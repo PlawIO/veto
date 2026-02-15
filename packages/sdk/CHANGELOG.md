@@ -1,5 +1,27 @@
 # veto-sdk
 
+## 1.5.0
+
+### Minor Changes
+
+- **Three-mode SDK** — Local (default), Cloud, and Self-Hosted runtime modes with auto-detection at init. Fresh installs now default to local mode with zero network calls. Set `VETO_API_KEY` or `options.apiKey` for cloud mode, `options.endpoint` for self-hosted. ([#86](https://github.com/VulnZap/veto/pull/86))
+
+- **`veto compile`** — Compile natural language policy descriptions into deterministic YAML rules using an LLM at build time. Supports `--input`, `--file`, `--output`, and `--provider` flags. ([#83](https://github.com/VulnZap/veto/pull/83))
+
+- **`veto learn`** — Observe tool calls and auto-generate tight allowlist policies from observations. Supports `--runs`, `--duration`, `--output`, and `--margin` flags. ([#82](https://github.com/VulnZap/veto/pull/82))
+
+- **`veto test`** — Adversarial policy gap finder. Static analysis that detects uncovered tools, argument splitting, regex bypasses, and type coercion gaps. CI-friendly with exit code 1 on critical gaps. ([#84](https://github.com/VulnZap/veto/pull/84))
+
+- **Budget constraints** — Per-session cost circuit breaker. Configure `budget.max` and per-tool costs in YAML. Throws `BudgetExceededError` with `spent`, `limit`, `remaining` fields when the budget is exhausted. ([#80](https://github.com/VulnZap/veto/pull/80))
+
+- **MCP tool support** — `veto.wrap()` now auto-detects MCP tool format via `isMCPTool()` and converts `inputSchema` to `parameters` transparently. Manual adapters available at `veto-sdk/providers`. ([#81](https://github.com/VulnZap/veto/pull/81))
+
+- **Expanded constraint operators** — YAML rule conditions now support: `matches`, `in`, `not_in`, `contains`, `not_contains`, `starts_with`, `ends_with`, `equals`, `not_equals`. All operators work in both local and cloud evaluation modes. ([#78](https://github.com/VulnZap/veto/pull/78))
+
+### Patch Changes
+
+- Fixed package name references to use `veto-sdk` consistently across all docs and exports. ([#79](https://github.com/VulnZap/veto/pull/79))
+
 ## 1.4.0
 
 ### Minor Changes
