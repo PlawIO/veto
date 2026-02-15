@@ -25,6 +25,7 @@ import { createLogger, type Logger } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
 import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
+import { BudgetTracker, BudgetExceededError, type BudgetStatus } from './budget.js';
 import { Interceptor, ToolCallDeniedError, type InterceptionResult } from './interceptor.js';
 import type {
   Rule,
@@ -125,6 +126,12 @@ interface VetoConfigFile {
     directory?: string;
     recursive?: boolean;
   };
+  budget?: {
+    max?: number;
+    currency?: string;
+    window?: 'session';
+  };
+  costs?: Record<string, number | string>;
 }
 
 /**
@@ -221,6 +228,7 @@ export class Veto {
   private readonly logger: Logger;
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker: HistoryTracker;
+  private readonly budgetTracker: BudgetTracker | null;
   private readonly interceptor: Interceptor;
 
   // Configuration
@@ -407,11 +415,31 @@ export class Veto {
       logger: this.logger,
     });
 
+    // Initialize budget tracker (if configured)
+    if (config.budget?.max !== undefined && config.budget.max > 0) {
+      this.budgetTracker = new BudgetTracker({
+        config: {
+          max: config.budget.max,
+          currency: config.budget.currency,
+          window: config.budget.window,
+        },
+        costs: config.costs ?? {},
+        logger: this.logger,
+      });
+      this.logger.info('Budget tracking enabled', {
+        max: config.budget.max,
+        currency: config.budget.currency ?? 'USD',
+      });
+    } else {
+      this.budgetTracker = null;
+    }
+
     // Initialize interceptor
     this.interceptor = new Interceptor({
       logger: this.logger,
       validationEngine: this.validationEngine,
       historyTracker: this.historyTracker,
+      budgetTracker: this.budgetTracker ?? undefined,
     });
 
     this.logger.info('Veto initialized successfully');
@@ -1556,7 +1584,16 @@ export class Veto {
   clearHistory(): void {
     this.historyTracker.clear();
   }
+
+  getBudgetStatus(): BudgetStatus | null {
+    return this.budgetTracker?.getStatus() ?? null;
+  }
+
+  resetBudget(): void {
+    this.budgetTracker?.reset();
+  }
 }
 
-// Re-export error class
+// Re-export error classes
 export { ToolCallDeniedError };
+export { BudgetExceededError };

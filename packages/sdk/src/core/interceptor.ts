@@ -19,6 +19,7 @@ import type {
 import type { Logger } from '../utils/logger.js';
 import type { ValidationEngine, AggregatedValidationResult } from './validator.js';
 import type { HistoryTracker } from './history.js';
+import type { BudgetTracker } from './budget.js';
 import { generateToolCallId } from '../utils/id.js';
 
 /**
@@ -31,6 +32,8 @@ export interface InterceptorOptions {
   validationEngine: ValidationEngine;
   /** History tracker (optional) */
   historyTracker?: HistoryTracker;
+  /** Budget tracker (optional) */
+  budgetTracker?: BudgetTracker;
   /** Custom context data for validators */
   customContext?: Record<string, unknown>;
   /** Hook called before validation */
@@ -94,6 +97,7 @@ export class Interceptor {
   private readonly logger: Logger;
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker?: HistoryTracker;
+  private readonly budgetTracker?: BudgetTracker;
   private readonly customContext?: Record<string, unknown>;
   private readonly onBeforeValidation?: (
     context: ValidationContext
@@ -111,6 +115,7 @@ export class Interceptor {
     this.logger = options.logger;
     this.validationEngine = options.validationEngine;
     this.historyTracker = options.historyTracker;
+    this.budgetTracker = options.budgetTracker;
     this.customContext = options.customContext;
     this.onBeforeValidation = options.onBeforeValidation;
     this.onAfterValidation = options.onAfterValidation;
@@ -140,6 +145,11 @@ export class Interceptor {
       callHistory: this.historyTracker?.getAll() ?? [],
       custom: this.customContext,
     };
+
+    // Budget pre-check (fail fast before running validation)
+    if (this.budgetTracker) {
+      this.budgetTracker.check(call.name, call.arguments);
+    }
 
     // Run before hook
     if (this.onBeforeValidation) {
@@ -183,6 +193,11 @@ export class Interceptor {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    }
+
+    // Record budget charge for allowed calls
+    if (this.budgetTracker && validationResult.decision !== 'deny') {
+      this.budgetTracker.record(call.name, call.arguments);
     }
 
     // Handle denial

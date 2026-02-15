@@ -98,6 +98,15 @@ export { VetoCloudClient, ApprovalTimeoutError } from './cloud/client.js';
 export type { InterceptionResult } from './core/interceptor.js';
 export type { HistoryStats } from './core/history.js';
 
+// Budget
+export {
+  BudgetTracker,
+  BudgetExceededError,
+  type BudgetConfig,
+  type ToolCostMap,
+  type BudgetStatus,
+} from './core/budget.js';
+
 // Provider adapters (for converting to/from provider formats)
 export {
   toOpenAI,
