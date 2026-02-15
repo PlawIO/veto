@@ -136,6 +136,45 @@ export class BudgetTracker {
     return cost;
   }
 
+  reserve(toolName: string, args: Record<string, unknown>): number {
+    const cost = this.resolveCost(toolName, args);
+    if (cost === 0) return 0;
+
+    if (this.spent + cost > this.config.max) {
+      this.logger.warn('Budget would be exceeded', {
+        toolName,
+        cost,
+        spent: this.spent,
+        limit: this.config.max,
+      });
+      throw new BudgetExceededError(
+        toolName,
+        cost,
+        this.spent,
+        this.config.max
+      );
+    }
+
+    this.spent += cost;
+    this.logger.debug('Budget reserved', {
+      toolName,
+      cost,
+      totalSpent: this.spent,
+      remaining: this.config.max - this.spent,
+    });
+    return cost;
+  }
+
+  refund(amount: number): void {
+    if (amount <= 0) return;
+    this.spent = Math.max(0, this.spent - amount);
+    this.logger.debug('Budget refunded', {
+      amount,
+      totalSpent: this.spent,
+      remaining: this.config.max - this.spent,
+    });
+  }
+
   getStatus(): BudgetStatus {
     return {
       spent: this.spent,

@@ -193,6 +193,76 @@ describe('BudgetTracker', () => {
     });
   });
 
+  describe('reserve', () => {
+    it('should atomically check and deduct cost', () => {
+      const cost = tracker.reserve('purchase', { amount: 20 });
+      expect(cost).toBe(20);
+
+      const status = tracker.getStatus();
+      expect(status.spent).toBe(20);
+      expect(status.remaining).toBe(30);
+    });
+
+    it('should return 0 for zero-cost tools without modifying spent', () => {
+      const cost = tracker.reserve('send_email', {});
+      expect(cost).toBe(0);
+      expect(tracker.getStatus().spent).toBe(0);
+    });
+
+    it('should throw BudgetExceededError without deducting when over budget', () => {
+      tracker.reserve('purchase', { amount: 45 });
+
+      expect(() => tracker.reserve('purchase', { amount: 10 })).toThrow(BudgetExceededError);
+      // Spent should remain at 45, not 55
+      expect(tracker.getStatus().spent).toBe(45);
+    });
+
+    it('should prevent concurrent overrun by deducting immediately', () => {
+      // Simulate two concurrent calls both trying to reserve 30 out of 50
+      tracker.reserve('purchase', { amount: 30 });
+      // Second reserve should fail because 30 + 30 > 50
+      expect(() => tracker.reserve('purchase', { amount: 30 })).toThrow(BudgetExceededError);
+      expect(tracker.getStatus().spent).toBe(30);
+    });
+  });
+
+  describe('refund', () => {
+    it('should restore spent amount', () => {
+      tracker.reserve('purchase', { amount: 30 });
+      tracker.refund(30);
+
+      expect(tracker.getStatus().spent).toBe(0);
+      expect(tracker.getStatus().remaining).toBe(50);
+    });
+
+    it('should not go below zero', () => {
+      tracker.reserve('purchase', { amount: 5 });
+      tracker.refund(10);
+
+      expect(tracker.getStatus().spent).toBe(0);
+    });
+
+    it('should be a no-op for zero or negative amounts', () => {
+      tracker.reserve('purchase', { amount: 20 });
+      tracker.refund(0);
+      expect(tracker.getStatus().spent).toBe(20);
+
+      tracker.refund(-5);
+      expect(tracker.getStatus().spent).toBe(20);
+    });
+
+    it('should allow re-reserving after refund', () => {
+      tracker.reserve('purchase', { amount: 45 });
+      // Would fail without refund
+      expect(() => tracker.reserve('purchase', { amount: 10 })).toThrow(BudgetExceededError);
+
+      tracker.refund(45);
+      // Now should succeed
+      expect(() => tracker.reserve('purchase', { amount: 10 })).not.toThrow();
+      expect(tracker.getStatus().spent).toBe(10);
+    });
+  });
+
   describe('BudgetExceededError', () => {
     it('should have correct name', () => {
       const err = new BudgetExceededError('tool', 10, 45, 50);

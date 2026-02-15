@@ -146,9 +146,11 @@ export class Interceptor {
       custom: this.customContext,
     };
 
-    // Budget pre-check (fail fast before running validation)
+    // Atomically reserve budget (check + deduct in one step to prevent
+    // concurrent calls from passing the check before any charge is recorded)
+    let reservedCost = 0;
     if (this.budgetTracker) {
-      this.budgetTracker.check(call.name, call.arguments);
+      reservedCost = this.budgetTracker.reserve(call.name, call.arguments);
     }
 
     // Run before hook
@@ -164,7 +166,16 @@ export class Interceptor {
     }
 
     // Run validation
-    const aggregatedResult = await this.validationEngine.validate(context);
+    let aggregatedResult: Awaited<ReturnType<ValidationEngine['validate']>>;
+    try {
+      aggregatedResult = await this.validationEngine.validate(context);
+    } catch (error) {
+      // Refund reserved budget if validation throws
+      if (this.budgetTracker && reservedCost > 0) {
+        this.budgetTracker.refund(reservedCost);
+      }
+      throw error;
+    }
     const validationResult = aggregatedResult.finalResult;
 
     // Determine final arguments (may be modified by validators)
@@ -195,9 +206,9 @@ export class Interceptor {
       }
     }
 
-    // Record budget charge for allowed calls
-    if (this.budgetTracker && validationResult.decision !== 'deny') {
-      this.budgetTracker.record(call.name, call.arguments);
+    // Refund reserved budget for denied calls
+    if (this.budgetTracker && validationResult.decision === 'deny' && reservedCost > 0) {
+      this.budgetTracker.refund(reservedCost);
     }
 
     // Handle denial
