@@ -1,0 +1,43 @@
+- name: area:sdk
+  color: "1f77b4"
+  description: Changes in the TypeScript SDK
+
+- name: area:python
+  color: "3776ab"
+  description: Changes in the Python SDK
+
+- name: area:cli
+  color: "0052cc"
+  description: Changes in the CLI package
+
+- name: area:web
+  color: "6f42c1"
+  description: Changes in the web app
+
+- name: area:docs
+  color: "0e8a16"
+  description: Documentation updates
+
+- name: area:infra
+  color: "5319e7"
+  description: CI, workflows, and repository automation
+
+- name: release-exempt
+  color: "b60205"
+  description: PR is exempt from changeset requirement
+
+- name: no-changeset
+  color: "d93f0b"
+  description: Maintainer-approved exemption from changeset requirement
+
+- name: dependencies
+  color: "0366d6"
+  description: Dependency updates
+
+- name: good first issue
+  color: "7057ff"
+  description: Good for new contributors
+
+- name: help wanted
+  color: "008672"
+  description: Maintainers are looking for external help

@@ -1,0 +1,70 @@
+name: Changeset Required
+
+on:
+  pull_request:
+    branches: [master]
+    types:
+      [
+        opened,
+        synchronize,
+        reopened,
+        ready_for_review,
+        labeled,
+        unlabeled,
+        edited,
+      ]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changeset:
+    name: Validate changeset presence
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            package_changes:
+              - "packages/sdk/**"
+              - "packages/cli/**"
+              - "packages/sdk-python/**"
+            changeset:
+              - ".changeset/*.md"
+
+      - name: Detect exemption conditions
+        id: exempt
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(label => label.name);
+            const title = context.payload.pull_request.title || "";
+            const headRef = context.payload.pull_request.head.ref || "";
+            const actor = context.actor || "";
+
+            const hasExemptLabel = labels.includes("release-exempt") || labels.includes("no-changeset");
+            const isReleasePR = title.startsWith("chore: release packages") || headRef.startsWith("changeset-release/");
+            const isBotRelease = actor === "github-actions[bot]" || actor === "changeset-bot[bot]";
+            const exempt = hasExemptLabel || isReleasePR || isBotRelease;
+
+            core.setOutput("value", String(exempt));
+
+      - name: Enforce changeset requirement
+        if: steps.filter.outputs.package_changes == 'true' && steps.filter.outputs.changeset != 'true' && steps.exempt.outputs.value != 'true'
+        run: |
+          echo "::error::This PR changes published packages but does not include a changeset file."
+          echo "Run: pnpm changeset"
+          echo "If this PR should be exempt, add label 'release-exempt' or 'no-changeset'."
+          exit 1
+
+      - name: Requirement satisfied
+        if: steps.filter.outputs.package_changes != 'true' || steps.filter.outputs.changeset == 'true' || steps.exempt.outputs.value == 'true'
+        run: echo "Changeset requirement satisfied."

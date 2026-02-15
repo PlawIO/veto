@@ -80,9 +80,15 @@ pnpm typecheck  # Type check (if available)
 
 ### 5. Submit PR
 
-- Use descriptive title: `feat(sdk): add kernel validation mode`
+- Use conventional title: `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`
 - Reference issues: `Fixes #123`
 - Ensure CI passes
+
+### 6. Changeset requirement for package changes
+
+If your PR changes code in `packages/sdk`, `packages/sdk-python`, or `packages/cli`, include a changeset unless a maintainer labels the PR with `release-exempt` or `no-changeset`.
+
+The CI workflow enforces this automatically.
 
 ## Testing
 
@@ -99,8 +105,8 @@ pnpm --filter veto-sdk test:watch   # Watch mode
 cd packages/sdk-python
 pip install -e ".[dev]"
 pytest -v
-ruff check src
-mypy src
+ruff check veto
+mypy veto --ignore-missing-imports
 ```
 
 ## Release Process
@@ -115,6 +121,18 @@ Releases are fully automated:
    - Publishes to npm (SDK, CLI)
    - Publishes to PyPI (Python SDK)
    - Creates GitHub releases
+
+## CI and Repository Automation
+
+For contributor safety and maintainability, Veto uses these workflows:
+
+- `CI` - build, typecheck, and test packages on PRs and pushes to `master`
+- `Dependency Review` - blocks high-severity vulnerable dependencies in PRs
+- `PR Title` - enforces conventional PR title format
+- `Changeset Required` - ensures package changes include a changeset unless exempt
+- `Auto Label` and `Sync Labels` - path-based labeling and label catalog sync
+- `Actionlint` - validates workflow YAML
+- `First Interaction` - welcomes first-time contributors
 
 Manual release (maintainers only):
 

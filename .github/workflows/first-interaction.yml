@@ -1,0 +1,32 @@
+name: First Interaction
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    name: Welcome first-time contributors
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add welcome message
+        uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            Thanks for opening your first issue in Veto.
+
+            A maintainer will triage this shortly. If you can, include reproduction steps, expected behavior, and environment details.
+          pr-message: |
+            Thanks for your first pull request to Veto.
+
+            Please make sure:
+            - CI checks are green
+            - package changes include a changeset (`pnpm changeset`) unless exempt
+            - PR title follows conventional format (`feat:`, `fix:`, `chore:`, etc.)

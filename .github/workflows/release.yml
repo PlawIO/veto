@@ -22,6 +22,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
@@ -104,6 +105,7 @@ jobs:
   release-manual:
     name: Manual Release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true'
     permissions:
       contents: write

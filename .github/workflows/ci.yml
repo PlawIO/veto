@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +21,7 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,6 +57,7 @@ jobs:
   python:
     name: Python SDK
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +88,7 @@ jobs:
   status:
     name: CI Status
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [build, python]
     if: always()
     steps:
