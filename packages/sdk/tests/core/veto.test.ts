@@ -185,6 +185,42 @@ rules:
       infoSpy.mockRestore();
     });
 
+    it('should warn and use self-hosted mode when endpoint and apiKey are both provided', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ decision: 'allow', reason: 'Allowed' }),
+        text: async () => '',
+      });
+
+      const endpoint = 'https://self-hosted.example.com';
+      const veto = await Veto.init({
+        configDir: VETO_DIR,
+        endpoint,
+        apiKey: 'veto_test_key',
+        logLevel: 'warn',
+      });
+
+      const tools = [{ name: 'mixed_mode_tool', handler: vi.fn().mockResolvedValue('ok'), inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      await wrapped[0].handler({ query: 'test' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining(`${endpoint}/v1/tools/validate`),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-Veto-API-Key': 'veto_test_key',
+          }),
+        })
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Both endpoint and apiKey provided. Using self-hosted mode')
+      );
+      warnSpy.mockRestore();
+    });
+
     it('should load rules from directory', async () => {
       // Create a rule
       writeFileSync(

@@ -311,6 +311,13 @@ export class Veto {
     const cloudApiKey = options.apiKey ?? config.cloud?.apiKey ?? process.env.VETO_API_KEY;
     const cloudBaseUrl = options.endpoint ?? config.cloud?.baseUrl;
 
+    if (options.endpoint && options.apiKey) {
+      this.logger.warn(
+        'Both endpoint and apiKey provided. Using self-hosted mode with endpoint and apiKey authentication.',
+        { endpoint: options.endpoint }
+      );
+    }
+
     if (options.endpoint) {
       this.validationMode = 'cloud';
       this.startupMode = 'self-hosted';
