@@ -235,7 +235,7 @@ rules:
       expect(gaps[0].title).toContain('split across calls');
     });
 
-    it('should flag numeric greater_than limits', () => {
+    it('should flag numeric greater_than limits as warning for non-sensitive fields', () => {
       const rules = [
         makeRule({
           conditions: [
@@ -246,6 +246,23 @@ rules:
 
       const gaps = analyzer.analyze(rules, []);
       expect(gaps).toHaveLength(1);
+      expect(gaps[0].severity).toBe('warning');
+    });
+
+    it('should flag sensitive fields as critical', () => {
+      const rules = [
+        makeRule({
+          id: 'limit-balance',
+          tools: ['transfer'],
+          conditions: [
+            { field: 'arguments.balance', operator: 'less_than', value: 5000 },
+          ],
+        }),
+      ];
+
+      const gaps = analyzer.analyze(rules, ['transfer']);
+      expect(gaps).toHaveLength(1);
+      expect(gaps[0].severity).toBe('critical');
     });
 
     it('should not flag non-numeric operators', () => {
@@ -488,7 +505,23 @@ rules:
       expect(coercionGap!.title).toContain('String value');
     });
 
-    it('should flag numeric values that could receive strings', () => {
+    it('should flag numeric values on string-input fields', () => {
+      const rules = [
+        makeRule({
+          id: 'param-check',
+          conditions: [
+            { field: 'arguments.query_param', operator: 'greater_than', value: 100 },
+          ],
+        }),
+      ];
+
+      const gaps = analyzer.analyze(rules, []);
+      const infoGap = gaps.find(g => g.severity === 'info');
+      expect(infoGap).toBeDefined();
+      expect(infoGap!.title).toContain('may receive string input');
+    });
+
+    it('should not flag numeric values on non-string-input fields', () => {
       const rules = [
         makeRule({
           id: 'count-check',
@@ -500,8 +533,7 @@ rules:
 
       const gaps = analyzer.analyze(rules, []);
       const infoGap = gaps.find(g => g.severity === 'info');
-      expect(infoGap).toBeDefined();
-      expect(infoGap!.title).toContain('may receive string input');
+      expect(infoGap).toBeUndefined();
     });
 
     it('should not flag non-numeric operators', () => {

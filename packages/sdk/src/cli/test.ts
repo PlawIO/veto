@@ -242,6 +242,9 @@ export class UncoveredToolAnalyzer implements Analyzer {
 export class SplittingAttackAnalyzer implements Analyzer {
   name = 'splitting-attacks';
 
+  private static readonly SENSITIVE_FIELD_PATTERNS =
+    /amount|balance|limit|price|cost|total|budget|credit|debit|payment|transfer/i;
+
   analyze(rules: ParsedRule[]): Gap[] {
     const gaps: Gap[] = [];
 
@@ -267,9 +270,11 @@ export class SplittingAttackAnalyzer implements Analyzer {
           ? rule.tools.join(', ')
           : 'all tools';
 
+        const isSensitive = SplittingAttackAnalyzer.SENSITIVE_FIELD_PATTERNS.test(condition.field);
+
         gaps.push({
           analyzer: this.name,
-          severity: 'critical',
+          severity: isSensitive ? 'critical' : 'warning',
           title: `Numeric limit on "${condition.field}" can be split across calls`,
           description:
             `Rule "${rule.name}" (${rule.id}) limits ${condition.field} with ` +
@@ -578,6 +583,9 @@ export class CrossToolAnalyzer implements Analyzer {
 export class TypeCoercionAnalyzer implements Analyzer {
   name = 'type-coercion';
 
+  private static readonly STRING_INPUT_FIELD_PATTERNS =
+    /param|query|input|header|form|request/i;
+
   analyze(rules: ParsedRule[]): Gap[] {
     const gaps: Gap[] = [];
 
@@ -613,6 +621,9 @@ export class TypeCoercionAnalyzer implements Analyzer {
         }
 
         if (isNumericOp && typeof condition.value === 'number') {
+          const mayReceiveString = TypeCoercionAnalyzer.STRING_INPUT_FIELD_PATTERNS.test(condition.field);
+          if (!mayReceiveString) continue;
+
           gaps.push({
             analyzer: this.name,
             severity: 'info',
