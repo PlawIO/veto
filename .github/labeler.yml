@@ -1,0 +1,34 @@
+area:sdk:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/sdk/**"
+
+area:python:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/sdk-python/**"
+
+area:cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packages/cli/**"
+
+area:web:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/web/**"
+
+area:infra:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "scripts/**"
+          - "turbo.json"
+          - "pnpm-workspace.yaml"
+          - "package.json"
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "**/*.mdx"
