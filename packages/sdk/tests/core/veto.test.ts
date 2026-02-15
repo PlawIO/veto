@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Veto, ToolCallDeniedError } from '../../src/core/veto.js';
+import { Veto } from '../../src/core/veto.js';
 
 const TEST_DIR = '/tmp/veto-test-' + Date.now();
 const VETO_DIR = join(TEST_DIR, 'veto');
@@ -27,6 +27,8 @@ describe('Veto', () => {
       `
 version: "1.0"
 mode: "strict"
+validation:
+  mode: "api"
 api:
   baseUrl: "http://localhost:8080"
   endpoint: "/tool/call/check"
@@ -57,6 +59,99 @@ rules:
       rmSync(join(VETO_DIR, 'veto.config.yaml'));
       const veto = await Veto.init({ configDir: VETO_DIR });
       expect(veto).toBeInstanceOf(Veto);
+    });
+
+    it('should default to local mode with no config and make zero network calls', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+
+      writeFileSync(
+        join(RULES_DIR, 'local.yaml'),
+        `
+version: "1.0"
+name: local-rules
+rules:
+  - id: local-block
+    name: Local Block
+    enabled: true
+    action: block
+    tools: [local_tool]
+    conditions:
+      - field: arguments.path
+        operator: starts_with
+        value: /tmp/blocked
+`,
+        'utf-8'
+      );
+
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      const handler = vi.fn();
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{ name: 'local_tool', handler, inputSchema: {} }]);
+
+      await expect(wrapped[0].handler({ path: '/tmp/blocked/file.txt' })).rejects.toThrow('Tool call denied');
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Veto running in local mode'));
+      infoSpy.mockRestore();
+    });
+
+    it('should auto-detect cloud mode when apiKey is provided', async () => {
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ decision: 'allow', reason: 'Allowed' }),
+        text: async () => '',
+      });
+
+      const veto = await Veto.init({
+        configDir: VETO_DIR,
+        apiKey: 'veto_test_key',
+        logLevel: 'info',
+      });
+
+      const tools = [{ name: 'cloud_tool', handler: vi.fn().mockResolvedValue('ok'), inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      await wrapped[0].handler({ query: 'test' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('https://api.veto.dev/v1/tools/validate'),
+        expect.any(Object)
+      );
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Veto running in cloud mode'));
+      infoSpy.mockRestore();
+    });
+
+    it('should auto-detect self-hosted mode when endpoint is provided', async () => {
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ decision: 'allow', reason: 'Allowed' }),
+        text: async () => '',
+      });
+
+      const endpoint = 'https://self-hosted.example.com';
+      const veto = await Veto.init({
+        configDir: VETO_DIR,
+        endpoint,
+        logLevel: 'info',
+      });
+
+      const tools = [{ name: 'self_hosted_tool', handler: vi.fn().mockResolvedValue('ok'), inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      await wrapped[0].handler({ query: 'test' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining(`${endpoint}/v1/tools/validate`),
+        expect.any(Object)
+      );
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Veto running in self-hosted mode'));
+      infoSpy.mockRestore();
     });
 
     it('should load rules from directory', async () => {
@@ -273,7 +368,6 @@ rules:
       });
 
       const tools = [{ name: 'k_tool', handler: vi.fn(), inputSchema: {} }];
-      // @ts-expect-error testing invalid tool type
       const wrapped = veto.wrap(tools);
 
       try {

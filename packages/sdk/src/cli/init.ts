@@ -173,9 +173,9 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     log('Veto initialized successfully!', quiet);
     log('', quiet);
     log('Next steps:', quiet);
-    log('  1. Configure your API endpoint in veto/veto.config.yaml', quiet);
-    log('  2. Add your validation rules in veto/rules/', quiet);
-    log('  3. Use Veto in your application:', quiet);
+    log('  1. Add your validation rules in veto/rules/', quiet);
+    log('  2. Use Veto in your application (local mode is default):', quiet);
+    log('  3. Optional: set VETO_API_KEY to switch to cloud mode', quiet);
     log('', quiet);
     log('     import { Veto } from "veto-sdk";', quiet);
     log('', quiet);

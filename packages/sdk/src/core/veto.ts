@@ -31,11 +31,14 @@ import { fromMCP, isMCPTool } from '../providers/adapters.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
+  RuleCondition,
   RuleSet,
   ToolCallContext,
   ToolCallHistorySummary,
   ValidationAPIResponse,
 } from '../rules/types.js';
+import { compile, evaluate } from '../compiler/index.js';
+import type { ASTNode } from '../compiler/index.js';
 import { validatePolicyIR } from '../rules/schema-validator.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import { KernelClient } from '../kernel/client.js';
@@ -46,6 +49,7 @@ import { VetoCloudClient, ApprovalTimeoutError } from '../cloud/client.js';
 import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import type { LocalValidationResult } from '../deterministic/types.js';
+import { isSafePattern } from '../deterministic/regex-safety.js';
 
 /**
  * Veto operating mode.
@@ -56,12 +60,15 @@ export type VetoMode = 'strict' | 'log';
 
 /**
  * Validation mode - how tool calls are validated.
+ * - "local": Evaluate YAML rules locally with deterministic checks (default)
  * - "api": Use external HTTP API for validation
  * - "kernel": Use local kernel model via Ollama
  * - "custom": Use custom LLM provider (OpenAI, Anthropic, Gemini, OpenRouter)
  * - "cloud": Use Veto Cloud API with approval workflow support
  */
-export type ValidationMode = 'api' | 'kernel' | 'custom' | 'cloud';
+export type ValidationMode = 'local' | 'api' | 'kernel' | 'custom' | 'cloud';
+
+type StartupMode = 'local' | 'cloud' | 'self-hosted' | 'api' | 'kernel' | 'custom';
 
 /**
  * Wrapped handler function type.
@@ -186,6 +193,18 @@ export interface VetoOptions {
   validators?: (Validator | NamedValidator)[];
 
   /**
+   * API key for cloud mode.
+   * When set, Veto auto-detects cloud mode.
+   */
+  apiKey?: string;
+
+  /**
+   * Cloud endpoint override.
+   * When set, Veto auto-detects self-hosted cloud mode.
+   */
+  endpoint?: string;
+
+  /**
    * Injected kernel client for testing or custom configurations.
    */
   kernelClient?: KernelClient;
@@ -227,6 +246,8 @@ export interface VetoOptions {
  * ```
  */
 export class Veto {
+  private static readonly DEFAULT_CLOUD_BASE_URL = 'https://api.veto.dev';
+
   private readonly logger: Logger;
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker: HistoryTracker;
@@ -237,6 +258,7 @@ export class Veto {
   private readonly configDir: string;
   private readonly mode: VetoMode;
   private readonly validationMode: ValidationMode;
+  private readonly startupMode: StartupMode;
   private readonly apiBaseUrl: string;
   private readonly apiEndpoint: string;
   private readonly apiTimeout: number;
@@ -270,6 +292,7 @@ export class Veto {
 
   // Loaded rules
   private readonly rules: LoadedRulesState;
+  private readonly compiledExpressionCache = new Map<string, ASTNode>();
 
   private constructor(
     options: VetoOptions,
@@ -284,8 +307,35 @@ export class Veto {
     // Resolve mode (strict blocks, log only logs)
     this.mode = options.mode ?? config.mode ?? 'strict';
 
-    // Resolve validation mode (api or kernel)
-    this.validationMode = config.validation?.mode ?? 'api';
+    const explicitValidationMode = config.validation?.mode;
+    const cloudApiKey = options.apiKey ?? config.cloud?.apiKey ?? process.env.VETO_API_KEY;
+    const cloudBaseUrl = options.endpoint ?? config.cloud?.baseUrl;
+
+    if (options.endpoint) {
+      this.validationMode = 'cloud';
+      this.startupMode = 'self-hosted';
+    } else if (options.apiKey) {
+      this.validationMode = 'cloud';
+      this.startupMode = 'cloud';
+    } else if (explicitValidationMode) {
+      this.validationMode = explicitValidationMode;
+      if (explicitValidationMode === 'cloud') {
+        this.startupMode = Veto.isSelfHostedBaseUrl(cloudBaseUrl)
+          ? 'self-hosted'
+          : 'cloud';
+      } else {
+        this.startupMode = explicitValidationMode;
+      }
+    } else if (cloudApiKey) {
+      this.validationMode = 'cloud';
+      this.startupMode = 'cloud';
+    } else if (cloudBaseUrl) {
+      this.validationMode = 'cloud';
+      this.startupMode = 'self-hosted';
+    } else {
+      this.validationMode = 'local';
+      this.startupMode = 'local';
+    }
 
     // Resolve API configuration from config file
     this.apiBaseUrl = (config.api?.baseUrl ?? 'http://localhost:8080').replace(/\/$/, '');
@@ -330,8 +380,8 @@ export class Veto {
     // Resolve cloud configuration
     if (this.validationMode === 'cloud') {
       this.cloudConfig = {
-        apiKey: config.cloud?.apiKey,
-        baseUrl: config.cloud?.baseUrl,
+        apiKey: cloudApiKey,
+        baseUrl: cloudBaseUrl,
         timeout: config.cloud?.timeout,
         retries: config.cloud?.retries,
         retryDelay: config.cloud?.retryDelay,
@@ -367,6 +417,7 @@ export class Veto {
       configDir: this.configDir,
       mode: this.mode,
       validationMode: this.validationMode,
+      startupMode: this.startupMode,
       apiUrl: this.validationMode === 'api' ? `${this.apiBaseUrl}${this.apiEndpoint}` : undefined,
       kernelModel: this.kernelConfig?.model,
       customProvider: this.customConfig?.provider,
@@ -374,6 +425,8 @@ export class Veto {
       cloudBaseUrl: this.cloudConfig?.baseUrl,
       rulesLoaded: rules.allRules.length,
     });
+
+    this.logger.info(`Veto running in ${this.startupMode} mode`);
 
     // Initialize validation engine
     const defaultDecision = 'allow';
@@ -391,17 +444,23 @@ export class Veto {
           ? `Validates tool calls via ${this.customConfig?.provider ?? 'custom'} LLM`
           : this.validationMode === 'cloud'
             ? 'Validates tool calls via Veto Cloud API'
-            : 'Validates tool calls via external API',
+            : this.validationMode === 'local'
+              ? 'Validates tool calls via local deterministic rules'
+              : 'Validates tool calls via external API',
       priority: 50,
       validate: (ctx) => {
-        if (this.validationMode === 'kernel') {
-          return this.validateWithKernel(ctx);
-        } else if (this.validationMode === 'custom') {
-          return this.validateWithCustom(ctx);
-        } else if (this.validationMode === 'cloud') {
-          return this.validateWithCloud(ctx);
-        } else {
-          return this.validateWithAPI(ctx);
+        switch (this.validationMode) {
+          case 'local':
+            return this.validateWithLocal(ctx);
+          case 'kernel':
+            return this.validateWithKernel(ctx);
+          case 'custom':
+            return this.validateWithCustom(ctx);
+          case 'cloud':
+            return this.validateWithCloud(ctx);
+          case 'api':
+          default:
+            return this.validateWithAPI(ctx);
         }
       },
     });
@@ -461,8 +520,11 @@ export class Veto {
    * // Custom config directory
    * const veto = await Veto.init({ configDir: './my-veto-config' });
    *
-   * // Override API URL
-   * const veto = await Veto.init({ apiBaseUrl: 'https://api.example.com' });
+   * // Cloud mode
+   * const cloudVeto = await Veto.init({ apiKey: 'veto_...' });
+   *
+   * // Self-hosted mode
+   * const selfHostedVeto = await Veto.init({ endpoint: 'https://veto.my-company.com' });
    * ```
    */
   static async init(options: VetoOptions = {}): Promise<Veto> {
@@ -496,6 +558,11 @@ export class Veto {
     const rules = Veto.loadRules(rulesDir, recursive, logger);
 
     return new Veto(options, config, rules, logger);
+  }
+
+  private static isSelfHostedBaseUrl(baseUrl?: string): boolean {
+    if (!baseUrl) return false;
+    return baseUrl.replace(/\/$/, '') !== Veto.DEFAULT_CLOUD_BASE_URL;
   }
 
   /**
@@ -780,6 +847,239 @@ export class Veto {
         metadata: { api_error: true },
       };
     }
+  }
+
+  /**
+   * Validate a tool call locally against YAML rules without network calls.
+   */
+  private async validateWithLocal(context: ValidationContext): Promise<ValidationResult> {
+    const rules = this.getRulesForTool(context.toolName);
+
+    if (rules.length === 0) {
+      this.logger.debug('No rules for tool, allowing', { tool: context.toolName });
+      return { decision: 'allow' };
+    }
+
+    const localContext = this.buildLocalEvaluationContext(context);
+    let firstAllowRule: Rule | null = null;
+
+    for (const rule of rules) {
+      if (!this.matchesLocalRule(rule, localContext)) {
+        continue;
+      }
+
+      const reason = rule.description ?? `Matched rule: ${rule.name}`;
+
+      if (rule.action === 'block') {
+        if (this.mode === 'log') {
+          this.logger.warn('Tool call would be blocked locally (log mode)', {
+            tool: context.toolName,
+            ruleId: rule.id,
+            reason,
+          });
+          return {
+            decision: 'allow',
+            reason: `[LOG MODE] Would block: ${reason}`,
+            metadata: {
+              blocked_in_strict_mode: true,
+              source: 'local',
+              ruleId: rule.id,
+              ruleName: rule.name,
+            },
+          };
+        }
+
+        this.logger.warn('Tool call blocked by local rule', {
+          tool: context.toolName,
+          ruleId: rule.id,
+          reason,
+        });
+        return {
+          decision: 'deny',
+          reason,
+          metadata: {
+            source: 'local',
+            ruleId: rule.id,
+            ruleName: rule.name,
+          },
+        };
+      }
+
+      if (rule.action === 'allow' && !firstAllowRule) {
+        firstAllowRule = rule;
+      }
+
+      if (rule.action === 'warn' || rule.action === 'log') {
+        this.logger.warn('Local rule matched with non-blocking action', {
+          tool: context.toolName,
+          action: rule.action,
+          ruleId: rule.id,
+        });
+      }
+    }
+
+    if (firstAllowRule) {
+      return {
+        decision: 'allow',
+        reason: firstAllowRule.description ?? `Allowed by rule: ${firstAllowRule.name}`,
+        metadata: {
+          source: 'local',
+          ruleId: firstAllowRule.id,
+          ruleName: firstAllowRule.name,
+        },
+      };
+    }
+
+    return { decision: 'allow' };
+  }
+
+  private buildLocalEvaluationContext(context: ValidationContext): Record<string, unknown> {
+    return {
+      tool_name: context.toolName,
+      arguments: context.arguments,
+      session_id: this.sessionId,
+      agent_id: this.agentId,
+      custom: context.custom,
+      ...context.arguments,
+    };
+  }
+
+  private matchesLocalRule(rule: Rule, context: Record<string, unknown>): boolean {
+    if (rule.conditions && rule.conditions.length > 0) {
+      return rule.conditions.every((condition) => this.matchesLocalCondition(condition, context));
+    }
+
+    if (rule.condition_groups && rule.condition_groups.length > 0) {
+      return rule.condition_groups.some((group) =>
+        group.every((condition) => this.matchesLocalCondition(condition, context))
+      );
+    }
+
+    return true;
+  }
+
+  private matchesLocalCondition(
+    condition: RuleCondition,
+    context: Record<string, unknown>
+  ): boolean {
+    if (condition.expression) {
+      return this.evaluateLocalExpression(condition.expression, context);
+    }
+
+    if (condition.field && condition.operator) {
+      return this.evaluateLocalLegacyCondition(condition, context);
+    }
+
+    return true;
+  }
+
+  private evaluateLocalExpression(
+    expression: string,
+    context: Record<string, unknown>
+  ): boolean {
+    let ast = this.compiledExpressionCache.get(expression);
+
+    if (!ast) {
+      try {
+        ast = compile(expression);
+        this.compiledExpressionCache.set(expression, ast);
+      } catch (error) {
+        this.logger.warn('Failed to compile local rule expression', {
+          expression,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    }
+
+    try {
+      return Boolean(evaluate(ast, context));
+    } catch (error) {
+      this.logger.warn('Failed to evaluate local rule expression', {
+        expression,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private evaluateLocalLegacyCondition(
+    condition: RuleCondition,
+    context: Record<string, unknown>
+  ): boolean {
+    const fieldValue = this.resolveLocalField(condition.field!, context);
+    const expected = condition.value;
+
+    switch (condition.operator) {
+      case 'equals':
+        return fieldValue === expected;
+      case 'not_equals':
+        return fieldValue !== expected;
+      case 'contains':
+        if (typeof fieldValue === 'string' && typeof expected === 'string') {
+          return fieldValue.includes(expected);
+        }
+        if (Array.isArray(fieldValue)) {
+          return fieldValue.includes(expected);
+        }
+        return false;
+      case 'not_contains':
+        if (typeof fieldValue === 'string' && typeof expected === 'string') {
+          return !fieldValue.includes(expected);
+        }
+        if (Array.isArray(fieldValue)) {
+          return !fieldValue.includes(expected);
+        }
+        return true;
+      case 'starts_with':
+        return typeof fieldValue === 'string' && typeof expected === 'string'
+          && fieldValue.startsWith(expected);
+      case 'ends_with':
+        return typeof fieldValue === 'string' && typeof expected === 'string'
+          && fieldValue.endsWith(expected);
+      case 'matches':
+        if (typeof fieldValue !== 'string' || typeof expected !== 'string') {
+          return false;
+        }
+        if (expected.length > 256 || !isSafePattern(expected)) {
+          return false;
+        }
+        try {
+          return new RegExp(expected).test(fieldValue);
+        } catch {
+          return false;
+        }
+      case 'greater_than':
+        return Number(fieldValue) > Number(expected);
+      case 'less_than':
+        return Number(fieldValue) < Number(expected);
+      case 'in':
+        return Array.isArray(expected) && expected.includes(fieldValue);
+      case 'not_in':
+        return Array.isArray(expected) && !expected.includes(fieldValue);
+      default:
+        return false;
+    }
+  }
+
+  private resolveLocalField(
+    field: string,
+    context: Record<string, unknown>
+  ): unknown {
+    const parts = field.split('.');
+    let current: unknown = context;
+
+    for (const part of parts) {
+      if (current === null || current === undefined) {
+        return undefined;
+      }
+      if (typeof current !== 'object') {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[part];
+    }
+
+    return current;
   }
 
   /**
