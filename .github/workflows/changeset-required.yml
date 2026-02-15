@@ -37,8 +37,6 @@ jobs:
               - "packages/sdk/**"
               - "packages/cli/**"
               - "packages/sdk-python/**"
-              - "!packages/**/README.md"
-              - "!packages/**/CHANGELOG.md"
             changeset:
               - ".changeset/*.md"
 
