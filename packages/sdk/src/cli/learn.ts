@@ -241,7 +241,7 @@ export class PolicyGenerator {
       const min = Math.min(...argObs.numericValues);
       const max = Math.max(...argObs.numericValues);
       const range = max - min;
-      const marginValue = range > 0 ? range * this.margin : Math.abs(min) * this.margin || 1;
+      const marginValue = range > 0 ? range * this.margin : Math.max(Math.abs(min) * this.margin, 1);
 
       constraint.minimum = Math.floor((min - marginValue) * 100) / 100;
       constraint.maximum = Math.ceil((max + marginValue) * 100) / 100;

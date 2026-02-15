@@ -3,8 +3,8 @@
 import { init } from './init.js';
 import { Observer, PolicyGenerator, parseDuration, policiesToYaml } from './learn.js';
 import type { StopCondition } from './learn.js';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 const VERSION = '0.1.0';
 
@@ -110,6 +110,10 @@ async function runLearn(flags: Record<string, boolean>, values: Record<string, s
   }
 
   const margin = values['margin'] ? parseFloat(values['margin']) : 0.1;
+  if (values['margin'] && (isNaN(margin) || margin < 0 || margin > 1)) {
+    console.error('--margin must be a number between 0 and 1');
+    process.exit(1);
+  }
   const outputPath = resolve(values['output'] ?? './veto/rules/learned.yaml');
 
   const observer = new Observer(stopCondition);
@@ -168,6 +172,7 @@ async function runLearn(flags: Record<string, boolean>, values: Record<string, s
   }
 
   const yaml = policiesToYaml(policies);
+  mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, yaml, 'utf-8');
 
   if (!quiet) {
