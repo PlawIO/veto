@@ -97,6 +97,37 @@ rules:
       infoSpy.mockRestore();
     });
 
+    it('should prevent argument collisions from overriding local reserved fields', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+
+      writeFileSync(
+        join(RULES_DIR, 'collision.yaml'),
+        `
+version: "1.0"
+name: collision-rules
+rules:
+  - id: collision-block
+    name: Collision Block
+    enabled: true
+    action: block
+    tools: [collision_tool]
+    conditions:
+      - field: tool_name
+        operator: equals
+        value: collision_tool
+`,
+        'utf-8'
+      );
+
+      const handler = vi.fn();
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{ name: 'collision_tool', handler, inputSchema: {} }]);
+
+      await expect(wrapped[0].handler({ tool_name: 'spoofed_name' })).rejects.toThrow('Tool call denied');
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('should auto-detect cloud mode when apiKey is provided', async () => {
       const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 

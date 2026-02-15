@@ -935,12 +935,12 @@ export class Veto {
 
   private buildLocalEvaluationContext(context: ValidationContext): Record<string, unknown> {
     return {
+      ...context.arguments,
       tool_name: context.toolName,
       arguments: context.arguments,
       session_id: this.sessionId,
       agent_id: this.agentId,
       custom: context.custom,
-      ...context.arguments,
     };
   }
 
