@@ -106,6 +106,7 @@ function defaultModel(provider: CustomProvider): string {
     case 'anthropic': return 'claude-sonnet-4-5-20250929';
     case 'gemini': return 'gemini-2.0-flash';
     case 'openrouter': return 'openai/gpt-4o';
+    default: throw new CompileError(`Unsupported provider: ${provider}`);
   }
 }
 
@@ -178,6 +179,9 @@ async function callLLM(
       if (!text) throw new CompileError('Empty response from Gemini');
       return text;
     }
+
+    default:
+      throw new CompileError(`Unsupported provider: ${config.provider}`);
   }
 }
 
@@ -201,17 +205,29 @@ interface LLMOutput {
   notes: string;
 }
 
-function parseAndValidateLLMOutput(raw: string): LLMOutput {
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new CompileError('No JSON found in LLM response');
+function extractJSON(raw: string): string {
+  const start = raw.indexOf('{');
+  if (start === -1) throw new CompileError('No JSON found in LLM response');
+  let depth = 0;
+  for (let i = start; i < raw.length; i++) {
+    if (raw[i] === '{') depth++;
+    else if (raw[i] === '}') depth--;
+    if (depth === 0) return raw.slice(start, i + 1);
   }
+  throw new CompileError('No JSON found in LLM response');
+}
 
+function parseAndValidateLLMOutput(raw: string): LLMOutput {
   let parsed: unknown;
+
   try {
-    parsed = JSON.parse(jsonMatch[0]);
+    parsed = JSON.parse(raw.trim());
   } catch {
-    throw new CompileError('Invalid JSON in LLM response');
+    try {
+      parsed = JSON.parse(extractJSON(raw));
+    } catch {
+      throw new CompileError('Invalid JSON in LLM response');
+    }
   }
 
   if (!parsed || typeof parsed !== 'object') {
