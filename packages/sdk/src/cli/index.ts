@@ -26,3 +26,4 @@ export {
   type ArgumentObservation,
   type GeneratedPolicy,
 } from './learn.js';
+export { compile, CompileError, type CompileOptions, type CompileResult } from './compile.js';

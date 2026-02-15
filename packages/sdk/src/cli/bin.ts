@@ -3,10 +3,14 @@
 import { init } from './init.js';
 import { Observer, PolicyGenerator, parseDuration, policiesToYaml } from './learn.js';
 import type { StopCondition } from './learn.js';
+import { compile } from './compile.js';
+import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const VERSION = '0.1.0';
+
+const VALID_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'openrouter']);
 
 function printHelp(): void {
   console.log(`
@@ -18,6 +22,7 @@ Usage:
 Commands:
   init          Initialize Veto in the current directory
   learn         Observe tool calls and generate policies
+  compile       Compile natural language policies to deterministic YAML rules
   version       Show version information
   help          Show this help message
 
@@ -32,12 +37,20 @@ Learn Options:
   --output <path>       Output YAML file path (default: ./veto/rules/learned.yaml)
   --margin <n>          Numeric range margin as decimal (default: 0.1)
 
+Compile options:
+  --input <text>       Policy description as inline text
+  --file <path>        Path to a text file containing policy descriptions
+  --output <path>      Output file (.yaml) or directory for generated rules
+  --provider <name>    LLM provider: openai, anthropic, gemini, openrouter
+  --model <name>       Model identifier (e.g. gpt-4o, claude-sonnet-4-5-20250929)
+
 Examples:
   veto init                          Initialize Veto in current directory
   veto init --force                  Reinitialize, overwriting existing files
   veto learn --runs 10               Observe 10 tool calls then generate policies
   veto learn --duration 30m          Observe for 30 minutes
-  veto learn --output ./policies.yaml  Custom output path
+  veto compile --input 'Block emails outside company domain' --output ./veto/rules/email.yaml
+  veto compile --file policies.txt --output ./veto/rules/
 `);
 }
 
@@ -56,7 +69,7 @@ function parseArgs(args: string[]): ParsedArgs {
   const values: Record<string, string> = {};
   let command = '';
 
-  const valueFlags = new Set(['runs', 'duration', 'output', 'margin']);
+  const valueFlags = new Set(['runs', 'duration', 'output', 'margin', 'input', 'file', 'provider', 'model']);
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -214,6 +227,27 @@ async function main(): Promise<void> {
     case 'learn': {
       await runLearn(flags, values);
       process.exit(0);
+      break;
+    }
+
+    case 'compile': {
+      if (!values['output']) {
+        console.error('Error: --output is required for compile command');
+        process.exit(1);
+      }
+      if (values['provider'] && !VALID_PROVIDERS.has(values['provider'])) {
+        console.error(`Error: Invalid provider "${values['provider']}". Must be one of: openai, anthropic, gemini, openrouter`);
+        process.exit(1);
+      }
+      const result = await compile({
+        input: values['input'],
+        file: values['file'],
+        output: values['output'],
+        provider: values['provider'] as CustomProvider | undefined,
+        model: values['model'],
+        quiet: flags['quiet'],
+      });
+      process.exit(result.success ? 0 : 1);
       break;
     }
 
