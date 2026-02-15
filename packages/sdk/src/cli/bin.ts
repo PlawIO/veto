@@ -4,6 +4,7 @@ import { init } from './init.js';
 import { Observer, PolicyGenerator, parseDuration, policiesToYaml } from './learn.js';
 import type { StopCondition } from './learn.js';
 import { compile } from './compile.js';
+import { test } from './test.js';
 import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -23,13 +24,14 @@ Commands:
   init          Initialize Veto in the current directory
   learn         Observe tool calls and generate policies
   compile       Compile natural language policies to deterministic YAML rules
+  test          Run adversarial policy gap analysis
   version       Show version information
   help          Show this help message
 
 Options:
-  --force, -f   Force overwrite existing files (init)
-  --quiet, -q   Suppress output
-  --help, -h    Show help
+  --force, -f          Force overwrite existing files (init)
+  --quiet, -q          Suppress output
+  --help, -h           Show help
 
 Learn Options:
   --runs <n>            Stop after n tool calls
@@ -37,12 +39,17 @@ Learn Options:
   --output <path>       Output YAML file path (default: ./veto/rules/learned.yaml)
   --margin <n>          Numeric range margin as decimal (default: 0.1)
 
-Compile options:
+Compile Options:
   --input <text>       Policy description as inline text
   --file <path>        Path to a text file containing policy descriptions
   --output <path>      Output file (.yaml) or directory for generated rules
   --provider <name>    LLM provider: openai, anthropic, gemini, openrouter
   --model <name>       Model identifier (e.g. gpt-4o, claude-sonnet-4-5-20250929)
+
+Test Options:
+  --policy <path>      Policy directory (default: ./veto/rules/)
+  --output <file>      Write JSON report to file
+  --format <fmt>       Output format: text or json (default: text)
 
 Examples:
   veto init                          Initialize Veto in current directory
@@ -51,6 +58,9 @@ Examples:
   veto learn --duration 30m          Observe for 30 minutes
   veto compile --input 'Block emails outside company domain' --output ./veto/rules/email.yaml
   veto compile --file policies.txt --output ./veto/rules/
+  veto test                          Analyze policies for gaps
+  veto test --policy ./rules         Analyze specific policy directory
+  veto test --output report.json     Save JSON report
 `);
 }
 
@@ -69,7 +79,11 @@ function parseArgs(args: string[]): ParsedArgs {
   const values: Record<string, string> = {};
   let command = '';
 
-  const valueFlags = new Set(['runs', 'duration', 'output', 'margin', 'input', 'file', 'provider', 'model']);
+  const valueFlags = new Set([
+    'runs', 'duration', 'output', 'margin',
+    'input', 'file', 'provider', 'model',
+    'policy', 'format',
+  ]);
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -248,6 +262,17 @@ async function main(): Promise<void> {
         quiet: flags['quiet'],
       });
       process.exit(result.success ? 0 : 1);
+      break;
+    }
+
+    case 'test': {
+      const testResult = await test({
+        policy: values['policy'],
+        output: values['output'],
+        quiet: flags['quiet'],
+        format: (values['format'] as 'text' | 'json') ?? undefined,
+      });
+      process.exit(testResult.success ? 0 : 1);
       break;
     }
 
