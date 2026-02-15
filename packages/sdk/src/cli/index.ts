@@ -27,3 +27,23 @@ export {
   type GeneratedPolicy,
 } from './learn.js';
 export { compile, CompileError, type CompileOptions, type CompileResult } from './compile.js';
+export {
+  test,
+  GapAnalyzer,
+  UncoveredToolAnalyzer,
+  SplittingAttackAnalyzer,
+  UncheckedFieldAnalyzer,
+  RegexBypassAnalyzer,
+  CrossToolAnalyzer,
+  TypeCoercionAnalyzer,
+  loadRuleSets,
+  type TestOptions,
+  type TestResult,
+  type TestReport,
+  type Gap,
+  type GapSeverity,
+  type Analyzer,
+  type ParsedRule,
+  type ParsedRuleSet,
+  type ParsedCondition,
+} from './test.js';
