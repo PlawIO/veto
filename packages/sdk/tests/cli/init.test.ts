@@ -39,8 +39,8 @@ describe('CLI init', () => {
 
       const content = readFileSync(configPath, 'utf-8');
       expect(content).toContain('version: "1.0"');
-      expect(content).toContain('api:');
-      expect(content).toContain('baseUrl:');
+      expect(content).toContain('validation:');
+      expect(content).toContain('mode: "local"');
     });
 
     it('should create default rules file', async () => {

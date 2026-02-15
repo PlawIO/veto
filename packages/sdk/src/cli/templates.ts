@@ -18,19 +18,20 @@ version: "1.0"
 mode: "strict"
 
 # Validation mode:
-#   "api"    - Use external HTTP API (default)
+#   "local"  - Evaluate YAML rules locally (default, zero network calls)
+#   "cloud"  - Use Veto Cloud API (set VETO_API_KEY)
 #   "kernel" - Use local Ollama model
 #   "custom" - Use specified LLM provider
 validation:
-  mode: "api"
+  mode: "local"
 
-# Validation API endpoint (for mode: "api")
-api:
-  baseUrl: "http://localhost:8080"
-  endpoint: "/tool/call/check"
-  timeout: 10000
-  retries: 2
-  retryDelay: 1000
+# Cloud configuration (for mode: "cloud")
+# cloud:
+#   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
+#   # baseUrl: "https://api.veto.dev"  # Set to your endpoint for self-hosted
+#   timeout: 30000
+#   retries: 2
+#   retryDelay: 1000
 
 # Kernel configuration (for mode: "kernel")
 # kernel:
@@ -155,6 +156,9 @@ export const ENV_EXAMPLE = `# Veto Environment Variables
 # Session/Agent tracking (optional)
 # VETO_SESSION_ID=
 # VETO_AGENT_ID=
+
+# Cloud mode (auto-detected when set)
+# VETO_API_KEY=veto_...
 
 # Custom LLM Provider API Keys (for validation.mode: "custom")
 # OPENAI_API_KEY=sk-...
