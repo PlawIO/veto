@@ -84,7 +84,9 @@ function checkConstraints(
   }
 
   if (Array.isArray(value)) {
-    return checkArrayConstraints(value, constraint);
+    const arrResult = checkArrayConstraints(value, constraint);
+    if (!arrResult.pass) return arrResult;
+    return checkInConstraints(value, constraint);
   }
 
   return checkInConstraints(value, constraint);
