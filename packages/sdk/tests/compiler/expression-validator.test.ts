@@ -231,6 +231,54 @@ describe('ExpressionValidator', () => {
       expect(blocked.decision).toBe('deny');
     });
 
+    it('should reject unsafe regex patterns in matches (ReDoS)', async () => {
+      const validator = new ExpressionValidator({
+        config: {},
+        logger: createMockLogger(),
+      });
+
+      const rule: Rule = {
+        id: 'redos',
+        name: 'Unsafe regex rule',
+        enabled: true,
+        severity: 'high',
+        action: 'block',
+        tools: ['send_email'],
+        conditions: [
+          { field: 'to', operator: 'matches', value: '(a+)+' },
+        ],
+      };
+
+      validator.addRules([rule]);
+
+      const result = await validator.validate(createContext({ arguments: { to: 'aaaaaa' } }));
+      expect(result.decision).toBe('allow');
+    });
+
+    it('should reject regex patterns exceeding 256 chars in matches', async () => {
+      const validator = new ExpressionValidator({
+        config: {},
+        logger: createMockLogger(),
+      });
+
+      const rule: Rule = {
+        id: 'long-regex',
+        name: 'Long regex rule',
+        enabled: true,
+        severity: 'high',
+        action: 'block',
+        tools: ['send_email'],
+        conditions: [
+          { field: 'to', operator: 'matches', value: 'a'.repeat(257) },
+        ],
+      };
+
+      validator.addRules([rule]);
+
+      const result = await validator.validate(createContext({ arguments: { to: 'a'.repeat(257) } }));
+      expect(result.decision).toBe('allow');
+    });
+
     it('should evaluate in condition', async () => {
       const validator = new ExpressionValidator({
         config: {},

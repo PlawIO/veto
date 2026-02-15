@@ -18,6 +18,7 @@ import type { Rule, RuleCondition } from './types.js';
 import { RuleLoader, type YamlParser } from './loader.js';
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
+import { isSafePattern } from '../deterministic/regex-safety.js';
 
 export interface ExpressionValidatorConfig {
   rulesDir?: string;
@@ -201,7 +202,12 @@ export class ExpressionValidator {
           && fieldValue.endsWith(expected);
       case 'matches':
         if (typeof fieldValue !== 'string' || typeof expected !== 'string') return false;
-        return new RegExp(expected).test(fieldValue);
+        if (expected.length > 256 || !isSafePattern(expected)) return false;
+        try {
+          return new RegExp(expected).test(fieldValue);
+        } catch {
+          return false;
+        }
       case 'greater_than':
         return Number(fieldValue) > Number(expected);
       case 'less_than':

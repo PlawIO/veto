@@ -99,6 +99,72 @@ describe('validateDeterministic', () => {
     });
   });
 
+  describe('in/notIn constraints', () => {
+    it('should allow values in the allowed list (strings)', () => {
+      const constraints = [makeConstraint({ argumentName: 'currency', in: ['usd', 'eur', 'gbp'] })];
+      expect(validateDeterministic('tool', { currency: 'usd' }, constraints).decision).toBe('allow');
+    });
+
+    it('should deny values not in the allowed list (strings)', () => {
+      const constraints = [makeConstraint({ argumentName: 'currency', in: ['usd', 'eur', 'gbp'] })];
+      const result = validateDeterministic('tool', { currency: 'btc' }, constraints);
+      expect(result.decision).toBe('deny');
+      expect(result.reason).toContain('not in allowed list');
+    });
+
+    it('should allow values in the allowed list (numbers)', () => {
+      const constraints = [makeConstraint({ argumentName: 'tier', in: [1, 2, 3] })];
+      expect(validateDeterministic('tool', { tier: 2 }, constraints).decision).toBe('allow');
+    });
+
+    it('should deny values not in the allowed list (numbers)', () => {
+      const constraints = [makeConstraint({ argumentName: 'tier', in: [1, 2, 3] })];
+      expect(validateDeterministic('tool', { tier: 4 }, constraints).decision).toBe('deny');
+    });
+
+    it('should deny values in the denied list (notIn)', () => {
+      const constraints = [makeConstraint({ argumentName: 'action', notIn: ['delete', 'drop', 'truncate'] })];
+      const result = validateDeterministic('tool', { action: 'delete' }, constraints);
+      expect(result.decision).toBe('deny');
+      expect(result.reason).toContain('in denied list');
+    });
+
+    it('should allow values not in the denied list (notIn)', () => {
+      const constraints = [makeConstraint({ argumentName: 'action', notIn: ['delete', 'drop', 'truncate'] })];
+      expect(validateDeterministic('tool', { action: 'select' }, constraints).decision).toBe('allow');
+    });
+
+    it('should work with mixed types in the list', () => {
+      const constraints = [makeConstraint({ argumentName: 'val', in: ['a', 1, true] })];
+      expect(validateDeterministic('tool', { val: 'a' }, constraints).decision).toBe('allow');
+      expect(validateDeterministic('tool', { val: 1 }, constraints).decision).toBe('allow');
+      expect(validateDeterministic('tool', { val: true }, constraints).decision).toBe('allow');
+      expect(validateDeterministic('tool', { val: 'b' }, constraints).decision).toBe('deny');
+    });
+
+    it('should combine in with other string constraints', () => {
+      const constraints = [makeConstraint({ argumentName: 'code', minLength: 2, in: ['us', 'eu', 'uk'] })];
+      expect(validateDeterministic('tool', { code: 'us' }, constraints).decision).toBe('allow');
+      expect(validateDeterministic('tool', { code: 'jp' }, constraints).decision).toBe('deny');
+    });
+
+    it('should combine in with number constraints', () => {
+      const constraints = [makeConstraint({ argumentName: 'port', greaterThan: 0, in: [80, 443, 8080] })];
+      expect(validateDeterministic('tool', { port: 443 }, constraints).decision).toBe('allow');
+      expect(validateDeterministic('tool', { port: 22 }, constraints).decision).toBe('deny');
+    });
+
+    it('should handle empty in list (deny all)', () => {
+      const constraints = [makeConstraint({ argumentName: 'val', in: [] })];
+      expect(validateDeterministic('tool', { val: 'anything' }, constraints).decision).toBe('deny');
+    });
+
+    it('should handle empty notIn list (allow all)', () => {
+      const constraints = [makeConstraint({ argumentName: 'val', notIn: [] })];
+      expect(validateDeterministic('tool', { val: 'anything' }, constraints).decision).toBe('allow');
+    });
+  });
+
   describe('array constraints', () => {
     it('should enforce minItems', () => {
       const constraints = [makeConstraint({ argumentName: 'tags', minItems: 2 })];

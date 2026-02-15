@@ -11,6 +11,8 @@ export interface ArgumentConstraint {
   maxLength?: number;
   regex?: string;
   enum?: string[];
+  in?: unknown[];
+  notIn?: unknown[];
   minItems?: number;
   maxItems?: number;
   required?: boolean;
