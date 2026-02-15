@@ -14,3 +14,15 @@ export {
   type LoadConfigOptions,
 } from './config.js';
 export { DEFAULT_CONFIG, DEFAULT_RULES } from './templates.js';
+export {
+  Observer,
+  PolicyGenerator,
+  parseDuration,
+  policiesToYaml,
+  type ObservedCall,
+  type StopCondition,
+  type LearnOptions,
+  type ToolObservation,
+  type ArgumentObservation,
+  type GeneratedPolicy,
+} from './learn.js';
