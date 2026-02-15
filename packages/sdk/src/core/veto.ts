@@ -205,7 +205,7 @@ export interface VetoOptions {
  *
  * @example
  * ```typescript
- * import { Veto } from 'veto';
+ * import { Veto } from 'veto-sdk';
  *
  * // Initialize Veto (loads config from ./veto automatically)
  * const veto = await Veto.init();
@@ -1327,7 +1327,7 @@ export class Veto {
    * @example
    * ```typescript
    * import { createAgent, tool } from 'langchain';
-   * import { Veto } from 'veto';
+   * import { Veto } from 'veto-sdk';
    *
    * const tools = [
    *   tool(({ query }) => `Results for: ${query}`, {

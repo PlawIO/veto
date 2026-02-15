@@ -177,7 +177,7 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     log('  2. Add your validation rules in veto/rules/', quiet);
     log('  3. Use Veto in your application:', quiet);
     log('', quiet);
-    log('     import { Veto } from "veto";', quiet);
+    log('     import { Veto } from "veto-sdk";', quiet);
     log('', quiet);
     log('     const veto = await Veto.init();', quiet);
     log('     const tools = veto.wrapTools(myTools);', quiet);
