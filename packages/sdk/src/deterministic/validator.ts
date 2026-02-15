@@ -72,18 +72,22 @@ function checkConstraints(
   constraint: ArgumentConstraint
 ): ConstraintCheckResult {
   if (typeof value === 'number') {
-    return checkNumberConstraints(value, constraint);
+    const numResult = checkNumberConstraints(value, constraint);
+    if (!numResult.pass) return numResult;
+    return checkInConstraints(value, constraint);
   }
 
   if (typeof value === 'string') {
-    return checkStringConstraints(value, constraint);
+    const strResult = checkStringConstraints(value, constraint);
+    if (!strResult.pass) return strResult;
+    return checkInConstraints(value, constraint);
   }
 
   if (Array.isArray(value)) {
     return checkArrayConstraints(value, constraint);
   }
 
-  return { pass: true };
+  return checkInConstraints(value, constraint);
 }
 
 function checkNumberConstraints(
@@ -215,6 +219,27 @@ function checkArrayConstraints(
     return {
       pass: false,
       reason: `array has ${value.length} items, maximum is ${constraint.maxItems}`,
+    };
+  }
+
+  return { pass: true };
+}
+
+function checkInConstraints(
+  value: unknown,
+  constraint: ArgumentConstraint
+): ConstraintCheckResult {
+  if (constraint.in !== undefined && !constraint.in.includes(value)) {
+    return {
+      pass: false,
+      reason: `value ${JSON.stringify(value)} is not in allowed list`,
+    };
+  }
+
+  if (constraint.notIn !== undefined && constraint.notIn.includes(value)) {
+    return {
+      pass: false,
+      reason: `value ${JSON.stringify(value)} is in denied list`,
     };
   }
 
