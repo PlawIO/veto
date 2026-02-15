@@ -4,6 +4,19 @@ dist/
 .env
 .DS_Store
 .turbo/
+.worktrees/
+worktrees/
+
+# Python caches and virtualenvs
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+packages/sdk-python/dist/
+packages/sdk-python/*.egg-info/
 
 # Go binaries
 packages/cli/go/veto
