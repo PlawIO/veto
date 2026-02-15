@@ -19,6 +19,7 @@ import type {
 import type { Logger } from '../utils/logger.js';
 import type { ValidationEngine, AggregatedValidationResult } from './validator.js';
 import type { HistoryTracker } from './history.js';
+import type { BudgetTracker } from './budget.js';
 import { generateToolCallId } from '../utils/id.js';
 
 /**
@@ -31,6 +32,8 @@ export interface InterceptorOptions {
   validationEngine: ValidationEngine;
   /** History tracker (optional) */
   historyTracker?: HistoryTracker;
+  /** Budget tracker (optional) */
+  budgetTracker?: BudgetTracker;
   /** Custom context data for validators */
   customContext?: Record<string, unknown>;
   /** Hook called before validation */
@@ -94,6 +97,7 @@ export class Interceptor {
   private readonly logger: Logger;
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker?: HistoryTracker;
+  private readonly budgetTracker?: BudgetTracker;
   private readonly customContext?: Record<string, unknown>;
   private readonly onBeforeValidation?: (
     context: ValidationContext
@@ -111,6 +115,7 @@ export class Interceptor {
     this.logger = options.logger;
     this.validationEngine = options.validationEngine;
     this.historyTracker = options.historyTracker;
+    this.budgetTracker = options.budgetTracker;
     this.customContext = options.customContext;
     this.onBeforeValidation = options.onBeforeValidation;
     this.onAfterValidation = options.onAfterValidation;
@@ -141,6 +146,13 @@ export class Interceptor {
       custom: this.customContext,
     };
 
+    // Atomically reserve budget (check + deduct in one step to prevent
+    // concurrent calls from passing the check before any charge is recorded)
+    let reservedCost = 0;
+    if (this.budgetTracker) {
+      reservedCost = this.budgetTracker.reserve(call.name, call.arguments);
+    }
+
     // Run before hook
     if (this.onBeforeValidation) {
       try {
@@ -154,7 +166,16 @@ export class Interceptor {
     }
 
     // Run validation
-    const aggregatedResult = await this.validationEngine.validate(context);
+    let aggregatedResult: Awaited<ReturnType<ValidationEngine['validate']>>;
+    try {
+      aggregatedResult = await this.validationEngine.validate(context);
+    } catch (error) {
+      // Refund reserved budget if validation throws
+      if (this.budgetTracker && reservedCost > 0) {
+        this.budgetTracker.refund(reservedCost);
+      }
+      throw error;
+    }
     const validationResult = aggregatedResult.finalResult;
 
     // Determine final arguments (may be modified by validators)
@@ -183,6 +204,11 @@ export class Interceptor {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    }
+
+    // Refund reserved budget for denied calls
+    if (this.budgetTracker && validationResult.decision === 'deny' && reservedCost > 0) {
+      this.budgetTracker.refund(reservedCost);
     }
 
     // Handle denial

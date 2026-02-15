@@ -19,6 +19,14 @@ export {
   type HistoryStats,
 } from './history.js';
 export {
+  BudgetTracker,
+  BudgetExceededError,
+  type BudgetConfig,
+  type ToolCostMap,
+  type BudgetTrackerOptions,
+  type BudgetStatus,
+} from './budget.js';
+export {
   Interceptor,
   type InterceptorOptions,
   type InterceptionResult,
