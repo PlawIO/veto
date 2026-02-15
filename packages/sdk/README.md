@@ -18,7 +18,7 @@ The AI model remains unaware of the guardrail - the tool interface is preserved.
 ## Installation
 
 ```bash
-npm install veto
+npm install veto-sdk
 ```
 
 ## Quick Start
@@ -36,7 +36,7 @@ This creates a `veto/` directory with `veto.config.yaml` and default rules.
 Veto's `wrap()` method is provider-agnostic. It works with LangChain, Vercel AI SDK, or any custom tool object.
 
 ```typescript
-import { Veto } from 'veto';
+import { Veto } from 'veto-sdk';
 import { tool } from '@langchain/core/tools'; // Example with LangChain
 
 // 1. Define your tools normally

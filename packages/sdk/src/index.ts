@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { Veto, toOpenAITools } from 'veto';
+ * import { Veto, toOpenAITools } from 'veto-sdk';
  *
  * // Initialize Veto
  * const veto = await Veto.init();

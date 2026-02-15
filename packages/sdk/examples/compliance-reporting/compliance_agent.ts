@@ -11,7 +11,7 @@ import 'dotenv/config';
 
 import { createAgent, tool } from 'langchain';
 import { z } from 'zod';
-import { Veto } from 'veto';
+import { Veto } from 'veto-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
