@@ -26,6 +26,8 @@ import { generateId, generateToolCallId } from '../utils/id.js';
 import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
 import { Interceptor, ToolCallDeniedError, type InterceptionResult } from './interceptor.js';
+import { fromMCP, isMCPTool } from '../providers/adapters.js';
+import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
   RuleSet,
@@ -1469,9 +1471,98 @@ export class Veto {
       }
     }
 
+    // Check if this is an MCP tool (has inputSchema but no execution function)
+    if (isMCPTool(tool)) {
+      veto.logger.debug('MCP tool detected, no execution function to wrap', { name: toolName });
+      return tool;
+    }
+
     // No wrappable function found, return as-is
     veto.logger.warn('No wrappable function found on tool', { name: toolName });
     return tool;
+  }
+
+  /**
+   * Wrap MCP tools with Veto validation.
+   *
+   * Returns a wrapped `callTool` function that validates arguments before
+   * forwarding to the real MCP server. The original MCP tool definitions
+   * are returned unmodified (pass them to the AI model as-is).
+   *
+   * @param tools - Array of MCP tool definitions from the server
+   * @param serverClient - MCP server client with `callTool` method
+   * @returns Object with `tools` (original definitions) and `callTool` (validated caller)
+   *
+   * @example
+   * ```typescript
+   * import { Veto } from 'veto-sdk';
+   *
+   * const veto = await Veto.init();
+   * const mcpTools = await mcpServer.listTools();
+   *
+   * const { tools, callTool } = veto.wrapMCPTools(mcpTools, mcpServer);
+   *
+   * // Pass `tools` to the AI model
+   * // Use `callTool` instead of `mcpServer.callTool`
+   * const result = await callTool({ name: 'read_file', arguments: { path: '/etc/passwd' } });
+   * ```
+   */
+  wrapMCPTools(
+    tools: MCPTool[],
+    serverClient: MCPServerClient
+  ): {
+    tools: MCPTool[];
+    callTool: (args: { name: string; arguments?: Record<string, unknown> }) => Promise<MCPToolResult>;
+  } {
+    const toolDefs = tools.map(fromMCP);
+
+    // Register tool definitions for cloud mode
+    if (this.validationMode === 'cloud') {
+      this.registerTools(
+        toolDefs.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: Object.entries(t.inputSchema.properties ?? {}).map(
+            ([name, prop]) => ({
+              name,
+              type: (prop as Record<string, unknown>).type as string ?? 'string',
+              description: (prop as Record<string, unknown>).description as string | undefined,
+              required: t.inputSchema.required?.includes(name) ?? false,
+            })
+          ),
+        }))
+      ).catch(() => {});
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const veto = this;
+
+    const callTool = async (args: {
+      name: string;
+      arguments?: Record<string, unknown>;
+    }): Promise<MCPToolResult> => {
+      const callArgs = args.arguments ?? {};
+
+      const result = await veto.validateToolCall({
+        id: generateToolCallId(),
+        name: args.name,
+        arguments: callArgs,
+      });
+
+      if (!result.allowed) {
+        throw new ToolCallDeniedError(
+          args.name,
+          result.originalCall.id || '',
+          result.validationResult
+        );
+      }
+
+      const finalArgs = result.finalArguments ?? callArgs;
+      return serverClient.callTool({ name: args.name, arguments: finalArgs });
+    };
+
+    this.logger.debug('MCP tools wrapped', { count: tools.length });
+    return { tools, callTool };
   }
 
   /**

@@ -110,6 +110,11 @@ export {
   toAnthropicTools,
   toGoogleTool,
   fromGoogleFunctionCall,
+  toMCP,
+  fromMCP,
+  fromMCPToolCall,
+  toMCPTools,
+  isMCPTool,
 } from './providers/adapters.js';
 
 export type {
@@ -119,6 +124,10 @@ export type {
   AnthropicToolUse,
   GoogleTool,
   GoogleFunctionCall,
+  MCPTool,
+  MCPToolCallArgs,
+  MCPToolResult,
+  MCPServerClient,
 } from './providers/types.js';
 
 // Compiler (AST-based policy expressions)

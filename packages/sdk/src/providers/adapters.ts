@@ -17,6 +17,8 @@ import type {
   GoogleTool,
   GoogleFunctionDeclaration,
   GoogleFunctionCall,
+  MCPTool,
+  MCPToolCallArgs,
 } from './types.js';
 import { generateToolCallId } from '../utils/id.js';
 
@@ -245,6 +247,90 @@ export function fromGoogleFunctionCall(functionCall: GoogleFunctionCall): ToolCa
 }
 
 // ============================================================================
+// MCP (Model Context Protocol) Adapter
+// ============================================================================
+
+/**
+ * Convert Veto tool definition to MCP format.
+ *
+ * @param tool - Veto tool definition
+ * @returns MCP tool format
+ */
+export function toMCP(tool: ToolDefinition): MCPTool {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: {
+      type: 'object',
+      properties: tool.inputSchema.properties as Record<string, unknown> | undefined,
+      required: tool.inputSchema.required ? [...tool.inputSchema.required] : undefined,
+    },
+  };
+}
+
+/**
+ * Convert MCP tool format to Veto definition.
+ *
+ * @param tool - MCP tool
+ * @returns Veto tool definition
+ */
+export function fromMCP(tool: MCPTool): ToolDefinition {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: {
+      type: 'object',
+      properties: tool.inputSchema.properties as Record<string, import('../types/tool.js').JsonSchemaProperty> | undefined,
+      required: tool.inputSchema.required,
+    },
+  };
+}
+
+/**
+ * Convert MCP tool call arguments to Veto format.
+ *
+ * @param toolCall - MCP tool call arguments
+ * @returns Veto tool call
+ */
+export function fromMCPToolCall(toolCall: MCPToolCallArgs): ToolCall {
+  return {
+    id: generateToolCallId(),
+    name: toolCall.name,
+    arguments: toolCall.arguments ?? {},
+  };
+}
+
+/**
+ * Convert multiple Veto tools to MCP format.
+ *
+ * @param tools - Veto tool definitions
+ * @returns MCP tools array
+ */
+export function toMCPTools(tools: readonly ToolDefinition[]): MCPTool[] {
+  return tools.map(toMCP);
+}
+
+/**
+ * Detect whether a tool object matches the MCP tool shape.
+ *
+ * MCP tools have a top-level `inputSchema` with `type: "object"` and
+ * no `input_schema` (Anthropic) or `function` (OpenAI) properties.
+ */
+export function isMCPTool(tool: unknown): tool is MCPTool {
+  if (typeof tool !== 'object' || tool === null) return false;
+  const t = tool as Record<string, unknown>;
+  if (typeof t.name !== 'string') return false;
+  if (typeof t.inputSchema !== 'object' || t.inputSchema === null) return false;
+  const schema = t.inputSchema as Record<string, unknown>;
+  if (schema.type !== 'object') return false;
+  // Exclude Anthropic (has input_schema) and OpenAI (has function) shapes
+  if ('input_schema' in t) return false;
+  if ('function' in t) return false;
+  if ('type' in t && t.type === 'function') return false;
+  return true;
+}
+
+// ============================================================================
 // Generic Adapter Factory
 // ============================================================================
 
@@ -283,6 +369,16 @@ export const anthropicAdapter: ProviderAdapter<AnthropicTool, AnthropicToolUse> 
 };
 
 /**
+ * MCP adapter instance.
+ */
+export const mcpAdapter: ProviderAdapter<MCPTool, MCPToolCallArgs> = {
+  toProviderTool: toMCP,
+  fromProviderTool: fromMCP,
+  fromProviderToolCall: fromMCPToolCall,
+  toProviderTools: toMCPTools,
+};
+
+/**
  * Get an adapter for a specific provider.
  *
  * @param provider - Provider name
@@ -302,6 +398,9 @@ export function getAdapter(
   provider: 'anthropic'
 ): ProviderAdapter<AnthropicTool, AnthropicToolUse>;
 export function getAdapter(
+  provider: 'mcp'
+): ProviderAdapter<MCPTool, MCPToolCallArgs>;
+export function getAdapter(
   provider: Provider
 ): ProviderAdapter<unknown, unknown> {
   switch (provider) {
@@ -309,6 +408,8 @@ export function getAdapter(
       return openAIAdapter;
     case 'anthropic':
       return anthropicAdapter;
+    case 'mcp':
+      return mcpAdapter;
     case 'google':
       throw new Error(
         'Google adapter not available via getAdapter(). Use toGoogleTool() and fromGoogleFunctionCall() directly.'
