@@ -573,6 +573,109 @@ logging:
     });
   });
 
+  describe('wrapMCPTools', () => {
+    it('should wrap MCP tools and validate before calling server', async () => {
+      const mcpTools = [
+        {
+          name: 'read_file',
+          description: 'Read a file',
+          inputSchema: {
+            type: 'object' as const,
+            properties: { path: { type: 'string' } },
+            required: ['path'],
+          },
+        },
+      ];
+
+      const mockServerClient = {
+        callTool: vi.fn().mockResolvedValue({
+          content: [{ type: 'text', text: 'file contents' }],
+        }),
+      };
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const { tools, callTool } = veto.wrapMCPTools(mcpTools, mockServerClient);
+
+      // Original tools are returned unmodified
+      expect(tools).toBe(mcpTools);
+      expect(tools).toHaveLength(1);
+
+      // callTool validates and forwards
+      const result = await callTool({ name: 'read_file', arguments: { path: '/tmp/test.txt' } });
+      expect(result.content[0].text).toBe('file contents');
+      expect(mockServerClient.callTool).toHaveBeenCalledWith({
+        name: 'read_file',
+        arguments: { path: '/tmp/test.txt' },
+      });
+    });
+
+    it('should block MCP tool call when validation denies', async () => {
+      const rulePath = join(RULES_DIR, 'mcp-block.yaml');
+      writeFileSync(rulePath, `
+version: "1.0"
+name: mcp-block
+rules:
+  - id: block-read
+    name: Block read_file
+    enabled: true
+    action: block
+    tools: [read_file]
+`);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: 'block',
+          reasoning: 'Blocked by policy',
+          should_block_weight: 1,
+        }),
+      });
+
+      const mcpTools = [
+        {
+          name: 'read_file',
+          inputSchema: { type: 'object' as const },
+        },
+      ];
+
+      const mockServerClient = {
+        callTool: vi.fn(),
+      };
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const { callTool } = veto.wrapMCPTools(mcpTools, mockServerClient);
+
+      await expect(callTool({ name: 'read_file', arguments: { path: '/etc/passwd' } }))
+        .rejects.toThrow('Tool call denied');
+      expect(mockServerClient.callTool).not.toHaveBeenCalled();
+    });
+
+    it('should handle callTool without arguments', async () => {
+      const mcpTools = [
+        {
+          name: 'list_tools',
+          inputSchema: { type: 'object' as const },
+        },
+      ];
+
+      const mockServerClient = {
+        callTool: vi.fn().mockResolvedValue({
+          content: [{ type: 'text', text: '[]' }],
+        }),
+      };
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const { callTool } = veto.wrapMCPTools(mcpTools, mockServerClient);
+
+      const result = await callTool({ name: 'list_tools' });
+      expect(result.content[0].text).toBe('[]');
+      expect(mockServerClient.callTool).toHaveBeenCalledWith({
+        name: 'list_tools',
+        arguments: {},
+      });
+    });
+  });
+
   describe('Approval Preferences', () => {
     it('should auto-approve when approve_all preference is set', async () => {
       writeFileSync(

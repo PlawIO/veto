@@ -100,20 +100,68 @@ export interface GoogleFunctionCall {
 }
 
 // ============================================================================
+// MCP (Model Context Protocol) Format
+// ============================================================================
+
+/**
+ * MCP tool definition format.
+ *
+ * @see https://spec.modelcontextprotocol.io/specification/2025-03-26/server/tools/
+ */
+export interface MCPTool {
+  name: string;
+  description?: string;
+  inputSchema: {
+    type: 'object';
+    properties?: Record<string, unknown>;
+    required?: string[];
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * MCP tool call arguments (passed to server.callTool).
+ */
+export interface MCPToolCallArgs {
+  name: string;
+  arguments?: Record<string, unknown>;
+}
+
+/**
+ * MCP tool call result.
+ */
+export interface MCPToolResult {
+  content: Array<{
+    type: string;
+    text?: string;
+    data?: string;
+    mimeType?: string;
+  }>;
+  isError?: boolean;
+}
+
+/**
+ * MCP server client interface (subset needed for wrapping).
+ */
+export interface MCPServerClient {
+  callTool(args: MCPToolCallArgs): Promise<MCPToolResult>;
+}
+
+// ============================================================================
 // Provider Enum
 // ============================================================================
 
 /**
  * Supported AI providers.
  */
-export type Provider = 'openai' | 'anthropic' | 'google';
+export type Provider = 'openai' | 'anthropic' | 'google' | 'mcp';
 
 /**
  * Union type for all provider tool formats.
  */
-export type ProviderTool = OpenAITool | AnthropicTool | GoogleTool;
+export type ProviderTool = OpenAITool | AnthropicTool | GoogleTool | MCPTool;
 
 /**
  * Union type for all provider tool call formats.
  */
-export type ProviderToolCall = OpenAIToolCall | AnthropicToolUse | GoogleFunctionCall;
+export type ProviderToolCall = OpenAIToolCall | AnthropicToolUse | GoogleFunctionCall | MCPToolCallArgs;
