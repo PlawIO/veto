@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.7.0
+
+### Minor Changes
+
+- [#98](https://github.com/VulnZap/veto/pull/98) [`0a45454`](https://github.com/VulnZap/veto/commit/0a45454a2e778a53809ebce00a6c4781f94e4ab2) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add deep Vercel AI SDK and LangChain integrations with middleware-level tool call interception, streaming support, and LangGraph ToolNode wrapping for both TypeScript and Python SDKs.
+
 ## 1.6.0
 
 ### Minor Changes
