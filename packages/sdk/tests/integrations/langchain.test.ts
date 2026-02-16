@@ -129,6 +129,29 @@ describe('LangChain Middleware', () => {
       );
     });
 
+    it('should pass original request when args are not modified', async () => {
+      const veto = {
+        validateToolCall: vi.fn().mockResolvedValue({
+          allowed: true,
+          validationResult: { decision: 'allow' },
+          originalCall: { id: 'tc_1', name: 'search', arguments: {} },
+          finalArguments: { query: 'test' }, // same as input
+        }),
+      } as any;
+
+      const middleware = createVetoLangChainMiddleware(veto);
+
+      const handler = vi.fn().mockResolvedValue({ content: 'ok' });
+      const request = {
+        toolCall: { name: 'search', args: { query: 'test' }, id: 'tc_1' },
+      };
+
+      await middleware.wrapToolCall(request, handler);
+
+      // Handler called with original request (not spread with modified args)
+      expect(handler).toHaveBeenCalledWith(request);
+    });
+
     it('should generate a call ID when none is provided', async () => {
       const veto = createMockVeto('allow');
       const middleware = createVetoLangChainMiddleware(veto);
@@ -298,6 +321,55 @@ describe('LangGraph ToolNode Wrapper', () => {
       expect(result.messages[0].tool_call_id).toBe('tc_2');
       expect(result.messages[1].content).toBe('search result');
       expect(result.messages[2].content).toBe('file content');
+    });
+
+    it('should correctly deny tool calls that have no explicit id', async () => {
+      const veto = {
+        validateToolCall: vi.fn()
+          .mockResolvedValueOnce({
+            allowed: true,
+            validationResult: { decision: 'allow' },
+            originalCall: { id: 'generated_1', name: 'search', arguments: {} },
+            finalArguments: {},
+          })
+          .mockResolvedValueOnce({
+            allowed: false,
+            validationResult: { decision: 'deny', reason: 'Blocked' },
+            originalCall: { id: 'generated_2', name: 'delete_file', arguments: {} },
+            finalArguments: {},
+          }),
+      } as any;
+
+      const toolNode = {
+        invoke: vi.fn().mockResolvedValue({
+          messages: [{ content: 'search result' }],
+        }),
+      };
+      const vetoNode = createVetoToolNode(veto, toolNode);
+
+      // Tool calls WITHOUT explicit ids
+      const state = {
+        messages: [
+          {
+            tool_calls: [
+              { name: 'search', args: { q: 'test' } },
+              { name: 'delete_file', args: { path: '/tmp' } },
+            ],
+          },
+        ],
+      };
+
+      const result = await vetoNode(state);
+
+      expect(veto.validateToolCall).toHaveBeenCalledTimes(2);
+      // toolNode must be invoked with ONLY the allowed call
+      expect(toolNode.invoke).toHaveBeenCalledTimes(1);
+      const invokedState = toolNode.invoke.mock.calls[0][0];
+      expect(invokedState.messages[0].tool_calls).toHaveLength(1);
+      expect(invokedState.messages[0].tool_calls[0].name).toBe('search');
+      // Result: 1 denial + 1 allowed
+      expect(result.messages).toHaveLength(2);
+      expect(result.messages[0].content).toContain('Blocked');
     });
 
     it('should return denial messages for multiple denied calls', async () => {

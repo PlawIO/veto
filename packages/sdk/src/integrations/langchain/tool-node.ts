@@ -53,11 +53,13 @@ export function createVetoToolNode(
       return toolNode.invoke(state);
     }
 
-    // Validate ALL tool calls before deciding
-    const denied: Array<{ callId: string; reason: string }> = [];
-    const deniedIds = new Set<string>();
+    // Validate ALL tool calls before deciding.
+    // Track denied by index to avoid ID mismatch when tool calls lack an explicit id.
+    const denied: Array<{ callId: string; reason: string; index: number }> = [];
+    const deniedIndices = new Set<number>();
 
-    for (const tc of toolCalls) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i];
       const callId = tc.id ?? generateToolCallId();
 
       const result = await veto.validateToolCall({
@@ -68,8 +70,8 @@ export function createVetoToolNode(
 
       if (!result.allowed) {
         const reason = result.validationResult?.reason ?? 'Policy violation';
-        denied.push({ callId, reason });
-        deniedIds.add(callId);
+        denied.push({ callId, reason, index: i });
+        deniedIndices.add(i);
         if (onDeny) await onDeny(tc.name, tc.args, reason);
       } else {
         if (onAllow) await onAllow(tc.name, tc.args);
@@ -101,7 +103,7 @@ export function createVetoToolNode(
     }
 
     // Partial denial — execute allowed calls, merge with denial messages
-    const allowedCalls = toolCalls.filter((tc: any) => !deniedIds.has(tc.id ?? ''));
+    const allowedCalls = toolCalls.filter((_: any, idx: number) => !deniedIndices.has(idx));
     const modifiedMessages = [...state.messages];
     const lastMsg = modifiedMessages[modifiedMessages.length - 1];
     modifiedMessages[modifiedMessages.length - 1] = { ...lastMsg, tool_calls: allowedCalls };

@@ -72,11 +72,12 @@ def create_veto_tool_node(
             result_pass: dict[str, Any] = await tool_node.ainvoke(state)
             return result_pass
 
-        # Validate ALL tool calls before deciding
+        # Validate ALL tool calls before deciding.
+        # Track denied by index to avoid ID mismatch when tool calls lack an explicit id.
         denied: list[dict[str, Any]] = []
-        denied_ids: set[str] = set()
+        denied_indices: set[int] = set()
 
-        for tc in tool_calls:
+        for i, tc in enumerate(tool_calls):
             if isinstance(tc, dict):
                 name = tc.get("name", "")
                 args = tc.get("args", {})
@@ -98,7 +99,7 @@ def create_veto_tool_node(
                 reason = validation.validation_result.reason or "Policy violation"
                 logger.info("BLOCKED %s: %s", name, reason)
                 denied.append({"call_id": call_id, "reason": reason})
-                denied_ids.add(call_id)
+                denied_indices.add(i)
 
                 if on_deny is not None:
                     ret = on_deny(name, args, reason)
@@ -139,12 +140,7 @@ def create_veto_tool_node(
             return {"messages": denial_messages}
 
         # Partial denial — execute allowed calls, merge with denial messages
-        def _get_id(tc: Any) -> str:
-            if isinstance(tc, dict):
-                return tc.get("id", "")
-            return getattr(tc, "id", "") or ""
-
-        allowed_calls = [tc for tc in tool_calls if _get_id(tc) not in denied_ids]
+        allowed_calls = [tc for i, tc in enumerate(tool_calls) if i not in denied_indices]
         modified_messages = list(messages)
         last_msg = modified_messages[-1]
 

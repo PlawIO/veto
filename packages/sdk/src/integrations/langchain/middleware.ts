@@ -104,7 +104,7 @@ export function createVetoLangChainMiddleware(
       if (onAllow) await onAllow(toolName, args);
 
       // If arguments were modified, update the request
-      if (result.finalArguments && result.finalArguments !== args) {
+      if (result.finalArguments && JSON.stringify(result.finalArguments) !== JSON.stringify(args)) {
         return handler({
           ...request,
           toolCall: { ...tc, args: result.finalArguments },

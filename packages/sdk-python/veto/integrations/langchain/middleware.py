@@ -141,6 +141,21 @@ class VetoMiddleware:
             if inspect.isawaitable(ret):
                 await ret
 
+        # Forward modified arguments when Veto has sanitized/changed them
+        if result.final_arguments and result.final_arguments != args:
+            if isinstance(tc, dict):
+                modified_tc = {**tc, "args": result.final_arguments}
+            else:
+                modified_tc = type(tc)(**{**tc.__dict__, "args": result.final_arguments})
+
+            if hasattr(request, "tool_call"):
+                modified_request = type(request)(**{**request.__dict__, "tool_call": modified_tc})
+            elif isinstance(request, dict):
+                modified_request = {**request, "tool_call": modified_tc}
+            else:
+                modified_request = request
+            return await handler(modified_request)
+
         return await handler(request)
 
 

@@ -26,15 +26,25 @@ import logging
 from typing import Any, Callable, Optional
 from uuid import UUID
 
+try:
+    from langchain_core.callbacks import BaseCallbackHandler as _Base
+except ImportError:
+    _Base = object  # type: ignore[misc,assignment]
+
 logger = logging.getLogger("veto.integrations.langchain")
 
 
-class VetoCallbackHandler:
+class VetoCallbackHandler(_Base):  # type: ignore[misc]
     """
     Observational callback handler for LangChain tool events.
 
-    Compatible with LangChain's callback system. Fires on tool
-    start/end/error for logging and metrics. Does not block execution.
+    Inherits from ``BaseCallbackHandler`` (when ``langchain_core`` is
+    installed) so LangChain's ``CallbackManager`` recognises it via
+    ``isinstance`` checks. Falls back to plain ``object`` when the
+    dependency is absent.
+
+    Fires on tool start/end/error for logging and metrics. Does not
+    block execution.
 
     Note:
         LangChain's ``BaseCallbackHandler`` methods are **synchronous**.
