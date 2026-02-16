@@ -1,5 +1,13 @@
 # veto-sdk
 
+## 1.6.0
+
+### Minor Changes
+
+- [#89](https://github.com/VulnZap/veto/pull/89) [`b13f6a9`](https://github.com/VulnZap/veto/commit/b13f6a9cfb7677f73ee69ec888d0da456f16c4d0) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add local human-in-the-loop approval support with `action: require_approval`, including webhook callback routing, configurable timeout behavior, and approval response mapping.
+
+  Add decision history export in JSON and CSV (`exportDecisions` / `export_decisions`) with normalized audit fields (`timestamp`, `tool_name`, `arguments`, `policy_version`, `rule_id`, `decision`, `reason`) and update schema/docs coverage for `require_approval` across TypeScript and Python SDKs.
+
 ## 1.5.0
 
 ### Minor Changes
