@@ -9,6 +9,7 @@ A guardrail system for AI agent tool calls. Veto intercepts and validates tool c
 3. **Pass** the wrapped tools to your AI agent/model.
 
 When the AI model calls a tool, Veto automatically:
+
 1. Intercepts the call.
 2. Validates arguments against your rules (via YAML & LLM).
 3. Blocks or Allows execution based on the result.
@@ -21,14 +22,18 @@ The AI model remains unaware of the guardrail - the tool interface is preserved.
 npm install veto-sdk
 ```
 
+For a complete bank transfer escalation example, see the [HITL guide](../../docs/hitl-guide.md).
+
 ## Quick Start
 
 ### 1. Initialize Veto
 
 Run the CLI to create configuration:
+
 ```bash
 npx veto init
 ```
+
 This creates a `veto/` directory with `veto.config.yaml` and default rules.
 
 ### 2. Wrap Your Tools
@@ -84,7 +89,7 @@ rules:
 version: "1.0"
 
 # Operating mode
-mode: "strict"  # "strict" blocks calls, "log" only logs them
+mode: "strict" # "strict" blocks calls, "log" only logs them
 
 # Validation Backend
 validation:
@@ -103,6 +108,16 @@ logging:
 rules:
   directory: "./rules"
   recursive: true
+
+# Local approval callback (for action: require_approval)
+# approval:
+#   callbackUrl: "http://localhost:8787/approvals"
+#   timeout: 30000
+#   timeoutBehavior: "block" # "block" (default) or "allow"
+#   includeCustomContext: false # opt-in: forward validation context.custom to webhook
+#   responseSchema:
+#     decisionField: "decision"
+#     reasonField: "reason"
 ```
 
 ## API Reference
@@ -150,12 +165,21 @@ Resets the history statistics.
 veto.clearHistory();
 ```
 
+### `veto.exportDecisions(format)`
+
+Exports decision history as JSON or CSV.
+
+```typescript
+const jsonAudit = veto.exportDecisions("json");
+const csvAudit = veto.exportDecisions("csv");
+```
+
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `npx veto init` | Initialize Veto in current directory |
-| `npx veto version` | Show version |
+| Command            | Description                          |
+| ------------------ | ------------------------------------ |
+| `npx veto init`    | Initialize Veto in current directory |
+| `npx veto version` | Show version                         |
 
 ## General Rule YAML Format
 
@@ -163,21 +187,21 @@ Each rule file (e.g., `veto/rules/policy.yaml`) can contain one or more rules.
 
 ```yaml
 rules:
-  - id: unique-rule-id           # [Required] Unique identifier for the rule
-    name: Human readable name    # [Required] Descriptive name for logging
-    enabled: true                # [Optional] Default: true
-    severity: high               # [Optional] critical, high, medium, low, info. Default: medium
-    action: block                # [Required] block, warn, log, allow.
-    
+  - id: unique-rule-id # [Required] Unique identifier for the rule
+    name: Human readable name # [Required] Descriptive name for logging
+    enabled: true # [Optional] Default: true
+    severity: high # [Optional] critical, high, medium, low, info. Default: medium
+    action: block # [Required] block, warn, log, allow, require_approval.
+
     # Scope: Which tools does this rule apply to?
-    tools:                       # [Optional] List of tool names.
-      - make_payment             # If omitted or empty, applies to ALL tools (Global Rule).
-      
+    tools: # [Optional] List of tool names.
+      - make_payment # If omitted or empty, applies to ALL tools (Global Rule).
+
     # Static Conditions (Optional):
     # Evaluated locally before LLM validation. Fast checks for specific values.
     conditions:
-      - field: arguments.amount  # Dot notation for nested arguments
-        operator: greater_than   # equals, contains, starts_with, ends_with, greater_than, less_than
+      - field: arguments.amount # Dot notation for nested arguments
+        operator: greater_than # equals, contains, starts_with, ends_with, greater_than, less_than
         value: 1000
 
     # description (Optional):
@@ -190,14 +214,18 @@ rules:
 Veto uses a two-step process to determine if a tool call is safe:
 
 ### 1. Rule Selection (Which rules apply?)
+
 Veto selects rules based on the `tools` list in your YAML:
-*   **Tool-Specific Rules**: If a rule lists specific tools (e.g., `tools: [make_payment]`), it ONLY applies when those tools are called.
-*   **Global Rules**: If `tools` is missing or empty `[]`, the rule activates for **EVERY** tool call. Use this for universal policies (e.g., "Do not reveal internal file paths").
+
+- **Tool-Specific Rules**: If a rule lists specific tools (e.g., `tools: [make_payment]`), it ONLY applies when those tools are called.
+- **Global Rules**: If `tools` is missing or empty `[]`, the rule activates for **EVERY** tool call. Use this for universal policies (e.g., "Do not reveal internal file paths").
 
 ### 2. Validation Execution
+
 For each intercepted tool call, Veto aggregates all applicable rules (Global + Specific) and validates them:
-*   **Static Conditions**: If `conditions` are defined, they are checked first by the Validation Engine. If a condition matches (e.g., `amount > 1000`), the rule triggers immediately.
-*   **Semantic Validation**: If no static conditions are matched (or none exist), the rule's `name` and `description` are passed to the LLM (via API, Kernel, or Custom provider) to semantically verify if the tool call violates the rule context.
+
+- **Static Conditions**: If `conditions` are defined, they are checked first by the Validation Engine. If a condition matches (e.g., `amount > 1000`), the rule triggers immediately.
+- **Semantic Validation**: If no static conditions are matched (or none exist), the rule's `name` and `description` are passed to the LLM (via API, Kernel, or Custom provider) to semantically verify if the tool call violates the rule context.
 
 ## License
 

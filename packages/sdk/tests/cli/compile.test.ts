@@ -140,6 +140,14 @@ describe('compile', () => {
       expect(() => parseAndValidateLLMOutput(bad)).toThrow('invalid action');
     });
 
+    it('should accept require_approval action', () => {
+      const output = parseAndValidateLLMOutput(JSON.stringify({
+        rules: [{ id: 'test', name: 'test', action: 'require_approval' }],
+        notes: '',
+      }));
+      expect(output.rules[0].action).toBe('require_approval');
+    });
+
     it('should reject rule with invalid severity', () => {
       const bad = JSON.stringify({
         rules: [

@@ -123,6 +123,65 @@ class TestHistoryTracker:
         assert len(tool_a_entries) == 2
         assert all(e.tool_name == "tool_a" for e in tool_a_entries)
 
+    def test_export_decisions_json(self, history_tracker):
+        """Should export decision history as JSON with required fields."""
+        history_tracker.record(
+            tool_name="wire_transfer",
+            args={"amount": 12500, "recipient": "ops-vendor"},
+            result=ValidationResult(
+                decision="deny",
+                reason="Approval denied",
+                metadata={
+                    "ruleId": "require-wire-approval",
+                    "policyVersion": "1.0",
+                },
+            ),
+        )
+
+        exported = history_tracker.export_decisions("json")
+        import json
+
+        parsed = json.loads(exported)
+        assert len(parsed) == 1
+        assert parsed[0]["tool_name"] == "wire_transfer"
+        assert parsed[0]["arguments"] == {"amount": 12500, "recipient": "ops-vendor"}
+        assert parsed[0]["policy_version"] == "1.0"
+        assert parsed[0]["rule_id"] == "require-wire-approval"
+        assert parsed[0]["decision"] == "deny"
+        assert parsed[0]["reason"] == "Approval denied"
+        assert isinstance(parsed[0]["timestamp"], str)
+
+    def test_export_decisions_csv(self, history_tracker):
+        """Should export decision history as CSV."""
+        history_tracker.record(
+            tool_name="wire_transfer",
+            args={"note": "requires, review"},
+            result=ValidationResult(
+                decision="allow",
+                metadata={
+                    "rule_id": "require-wire-approval",
+                    "policy_version": "1.0",
+                },
+            ),
+        )
+
+        exported = history_tracker.export_decisions("csv")
+        lines = exported.split("\n")
+
+        assert (
+            lines[0]
+            == "timestamp,tool_name,arguments,policy_version,rule_id,decision,reason"
+        )
+        assert len(lines) == 2
+        assert "wire_transfer" in lines[1]
+        assert "require-wire-approval" in lines[1]
+        assert "allow" in lines[1]
+
+    def test_export_decisions_invalid_format(self, history_tracker):
+        """Should reject unsupported export formats."""
+        with pytest.raises(ValueError):
+            history_tracker.export_decisions("xml")  # type: ignore[arg-type]
+
 
 class TestHistoryStats:
     """Tests for HistoryStats dataclass."""

@@ -45,6 +45,10 @@ npm install -g veto-cli
 3. Allowed → execute. Blocked → deny. Ask → prompt user.
 4. Result returned to agent (unaware of guardrail)
 
+## Guides
+
+- [Human-in-the-loop approval guide (bank transfer escalation)](./docs/hitl-guide.md)
+
 ## Why Veto?
 
 - **Zero-config defaults** — Sensible security rules out of the box

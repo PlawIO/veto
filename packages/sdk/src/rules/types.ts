@@ -46,7 +46,7 @@ export interface RuleCondition {
 /**
  * Action to take when a rule matches.
  */
-export type RuleAction = 'block' | 'warn' | 'log' | 'allow';
+export type RuleAction = 'block' | 'warn' | 'log' | 'allow' | 'require_approval';
 
 /**
  * Severity level for a rule.

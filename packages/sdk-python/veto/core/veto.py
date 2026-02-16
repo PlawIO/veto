@@ -22,6 +22,7 @@ import inspect
 
 from veto.types.tool import ToolDefinition, ToolCall
 from veto.types.config import (
+    DecisionExportFormat,
     LogLevel,
     Validator,
     NamedValidator,
@@ -155,7 +156,9 @@ class Veto:
         # Initialize validation engine
         default_decision = "allow"
         self._validation_engine = ValidationEngine(
-            ValidationEngineOptions(logger=self._logger, default_decision=default_decision)
+            ValidationEngineOptions(
+                logger=self._logger, default_decision=default_decision
+            )
         )
 
         # Add the cloud validator
@@ -218,7 +221,11 @@ class Veto:
         env_log_level = os.environ.get("VETO_LOG_LEVEL")
         log_level: LogLevel = (
             options.log_level
-            or (env_log_level if env_log_level in ("debug", "info", "warn", "error", "silent") else None)  # type: ignore[assignment]
+            or (
+                env_log_level
+                if env_log_level in ("debug", "info", "warn", "error", "silent")
+                else None
+            )  # type: ignore[assignment]
             or "info"
         )
 
@@ -227,7 +234,8 @@ class Veto:
         # Create cloud client
         cloud_config = VetoCloudConfig(
             api_key=options.api_key,
-            base_url=options.base_url or os.environ.get("VETO_API_URL", "https://api.veto.dev"),
+            base_url=options.base_url
+            or os.environ.get("VETO_API_URL", "https://api.veto.dev"),
             timeout=options.timeout or 30000,
             retries=options.retries or 2,
         )
@@ -399,19 +407,21 @@ class Veto:
 
         result = validate_deterministic(tool_name, args, policy.constraints)
 
-        self._cloud_client.log_decision({
-            "tool_name": tool_name,
-            "arguments": args,
-            "decision": result.decision,
-            "reason": result.reason,
-            "mode": "deterministic",
-            "latency_ms": result.latency_ms,
-            "source": "client",
-            "context": {
-                "session_id": self._session_id,
-                "agent_id": self._agent_id,
-            },
-        })
+        self._cloud_client.log_decision(
+            {
+                "tool_name": tool_name,
+                "arguments": args,
+                "decision": result.decision,
+                "reason": result.reason,
+                "mode": "deterministic",
+                "latency_ms": result.latency_ms,
+                "source": "client",
+                "context": {
+                    "session_id": self._session_id,
+                    "agent_id": self._agent_id,
+                },
+            }
+        )
 
         return result
 
@@ -429,9 +439,7 @@ class Veto:
                     "Local deterministic validation allowed",
                     {"tool": context.tool_name, "latency_ms": local_result.latency_ms},
                 )
-                return ValidationResult(
-                    decision="allow", reason=local_result.reason
-                )
+                return ValidationResult(decision="allow", reason=local_result.reason)
 
             if self._mode == "log":
                 self._logger.warn(
@@ -561,7 +569,10 @@ class Veto:
                 if approval_data.status == "approved":
                     self._logger.info(
                         "Approval granted",
-                        {"tool": context.tool_name, "approval_id": response.approval_id},
+                        {
+                            "tool": context.tool_name,
+                            "approval_id": response.approval_id,
+                        },
                     )
                     return ValidationResult(
                         decision="allow",
@@ -728,7 +739,11 @@ class Veto:
                         input_data: dict[str, Any], *args: Any, **kwargs: Any
                     ) -> Any:
                         # LangGraph passes a ToolCall dict with args nested
-                        if isinstance(input_data, dict) and "args" in input_data and "name" in input_data:
+                        if (
+                            isinstance(input_data, dict)
+                            and "args" in input_data
+                            and "name" in input_data
+                        ):
                             call_arguments = input_data["args"]
                         else:
                             call_arguments = input_data
@@ -792,7 +807,9 @@ class Veto:
                         if loop is not None and loop.is_running():
                             # Inside a running async loop — run validation
                             # in a separate thread with its own event loop
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            with concurrent.futures.ThreadPoolExecutor(
+                                max_workers=1
+                            ) as pool:
                                 final_args = pool.submit(
                                     asyncio.run, validate_and_invoke()
                                 ).result()
@@ -862,9 +879,7 @@ class Veto:
                     pass
 
         # No wrappable function found, return as-is
-        veto._logger.warn(
-            "No wrappable function found on tool", {"name": tool_name}
-        )
+        veto._logger.warn("No wrappable function found on tool", {"name": tool_name})
         return tool
 
     async def _validate_tool_call(self, call: ToolCall) -> InterceptionResult:
@@ -878,9 +893,7 @@ class Veto:
 
         return await self._interceptor.intercept(normalized_call)
 
-    def set_approval_preference(
-        self, tool_name: str, preference: str
-    ) -> None:
+    def set_approval_preference(self, tool_name: str, preference: str) -> None:
         """
         Cache an approval preference for a tool.
 
@@ -892,16 +905,16 @@ class Veto:
             preference: "approve_all" or "deny_all"
         """
         if preference not in ("approve_all", "deny_all"):
-            raise ValueError(f"Invalid preference: {preference}. Use 'approve_all' or 'deny_all'.")
+            raise ValueError(
+                f"Invalid preference: {preference}. Use 'approve_all' or 'deny_all'."
+            )
         self._approval_preferences[tool_name] = preference
         self._logger.info(
             "Approval preference set",
             {"tool": tool_name, "preference": preference},
         )
 
-    def clear_approval_preferences(
-        self, tool_name: Optional[str] = None
-    ) -> None:
+    def clear_approval_preferences(self, tool_name: Optional[str] = None) -> None:
         """
         Clear cached approval preferences.
 
@@ -920,6 +933,10 @@ class Veto:
     def get_history_stats(self) -> HistoryStats:
         """Get history statistics."""
         return self._history_tracker.get_stats()
+
+    def export_decisions(self, format: DecisionExportFormat = "json") -> str:
+        """Export decision history as JSON or CSV."""
+        return self._history_tracker.export_decisions(format)
 
     def clear_history(self) -> None:
         """Clear call history."""

@@ -57,20 +57,24 @@ class TestVetoInit:
 
     async def test_init_with_api_key(self):
         """Should initialize with API key from options."""
-        veto = await Veto.init(VetoOptions(
-            api_key="test-api-key",
-            log_level="silent",
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test-api-key",
+                log_level="silent",
+            )
+        )
         assert veto is not None
         assert veto._cloud_client._api_key == "test-api-key"
 
     async def test_init_with_custom_base_url(self):
         """Should use custom base URL when provided."""
-        veto = await Veto.init(VetoOptions(
-            api_key="test-key",
-            base_url="https://custom.veto.dev",
-            log_level="silent",
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test-key",
+                base_url="https://custom.veto.dev",
+                log_level="silent",
+            )
+        )
         assert veto._cloud_client._base_url == "https://custom.veto.dev"
 
     async def test_init_from_env_var(self):
@@ -157,6 +161,7 @@ class TestVetoWrap:
         wrapped = veto.wrap([tool])
 
         from veto.core.interceptor import ToolCallDeniedError
+
         with pytest.raises(ToolCallDeniedError):
             await wrapped[0].handler({})
 
@@ -177,6 +182,7 @@ class TestVetoWrap:
 
         # Need to await the registration which happens in wrap
         import asyncio
+
         veto.wrap([tool])
         # Give async task time to complete
         await asyncio.sleep(0.1)
@@ -233,6 +239,7 @@ class TestVetoHistory:
         wrapped = veto.wrap([tool])
 
         from veto.core.interceptor import ToolCallDeniedError
+
         try:
             await wrapped[0].handler({})
         except ToolCallDeniedError:
@@ -284,6 +291,33 @@ class TestVetoHistory:
         assert stats.total_calls == 1
         assert "history_tool" in stats.calls_by_tool
 
+    async def test_export_decisions(self, mock_cloud_client):
+        """Should export decision history through Veto facade."""
+
+        class MockTool:
+            name = "export_tool"
+            description = "Tool for export test"
+
+            async def handler(self, args):
+                return "ok"
+
+        tool = MockTool()
+        veto = await Veto.init(VetoOptions(api_key="test", log_level="silent"))
+        veto._cloud_client = mock_cloud_client
+
+        wrapped = veto.wrap([tool])
+        await wrapped[0].handler({"amount": 123})
+
+        exported_json = veto.export_decisions("json")
+        assert "tool_name" in exported_json
+        assert "export_tool" in exported_json
+
+        exported_csv = veto.export_decisions("csv")
+        assert (
+            exported_csv.split("\n")[0]
+            == "timestamp,tool_name,arguments,policy_version,rule_id,decision,reason"
+        )
+
 
 class TestVetoModes:
     """Tests for Veto operating modes."""
@@ -295,11 +329,13 @@ class TestVetoModes:
 
     async def test_log_mode_from_options(self):
         """Should respect log mode from options."""
-        veto = await Veto.init(VetoOptions(
-            api_key="test",
-            mode="log",
-            log_level="silent",
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                mode="log",
+                log_level="silent",
+            )
+        )
         assert veto._mode == "log"
 
     async def test_log_mode_allows_but_logs(self, mock_cloud_client):
@@ -319,11 +355,13 @@ class TestVetoModes:
                 return "executed"
 
         tool = MockTool()
-        veto = await Veto.init(VetoOptions(
-            api_key="test",
-            mode="log",
-            log_level="silent",
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                mode="log",
+                log_level="silent",
+            )
+        )
         veto._cloud_client = mock_cloud_client
 
         wrapped = veto.wrap([tool])
@@ -429,6 +467,7 @@ class TestApprovalFlow:
         wrapped = veto.wrap([tool])
 
         from veto.core.interceptor import ToolCallDeniedError
+
         with pytest.raises(ToolCallDeniedError):
             await wrapped[0].handler({})
 
@@ -453,16 +492,19 @@ class TestApprovalFlow:
                 return "should not reach"
 
         tool = MockTool()
-        veto = await Veto.init(VetoOptions(
-            api_key="test",
-            log_level="silent",
-            approval_timeout=0.05,
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                log_level="silent",
+                approval_timeout=0.05,
+            )
+        )
         veto._cloud_client = mock_cloud_client
 
         wrapped = veto.wrap([tool])
 
         from veto.core.interceptor import ToolCallDeniedError
+
         with pytest.raises(ToolCallDeniedError):
             await wrapped[0].handler({})
 
@@ -497,11 +539,13 @@ class TestApprovalFlow:
                 return "ok"
 
         tool = MockTool()
-        veto = await Veto.init(VetoOptions(
-            api_key="test",
-            log_level="silent",
-            on_approval_required=on_approval,
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                log_level="silent",
+                on_approval_required=on_approval,
+            )
+        )
         veto._cloud_client = mock_cloud_client
 
         wrapped = veto.wrap([tool])
@@ -539,12 +583,14 @@ class TestApprovalFlow:
                 return "ok"
 
         tool = MockTool()
-        veto = await Veto.init(VetoOptions(
-            api_key="test",
-            log_level="silent",
-            approval_poll_interval=0.5,
-            approval_timeout=10.0,
-        ))
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                log_level="silent",
+                approval_poll_interval=0.5,
+                approval_timeout=10.0,
+            )
+        )
         veto._cloud_client = mock_cloud_client
 
         wrapped = veto.wrap([tool])
@@ -619,6 +665,7 @@ class TestApprovalPreferences:
         wrapped = veto.wrap([tool])
 
         from veto.core.interceptor import ToolCallDeniedError
+
         with pytest.raises(ToolCallDeniedError):
             await wrapped[0].handler({})
 
