@@ -11,7 +11,7 @@ Usage::
 
     handler = VetoCallbackHandler(
         on_tool_start=lambda name, inp: print(f"Started: {name}"),
-        on_tool_end=lambda output: print(f"Done: {output}"),
+        on_tool_end=lambda name, output: print(f"Done: {name}: {output}"),
     )
 
     result = await agent.invoke(
@@ -38,8 +38,8 @@ class VetoCallbackHandler:
 
     Args:
         on_tool_start: ``(tool_name: str, input_str: str) -> None``
-        on_tool_end: ``(output: str) -> None``
-        on_tool_error: ``(error: BaseException) -> None``
+        on_tool_end: ``(tool_name: str, output: str) -> None``
+        on_tool_error: ``(tool_name: str, error: BaseException) -> None``
     """
 
     name = "VetoCallbackHandler"
@@ -54,6 +54,7 @@ class VetoCallbackHandler:
         self._on_tool_start = on_tool_start
         self._on_tool_end = on_tool_end
         self._on_tool_error = on_tool_error
+        self._tool_names: dict[UUID, str] = {}
 
     def on_tool_start(
         self,
@@ -65,6 +66,7 @@ class VetoCallbackHandler:
         **kwargs: Any,
     ) -> None:
         name = serialized.get("name", "unknown")
+        self._tool_names[run_id] = name
         logger.debug("Tool started: %s", name)
         if self._on_tool_start is not None:
             self._on_tool_start(name, input_str)
@@ -77,9 +79,10 @@ class VetoCallbackHandler:
         parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
-        logger.debug("Tool finished")
+        name = self._tool_names.pop(run_id, "")
+        logger.debug("Tool finished: %s", name)
         if self._on_tool_end is not None:
-            self._on_tool_end(output)
+            self._on_tool_end(name, output)
 
     def on_tool_error(
         self,
@@ -89,6 +92,7 @@ class VetoCallbackHandler:
         parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
-        logger.debug("Tool error: %s", error)
+        name = self._tool_names.pop(run_id, "")
+        logger.debug("Tool error: %s (%s)", name, error)
         if self._on_tool_error is not None:
-            self._on_tool_error(error)
+            self._on_tool_error(name, error)
