@@ -1,5 +1,13 @@
 # veto (Python SDK)
 
+## 0.6.0
+
+### Minor Changes
+
+- Add decision history export in JSON and CSV via `export_decisions()` with normalized audit fields (`timestamp`, `tool_name`, `arguments`, `policy_version`, `rule_id`, `decision`, `reason`).
+
+- Add `require_approval` schema/docs parity updates and align release contents with TypeScript SDK v1.6.0.
+
 ## 0.5.0
 
 ### Minor Changes
