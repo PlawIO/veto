@@ -81,7 +81,7 @@ def create_veto_tool_node(
                 args = getattr(tc, "args", {})
                 call_id = getattr(tc, "id", None) or generate_tool_call_id()
 
-            result = await veto._validate_tool_call(
+            validation = await veto._validate_tool_call(
                 ToolCall(
                     id=call_id,
                     name=name,
@@ -89,8 +89,8 @@ def create_veto_tool_node(
                 )
             )
 
-            if not result.allowed:
-                reason = result.validation_result.reason or "Policy violation"
+            if not validation.allowed:
+                reason = validation.validation_result.reason or "Policy violation"
                 logger.info("BLOCKED %s: %s", name, reason)
 
                 if on_deny is not None:
