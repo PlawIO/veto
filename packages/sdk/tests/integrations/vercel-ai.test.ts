@@ -265,6 +265,59 @@ describe('Vercel AI SDK Middleware', () => {
       expect(chunks.some(c => c.type === 'text-delta')).toBe(true);
     });
 
+    it('should not emit orphaned tool-input events for denied calls', async () => {
+      const veto = createMockVeto('deny', 'Not allowed');
+      const middleware = createVetoMiddleware(veto);
+
+      const stream = createReadableStream([
+        { type: 'text-delta', text: 'Hello' },
+        { type: 'tool-input-start', id: 'tc_1', toolName: 'delete_file' },
+        { type: 'tool-input-delta', id: 'tc_1', delta: '{"path":' },
+        { type: 'tool-input-delta', id: 'tc_1', delta: '"/tmp"}' },
+        { type: 'tool-call', toolCallId: 'tc_1', toolName: 'delete_file', input: '{"path":"/tmp"}' },
+        { type: 'finish', usage: {} },
+      ]);
+
+      const result = await middleware.wrapStream!({
+        doStream: vi.fn().mockResolvedValue({ stream }),
+        doGenerate: vi.fn(),
+        params: {},
+        model: {},
+      });
+
+      const chunks = await collectStream(result.stream);
+
+      expect(chunks.filter(c => c.type === 'tool-input-start')).toHaveLength(0);
+      expect(chunks.filter(c => c.type === 'tool-input-delta')).toHaveLength(0);
+      expect(chunks.filter(c => c.type === 'tool-call')).toHaveLength(0);
+      expect(chunks.some(c => c.type === 'text-delta')).toBe(true);
+    });
+
+    it('should emit buffered tool-input events for allowed calls', async () => {
+      const veto = createMockVeto('allow');
+      const middleware = createVetoMiddleware(veto);
+
+      const stream = createReadableStream([
+        { type: 'tool-input-start', id: 'tc_1', toolName: 'search' },
+        { type: 'tool-input-delta', id: 'tc_1', delta: '{"q":"test"}' },
+        { type: 'tool-call', toolCallId: 'tc_1', toolName: 'search', input: '{"q":"test"}' },
+        { type: 'finish', usage: {} },
+      ]);
+
+      const result = await middleware.wrapStream!({
+        doStream: vi.fn().mockResolvedValue({ stream }),
+        doGenerate: vi.fn(),
+        params: {},
+        model: {},
+      });
+
+      const chunks = await collectStream(result.stream);
+
+      expect(chunks.filter(c => c.type === 'tool-input-start')).toHaveLength(1);
+      expect(chunks.filter(c => c.type === 'tool-input-delta')).toHaveLength(1);
+      expect(chunks.filter(c => c.type === 'tool-call')).toHaveLength(1);
+    });
+
     it('should throw on denied tool calls when throwOnDeny is true', async () => {
       const veto = createMockVeto('deny', 'Blocked');
       const middleware = createVetoMiddleware(veto, { throwOnDeny: true });

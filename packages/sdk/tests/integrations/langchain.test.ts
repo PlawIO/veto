@@ -237,6 +237,46 @@ describe('LangGraph ToolNode Wrapper', () => {
 
       expect(onDeny).toHaveBeenCalledWith('rm', {}, 'Not allowed');
     });
+
+    it('should return denial for only the specific denied call, not all calls', async () => {
+      const veto = {
+        validateToolCall: vi.fn()
+          .mockResolvedValueOnce({
+            allowed: true,
+            validationResult: { decision: 'allow' },
+            originalCall: { id: 'tc_1', name: 'search', arguments: {} },
+            finalArguments: {},
+          })
+          .mockResolvedValueOnce({
+            allowed: false,
+            validationResult: { decision: 'deny', reason: 'Blocked' },
+            originalCall: { id: 'tc_2', name: 'delete_file', arguments: {} },
+            finalArguments: {},
+          }),
+      } as any;
+
+      const toolNode = { invoke: vi.fn() };
+      const vetoNode = createVetoToolNode(veto, toolNode);
+
+      const state = {
+        messages: [
+          {
+            tool_calls: [
+              { name: 'search', args: { q: 'test' }, id: 'tc_1' },
+              { name: 'delete_file', args: { path: '/tmp' }, id: 'tc_2' },
+              { name: 'read_file', args: { path: 'readme' }, id: 'tc_3' },
+            ],
+          },
+        ],
+      };
+
+      const result = await vetoNode(state);
+
+      expect(result.messages).toHaveLength(1);
+      expect(result.messages[0].content).toContain('Blocked');
+      expect(result.messages[0].tool_call_id).toBe('tc_2');
+      expect(toolNode.invoke).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -251,7 +291,18 @@ describe('LangChain Callback Handler', () => {
       expect(onToolStart).toHaveBeenCalledWith('search', '{"query":"test"}');
     });
 
-    it('should call onToolEnd with output', async () => {
+    it('should call onToolEnd with output and preserve tool name via runId', async () => {
+      const onToolStart = vi.fn();
+      const onToolEnd = vi.fn();
+      const handler = createVetoCallbackHandler({ onToolStart, onToolEnd });
+
+      await handler.handleToolStart({ name: 'search' }, '{"q":"test"}', 'run_1');
+      await handler.handleToolEnd('result data', 'run_1');
+
+      expect(onToolEnd).toHaveBeenCalledWith('search', 'result data');
+    });
+
+    it('should call onToolEnd with empty name when no runId', async () => {
       const onToolEnd = vi.fn();
       const handler = createVetoCallbackHandler({ onToolEnd });
 
@@ -260,7 +311,19 @@ describe('LangChain Callback Handler', () => {
       expect(onToolEnd).toHaveBeenCalledWith('', 'result data');
     });
 
-    it('should call onToolError with error', async () => {
+    it('should call onToolError with error and preserve tool name via runId', async () => {
+      const onToolStart = vi.fn();
+      const onToolError = vi.fn();
+      const handler = createVetoCallbackHandler({ onToolStart, onToolError });
+
+      const error = new Error('Something failed');
+      await handler.handleToolStart({ name: 'dangerous_tool' }, '{}', 'run_2');
+      await handler.handleToolError(error, 'run_2');
+
+      expect(onToolError).toHaveBeenCalledWith('dangerous_tool', error);
+    });
+
+    it('should call onToolError with empty name when no runId', async () => {
       const onToolError = vi.fn();
       const handler = createVetoCallbackHandler({ onToolError });
 

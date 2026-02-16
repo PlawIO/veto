@@ -102,9 +102,8 @@ def create_veto_tool_node(
                         "messages": [
                             ToolMessage(
                                 content=f"Tool call denied by Veto: {reason}",
-                                tool_call_id=t.get("id", call_id) if isinstance(t, dict) else getattr(t, "id", call_id),
+                                tool_call_id=call_id,
                             )
-                            for t in tool_calls
                         ]
                     }
                 except ImportError:
@@ -112,9 +111,8 @@ def create_veto_tool_node(
                         "messages": [
                             {
                                 "content": f"Tool call denied by Veto: {reason}",
-                                "tool_call_id": t.get("id", call_id) if isinstance(t, dict) else getattr(t, "id", call_id),
+                                "tool_call_id": call_id,
                             }
-                            for t in tool_calls
                         ]
                     }
 

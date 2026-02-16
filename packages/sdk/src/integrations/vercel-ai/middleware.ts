@@ -170,25 +170,24 @@ export function createVetoMiddleware(
     wrapStream: async ({ doStream }) => {
       const { stream, ...rest } = await doStream();
 
-      const toolCallBuffers = new Map<string, { toolName: string; chunks: string[] }>();
+      const toolCallBuffers = new Map<string, { toolName: string; chunks: any[] }>();
 
       const transform = new TransformStream({
         async transform(chunk: any, controller: TransformStreamDefaultController) {
           if (chunk.type === 'tool-input-start') {
-            toolCallBuffers.set(chunk.id, { toolName: chunk.toolName, chunks: [] });
-            controller.enqueue(chunk);
+            toolCallBuffers.set(chunk.id, { toolName: chunk.toolName, chunks: [chunk] });
             return;
           }
 
           if (chunk.type === 'tool-input-delta') {
             const buf = toolCallBuffers.get(chunk.id);
-            if (buf) buf.chunks.push(chunk.delta);
-            controller.enqueue(chunk);
+            if (buf) buf.chunks.push(chunk);
             return;
           }
 
           if (chunk.type === 'tool-call') {
             const tc = chunk as ToolCallStreamPart;
+            const buffer = toolCallBuffers.get(tc.toolCallId);
             toolCallBuffers.delete(tc.toolCallId);
 
             const validation = await validateToolCall(tc.toolName, tc.input, tc.toolCallId);
@@ -201,6 +200,12 @@ export function createVetoMiddleware(
                 );
               }
               return;
+            }
+
+            if (buffer) {
+              for (const bufferedChunk of buffer.chunks) {
+                controller.enqueue(bufferedChunk);
+              }
             }
 
             if (validation.finalArgs) {

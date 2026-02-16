@@ -68,26 +68,24 @@ export function createVetoToolNode(
         const reason = result.validationResult?.reason ?? 'Policy violation';
         if (onDeny) await onDeny(tc.name, tc.args, reason);
 
-        // Return ToolMessage(s) for denied calls
         let ToolMessage: any;
         try {
           const mod = await import('@langchain/core/messages');
           ToolMessage = mod.ToolMessage;
         } catch {
-          // Fallback: return plain objects
           return {
-            messages: toolCalls.map(t => ({
+            messages: [{
               content: `Tool call denied by Veto: ${reason}`,
-              tool_call_id: t.id ?? callId,
-            })),
+              tool_call_id: callId,
+            }],
           };
         }
 
         return {
-          messages: toolCalls.map(t => new ToolMessage({
+          messages: [new ToolMessage({
             content: `Tool call denied by Veto: ${reason}`,
-            tool_call_id: t.id ?? callId,
-          })),
+            tool_call_id: callId,
+          })],
         };
       }
 

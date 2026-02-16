@@ -28,23 +28,31 @@ export interface VetoCallbackOptions {
 }
 
 export function createVetoCallbackHandler(options: VetoCallbackOptions): Record<string, any> {
+  const toolNames = new Map<string, string>();
+
   return {
     name: 'VetoCallbackHandler',
 
     async handleToolStart(
       tool: { id?: string[]; name?: string },
       input: string,
+      runId?: string,
     ): Promise<void> {
       const name = tool.name ?? tool.id?.[tool.id.length - 1] ?? 'unknown';
+      if (runId) toolNames.set(runId, name);
       if (options.onToolStart) await options.onToolStart(name, input);
     },
 
-    async handleToolEnd(output: string): Promise<void> {
-      if (options.onToolEnd) await options.onToolEnd('', output);
+    async handleToolEnd(output: string, runId?: string): Promise<void> {
+      const name = runId ? (toolNames.get(runId) ?? '') : '';
+      if (runId) toolNames.delete(runId);
+      if (options.onToolEnd) await options.onToolEnd(name, output);
     },
 
-    async handleToolError(err: Error): Promise<void> {
-      if (options.onToolError) await options.onToolError('', err);
+    async handleToolError(err: Error, runId?: string): Promise<void> {
+      const name = runId ? (toolNames.get(runId) ?? '') : '';
+      if (runId) toolNames.delete(runId);
+      if (options.onToolError) await options.onToolError(name, err);
     },
   };
 }
