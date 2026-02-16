@@ -185,6 +185,12 @@ export function createVetoMiddleware(
             return;
           }
 
+          if (chunk.type === 'tool-input-end') {
+            const buf = toolCallBuffers.get(chunk.id);
+            if (buf) buf.chunks.push(chunk);
+            return;
+          }
+
           if (chunk.type === 'tool-call') {
             const tc = chunk as ToolCallStreamPart;
             const buffer = toolCallBuffers.get(tc.toolCallId);

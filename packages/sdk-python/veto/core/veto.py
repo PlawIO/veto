@@ -703,7 +703,7 @@ class Veto:
 
             async def wrapped_func(input_data: dict[str, Any]) -> Any:
                 # Validate with Veto
-                result = await veto._validate_tool_call(
+                result = await veto.validate_tool_call(
                     ToolCall(
                         id=generate_tool_call_id(),
                         name=tool_name,
@@ -749,7 +749,7 @@ class Veto:
                             call_arguments = input_data
 
                         # Validate with Veto first
-                        result = await veto._validate_tool_call(
+                        result = await veto.validate_tool_call(
                             ToolCall(
                                 id=generate_tool_call_id(),
                                 name=tool_name,
@@ -780,7 +780,7 @@ class Veto:
                         import asyncio
 
                         async def validate_and_invoke() -> dict[str, Any]:
-                            result = await veto._validate_tool_call(
+                            result = await veto.validate_tool_call(
                                 ToolCall(
                                     id=generate_tool_call_id(),
                                     name=tool_name,
@@ -842,7 +842,7 @@ class Veto:
                         else:
                             call_args = {"args": args}
 
-                        result = await veto._validate_tool_call(
+                        result = await veto.validate_tool_call(
                             ToolCall(
                                 id=generate_tool_call_id(),
                                 name=tool_name,
@@ -882,8 +882,13 @@ class Veto:
         veto._logger.warn("No wrappable function found on tool", {"name": tool_name})
         return tool
 
-    async def _validate_tool_call(self, call: ToolCall) -> InterceptionResult:
-        """Validate a tool call."""
+    async def validate_tool_call(self, call: ToolCall) -> InterceptionResult:
+        """Validate a tool call through the interceptor pipeline.
+
+        Used internally by ``wrap()`` and by framework integrations
+        (LangChain) to validate tool calls against configured rules
+        and policies.
+        """
         normalized_call = ToolCall(
             id=call.id or generate_tool_call_id(),
             name=call.name,

@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -101,7 +102,7 @@ class VetoMiddleware:
             args = getattr(tc, "args", {})
             call_id = getattr(tc, "id", None) or generate_tool_call_id()
 
-        result = await self._veto._validate_tool_call(
+        result = await self._veto.validate_tool_call(
             ToolCall(
                 id=call_id,
                 name=tool_name,
@@ -114,7 +115,9 @@ class VetoMiddleware:
             logger.info("BLOCKED %s: %s", tool_name, reason)
 
             if self._on_deny is not None:
-                await self._on_deny(tool_name, args, reason)
+                ret = self._on_deny(tool_name, args, reason)
+                if inspect.isawaitable(ret):
+                    await ret
 
             if self._throw_on_deny:
                 raise ToolCallDeniedError(
@@ -134,7 +137,9 @@ class VetoMiddleware:
 
         logger.info("ALLOWED %s", tool_name)
         if self._on_allow is not None:
-            await self._on_allow(tool_name, args)
+            ret = self._on_allow(tool_name, args)
+            if inspect.isawaitable(ret):
+                await ret
 
         return await handler(request)
 

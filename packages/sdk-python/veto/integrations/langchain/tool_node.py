@@ -22,6 +22,7 @@ Usage::
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -84,7 +85,7 @@ def create_veto_tool_node(
                 args = getattr(tc, "args", {})
                 call_id = getattr(tc, "id", None) or generate_tool_call_id()
 
-            validation = await veto._validate_tool_call(
+            validation = await veto.validate_tool_call(
                 ToolCall(
                     id=call_id,
                     name=name,
@@ -98,11 +99,15 @@ def create_veto_tool_node(
                 denied.append({"call_id": call_id, "reason": reason})
 
                 if on_deny is not None:
-                    await on_deny(name, args, reason)
+                    ret = on_deny(name, args, reason)
+                    if inspect.isawaitable(ret):
+                        await ret
             else:
                 logger.info("ALLOWED %s", name)
                 if on_allow is not None:
-                    await on_allow(name, args)
+                    ret = on_allow(name, args)
+                    if inspect.isawaitable(ret):
+                        await ret
 
         if denied:
             try:
