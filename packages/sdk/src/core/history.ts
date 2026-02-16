@@ -8,6 +8,8 @@
  */
 
 import type {
+  DecisionExportFormat,
+  DecisionExportRecord,
   ToolCallHistoryEntry,
   ValidationResult,
 } from '../types/config.js';
@@ -192,6 +194,104 @@ export class HistoryTracker {
       modifiedCalls: modifiedCount,
       callsByTool: toolCounts,
     };
+  }
+
+  /**
+   * Export decision history as JSON or CSV.
+   */
+  exportDecisions(format: DecisionExportFormat = 'json'): string {
+    const records = this.toExportRecords();
+
+    if (format === 'json') {
+      return JSON.stringify(records, null, 2);
+    }
+
+    if (format === 'csv') {
+      return this.toCsv(records);
+    }
+
+    throw new Error(`Unsupported decision export format: ${String(format)}`);
+  }
+
+  private toExportRecords(): DecisionExportRecord[] {
+    return this.entries.map((entry) => {
+      const metadata = entry.validationResult.metadata;
+
+      return {
+        timestamp: entry.timestamp.toISOString(),
+        tool_name: entry.toolName,
+        arguments: entry.arguments,
+        policy_version: this.extractMetadataString(metadata, [
+          'policyVersion',
+          'policy_version',
+        ]),
+        rule_id: this.extractMetadataString(metadata, ['ruleId', 'rule_id']),
+        decision: entry.validationResult.decision,
+        reason: entry.validationResult.reason ?? null,
+      };
+    });
+  }
+
+  private extractMetadataString(
+    metadata: Record<string, unknown> | undefined,
+    keys: string[]
+  ): string | null {
+    if (!metadata) {
+      return null;
+    }
+
+    for (const key of keys) {
+      const value = metadata[key];
+
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+      }
+
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+      }
+    }
+
+    return null;
+  }
+
+  private toCsv(records: DecisionExportRecord[]): string {
+    const header = [
+      'timestamp',
+      'tool_name',
+      'arguments',
+      'policy_version',
+      'rule_id',
+      'decision',
+      'reason',
+    ];
+
+    const rows = records.map((record) => [
+      record.timestamp,
+      record.tool_name,
+      JSON.stringify(record.arguments),
+      record.policy_version ?? '',
+      record.rule_id ?? '',
+      record.decision,
+      record.reason ?? '',
+    ]);
+
+    return [header, ...rows]
+      .map((row) => row.map((value) => this.escapeCsvCell(value)).join(','))
+      .join('\n');
+  }
+
+  private escapeCsvCell(value: string): string {
+    if (
+      value.includes(',')
+      || value.includes('"')
+      || value.includes('\n')
+      || value.includes('\r')
+    ) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+
+    return value;
   }
 }
 

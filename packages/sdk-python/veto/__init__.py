@@ -41,6 +41,8 @@ from veto.types.tool import (
 )
 
 from veto.types.config import (
+    DecisionExportFormat,
+    DecisionExportRecord,
     LogLevel,
     ValidationDecision,
     ValidationResult,
@@ -127,6 +129,8 @@ __all__ = [
     "JsonSchemaProperty",
     # Config types
     "LogLevel",
+    "DecisionExportFormat",
+    "DecisionExportRecord",
     "ValidationDecision",
     "ValidationResult",
     "ValidationContext",

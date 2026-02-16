@@ -24,6 +24,9 @@ LogLevel = Literal["debug", "info", "warn", "error", "silent"]
 # Validation decision for a tool call
 ValidationDecision = Literal["allow", "deny", "modify"]
 
+# Export format for decision history
+DecisionExportFormat = Literal["json", "csv"]
+
 
 @dataclass
 class ValidationResult:
@@ -44,6 +47,19 @@ class ToolCallHistoryEntry:
     validation_result: ValidationResult
     timestamp: datetime
     duration_ms: Optional[float] = None
+
+
+@dataclass
+class DecisionExportRecord:
+    """Serializable decision record returned by export_decisions()."""
+
+    timestamp: str
+    tool_name: str
+    arguments: dict[str, Any]
+    policy_version: Optional[str]
+    rule_id: Optional[str]
+    decision: ValidationDecision
+    reason: Optional[str]
 
 
 @dataclass
@@ -90,14 +106,10 @@ class VetoConfig:
         Callable[[ValidationContext], Union[None, Awaitable[None]]]
     ] = None
     on_after_validation: Optional[
-        Callable[
-            [ValidationContext, ValidationResult], Union[None, Awaitable[None]]
-        ]
+        Callable[[ValidationContext, ValidationResult], Union[None, Awaitable[None]]]
     ] = None
     on_denied: Optional[
-        Callable[
-            [ValidationContext, ValidationResult], Union[None, Awaitable[None]]
-        ]
+        Callable[[ValidationContext, ValidationResult], Union[None, Awaitable[None]]]
     ] = None
 
 
@@ -116,20 +128,14 @@ class ResolvedVetoConfig:
         Callable[[ValidationContext], Union[None, Awaitable[None]]]
     ] = None
     on_after_validation: Optional[
-        Callable[
-            [ValidationContext, ValidationResult], Union[None, Awaitable[None]]
-        ]
+        Callable[[ValidationContext, ValidationResult], Union[None, Awaitable[None]]]
     ] = None
     on_denied: Optional[
-        Callable[
-            [ValidationContext, ValidationResult], Union[None, Awaitable[None]]
-        ]
+        Callable[[ValidationContext, ValidationResult], Union[None, Awaitable[None]]]
     ] = None
 
 
-def is_named_validator(
-    validator: Union[Validator, NamedValidator]
-) -> bool:
+def is_named_validator(validator: Union[Validator, NamedValidator]) -> bool:
     """Helper to check if a validator is a named validator."""
     return isinstance(validator, NamedValidator)
 

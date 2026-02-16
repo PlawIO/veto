@@ -238,7 +238,7 @@ rules:
         'utf-8'
       );
 
-      const veto = await Veto.init({ configDir: VETO_DIR });
+      await Veto.init({ configDir: VETO_DIR });
       // Logic for verifying rules loaded is indirect via usage below
     });
   });
@@ -362,7 +362,7 @@ rules:
 
       try {
         await wrapped[1].handler();
-      } catch (e) {
+      } catch {
         // Expected to throw
       }
 
@@ -386,6 +386,228 @@ rules:
 
       veto.clearHistory();
       expect(veto.getHistoryStats().totalCalls).toBe(0);
+    });
+
+    it('should export decision history as JSON and CSV', async () => {
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const tools = [{
+        name: 'history_export_tool',
+        handler: async (_args: Record<string, unknown>) => 'ok',
+        inputSchema: {},
+      }];
+      const wrapped = veto.wrap(tools);
+
+      await wrapped[0].handler({ amount: 42 });
+
+      const exportedJson = JSON.parse(veto.exportDecisions('json'));
+      expect(exportedJson).toHaveLength(1);
+      expect(exportedJson[0]).toMatchObject({
+        tool_name: 'history_export_tool',
+        arguments: { amount: 42 },
+        decision: 'allow',
+      });
+
+      const exportedCsv = veto.exportDecisions('csv');
+      const lines = exportedCsv.split('\n');
+      expect(lines[0]).toBe('timestamp,tool_name,arguments,policy_version,rule_id,decision,reason');
+      expect(lines[1]).toContain('history_export_tool');
+    });
+  });
+
+  describe('Local require_approval action', () => {
+    it('should allow execution when callback approves', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+approval:
+  callbackUrl: "http://localhost:9001/approvals"
+  timeout: 100
+  timeoutBehavior: "block"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'approval.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: require-bank-transfer-approval
+    name: Require bank transfer approval
+    enabled: true
+    action: require_approval
+    tools: [bank_transfer]
+`,
+        'utf-8'
+      );
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ decision: 'approved', reason: 'Approved by treasury lead' }),
+        text: async () => '',
+      });
+
+      const handler = vi.fn().mockResolvedValue('transfer-complete');
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{ name: 'bank_transfer', handler, inputSchema: {} }]);
+
+      const result = await wrapped[0].handler({ amount: 25000, recipient: 'vendor-123' });
+
+      expect(result).toBe('transfer-complete');
+      expect(handler).toHaveBeenCalledOnce();
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:9001/approvals',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('should deny execution when callback denies', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+approval:
+  callbackUrl: "http://localhost:9001/approvals"
+  timeout: 100
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'approval.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: require-bank-transfer-approval
+    name: Require bank transfer approval
+    enabled: true
+    action: require_approval
+    tools: [bank_transfer]
+`,
+        'utf-8'
+      );
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ decision: 'deny', reason: 'Approval denied by reviewer' }),
+        text: async () => '',
+      });
+
+      const handler = vi.fn();
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{ name: 'bank_transfer', handler, inputSchema: {} }]);
+
+      await expect(wrapped[0].handler({ amount: 25000 })).rejects.toThrow('Tool call denied');
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should block by default on approval timeout', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+approval:
+  callbackUrl: "http://localhost:9001/approvals"
+  timeout: 20
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'approval.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: require-bank-transfer-approval
+    name: Require bank transfer approval
+    enabled: true
+    action: require_approval
+    tools: [bank_transfer]
+`,
+        'utf-8'
+      );
+
+      mockFetch.mockImplementationOnce(
+        () => new Promise(() => {})
+      );
+
+      const handler = vi.fn();
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{ name: 'bank_transfer', handler, inputSchema: {} }]);
+
+      await expect(wrapped[0].handler({ amount: 25000 })).rejects.toThrow('Tool call denied');
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should allow on timeout when timeoutBehavior is allow', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+approval:
+  callbackUrl: "http://localhost:9001/approvals"
+  timeout: 20
+  timeoutBehavior: "allow"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'approval.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: require-bank-transfer-approval
+    name: Require bank transfer approval
+    enabled: true
+    action: require_approval
+    tools: [bank_transfer]
+`,
+        'utf-8'
+      );
+
+      mockFetch.mockImplementationOnce(
+        () => new Promise(() => {})
+      );
+
+      const handler = vi.fn().mockResolvedValue('transfer-complete');
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{ name: 'bank_transfer', handler, inputSchema: {} }]);
+
+      const result = await wrapped[0].handler({ amount: 25000 });
+      expect(result).toBe('transfer-complete');
+      expect(handler).toHaveBeenCalledOnce();
     });
   });
 

@@ -9,6 +9,7 @@ A guardrail system for AI agent tool calls. Veto intercepts and validates tool c
 3. **Pass** the wrapped tools to your AI agent/model.
 
 When the AI model calls a tool, Veto automatically:
+
 1. Intercepts the call.
 2. Validates arguments against your rules (via YAML & LLM).
 3. Blocks or Allows execution based on the result.
@@ -21,7 +22,10 @@ The AI model remains unaware of the guardrail - the tool interface is preserved.
 pip install veto
 ```
 
+For a complete bank transfer escalation example, see the [HITL guide](../../docs/hitl-guide.md).
+
 For LLM provider support:
+
 ```bash
 pip install veto[openai]      # OpenAI support
 pip install veto[anthropic]   # Anthropic support
@@ -34,9 +38,11 @@ pip install veto[all]         # All providers
 ### 1. Initialize Veto
 
 Run the CLI to create configuration:
+
 ```bash
 veto init
 ```
+
 This creates a `veto/` directory with `veto.config.yaml` and default rules.
 
 ### 2. Wrap Your Tools
@@ -88,7 +94,7 @@ rules:
 version: "1.0"
 
 # Operating mode
-mode: "strict"  # "strict" blocks calls, "log" only logs them
+mode: "strict" # "strict" blocks calls, "log" only logs them
 
 # Validation Backend
 validation:
@@ -153,12 +159,21 @@ Resets the history statistics.
 veto.clear_history()
 ```
 
+### `veto.export_decisions(format)`
+
+Exports decision history as JSON or CSV.
+
+```python
+json_audit = veto.export_decisions("json")
+csv_audit = veto.export_decisions("csv")
+```
+
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `veto init` | Initialize Veto in current directory |
-| `veto version` | Show version |
+| Command        | Description                          |
+| -------------- | ------------------------------------ |
+| `veto init`    | Initialize Veto in current directory |
+| `veto version` | Show version                         |
 
 ## License
 

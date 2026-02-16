@@ -13,7 +13,12 @@ import yaml
 from veto.rules import validate_policy_ir, PolicySchemaError
 
 
-FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "conformance" / "fixtures" / "policy-ir"
+FIXTURES_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "conformance"
+    / "fixtures"
+    / "policy-ir"
+)
 
 
 def _load_fixture(name: str) -> dict:
@@ -29,6 +34,20 @@ class TestValidDocuments:
     def test_valid_full(self) -> None:
         data = _load_fixture("valid-full.yaml")
         validate_policy_ir(data)
+
+    def test_accepts_require_approval_action(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "rules": [
+                    {
+                        "id": "require-human",
+                        "name": "Require human approval",
+                        "action": "require_approval",
+                    }
+                ],
+            }
+        )
 
 
 class TestInvalidDocuments:
@@ -73,12 +92,14 @@ class TestInvalidDocuments:
 class TestErrorQuality:
     def test_actionable_error_messages(self) -> None:
         with pytest.raises(PolicySchemaError) as exc_info:
-            validate_policy_ir({
-                "version": "1.0",
-                "rules": [
-                    {"name": "no-id-no-action"},
-                ],
-            })
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [
+                        {"name": "no-id-no-action"},
+                    ],
+                }
+            )
         errors = exc_info.value.errors
         assert len(errors) >= 2
         assert any("rules/0" in e.path for e in errors)
@@ -96,30 +117,43 @@ class TestPathFormatting:
     def test_includes_parent_property_names(self) -> None:
         """Paths should be /rules/0 not /0."""
         with pytest.raises(PolicySchemaError) as exc_info:
-            validate_policy_ir({
-                "version": "1.0",
-                "rules": [{"name": "missing-required-fields"}],
-            })
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [{"name": "missing-required-fields"}],
+                }
+            )
         errors = exc_info.value.errors
         paths = [e.path for e in errors]
         # Paths must include 'rules' parent property
         assert any(p.startswith("/rules/0") for p in paths)
         # Should not have paths like '/0' without parent
         import re
+
         assert all(not re.match(r"^/\d+$", p) for p in paths)
 
     def test_nested_condition_paths(self) -> None:
         """Nested paths should include full hierarchy."""
         with pytest.raises(PolicySchemaError) as exc_info:
-            validate_policy_ir({
-                "version": "1.0",
-                "rules": [{
-                    "id": "test",
-                    "name": "test",
-                    "action": "block",
-                    "conditions": [{"field": "tool_name", "operator": "BAD_OPERATOR", "value": "x"}],
-                }],
-            })
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [
+                        {
+                            "id": "test",
+                            "name": "test",
+                            "action": "block",
+                            "conditions": [
+                                {
+                                    "field": "tool_name",
+                                    "operator": "BAD_OPERATOR",
+                                    "value": "x",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
         errors = exc_info.value.errors
         paths = [e.path for e in errors]
         # Path should include full hierarchy: /rules/0/conditions/0/operator

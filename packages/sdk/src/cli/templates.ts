@@ -49,6 +49,15 @@ validation:
 #   maxTokens: 500
 #   # baseUrl: "https://api.openai.com/v1"  # Optional override
 
+# Human-in-the-loop approvals (for action: "require_approval" in local rules)
+# approval:
+#   callbackUrl: "http://localhost:8787/approvals"
+#   timeout: 30000
+#   timeoutBehavior: "block"  # "block" (default) or "allow"
+#   responseSchema:
+#     decisionField: "decision"
+#     reasonField: "reason"
+
 # Logging
 logging:
   level: "info"  # debug, info, warn, error, silent

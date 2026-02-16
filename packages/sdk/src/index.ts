@@ -63,6 +63,8 @@ export type {
   Validator,
   NamedValidator,
   ToolCallHistoryEntry,
+  DecisionExportFormat,
+  DecisionExportRecord,
 } from './types/config.js';
 
 // Rule types

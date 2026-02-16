@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { HistoryTracker } from '../../src/core/history.js';
-import type { ToolCallHistoryEntry, ValidationResult } from '../../src/types/config.js';
+import type { ToolCallHistoryEntry } from '../../src/types/config.js';
 
 const createMockLogger = () => ({
   debug: vi.fn(),
@@ -170,6 +170,63 @@ describe('HistoryTracker', () => {
 
       expect(tracker.size()).toBe(0);
       expect(tracker.getAll()).toHaveLength(0);
+    });
+  });
+
+  describe('exportDecisions', () => {
+    it('should export decisions as JSON with required fields', () => {
+      tracker.record('wire_transfer', {
+        amount: 12500,
+        recipient: 'ops-vendor',
+      }, {
+        decision: 'deny',
+        reason: 'Approval denied',
+        metadata: {
+          ruleId: 'require-wire-approval',
+          policyVersion: '1.0',
+        },
+      });
+
+      const raw = tracker.exportDecisions('json');
+      const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
+
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]).toMatchObject({
+        tool_name: 'wire_transfer',
+        arguments: { amount: 12500, recipient: 'ops-vendor' },
+        policy_version: '1.0',
+        rule_id: 'require-wire-approval',
+        decision: 'deny',
+        reason: 'Approval denied',
+      });
+      expect(typeof parsed[0].timestamp).toBe('string');
+    });
+
+    it('should export decisions as CSV', () => {
+      tracker.record('wire_transfer', {
+        note: 'requires, review',
+      }, {
+        decision: 'allow',
+        metadata: {
+          rule_id: 'require-wire-approval',
+          policy_version: '1.0',
+        },
+      });
+
+      const csv = tracker.exportDecisions('csv');
+      const lines = csv.split('\n');
+
+      expect(lines[0]).toBe('timestamp,tool_name,arguments,policy_version,rule_id,decision,reason');
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toContain('wire_transfer');
+      expect(lines[1]).toContain('require-wire-approval');
+      expect(lines[1]).toContain('allow');
+    });
+
+    it('should reject unsupported export formats', () => {
+      expect(() => tracker.exportDecisions('xml' as never)).toThrow(
+        'Unsupported decision export format'
+      );
     });
   });
 

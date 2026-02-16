@@ -15,6 +15,7 @@ import type {
   ToolCall,
 } from '../types/tool.js';
 import type {
+  DecisionExportFormat,
   Validator,
   NamedValidator,
   ValidationContext,
@@ -127,6 +128,12 @@ interface VetoConfigFile {
   approval?: {
     pollInterval?: number;
     timeout?: number;
+    callbackUrl?: string;
+    timeoutBehavior?: 'block' | 'allow';
+    responseSchema?: {
+      decisionField?: string;
+      reasonField?: string;
+    };
   };
   logging?: {
     level?: LogLevel;
@@ -150,6 +157,23 @@ interface LoadedRulesState {
   allRules: Rule[];
   rulesByTool: Map<string, Rule[]>;
   globalRules: Rule[];
+}
+
+interface LocalApprovalConfig {
+  callbackUrl?: string;
+  timeoutMs: number;
+  timeoutBehavior: 'block' | 'allow';
+  responseSchema: {
+    decisionField: string;
+    reasonField: string;
+  };
+}
+
+class LocalApprovalTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Approval callback timed out after ${timeoutMs}ms`);
+    this.name = 'LocalApprovalTimeoutError';
+  }
 }
 
 /**
@@ -279,6 +303,7 @@ export class Veto {
   private cloudClient: VetoCloudClient | null = null;
   private readonly cloudConfig: VetoCloudConfig | null;
   private readonly approvalPollOptions: ApprovalPollOptions;
+  private readonly localApprovalConfig: LocalApprovalConfig;
   private readonly onApprovalRequired?: (
     context: ValidationContext,
     approvalId: string
@@ -411,6 +436,16 @@ export class Veto {
     this.approvalPollOptions = {
       pollInterval: config.approval?.pollInterval,
       timeout: config.approval?.timeout,
+    };
+
+    this.localApprovalConfig = {
+      callbackUrl: config.approval?.callbackUrl,
+      timeoutMs: config.approval?.timeout ?? 30_000,
+      timeoutBehavior: config.approval?.timeoutBehavior ?? 'block',
+      responseSchema: {
+        decisionField: config.approval?.responseSchema?.decisionField ?? 'decision',
+        reasonField: config.approval?.responseSchema?.reasonField ?? 'reason',
+      },
     };
 
     // Approval hook
@@ -877,6 +912,30 @@ export class Veto {
 
       const reason = rule.description ?? `Matched rule: ${rule.name}`;
 
+      if (rule.action === 'require_approval') {
+        if (this.mode === 'log') {
+          this.logger.warn('Tool call would require approval locally (log mode)', {
+            tool: context.toolName,
+            ruleId: rule.id,
+            reason,
+          });
+
+          return {
+            decision: 'allow',
+            reason: `[LOG MODE] Would require approval: ${reason}`,
+            metadata: {
+              blocked_in_strict_mode: true,
+              source: 'local',
+              ruleId: rule.id,
+              ruleName: rule.name,
+              policyVersion: '1.0',
+            },
+          };
+        }
+
+        return this.handleLocalApprovalFlow(context, rule, reason);
+      }
+
       if (rule.action === 'block') {
         if (this.mode === 'log') {
           this.logger.warn('Tool call would be blocked locally (log mode)', {
@@ -892,6 +951,7 @@ export class Veto {
               source: 'local',
               ruleId: rule.id,
               ruleName: rule.name,
+              policyVersion: '1.0',
             },
           };
         }
@@ -908,6 +968,7 @@ export class Veto {
             source: 'local',
             ruleId: rule.id,
             ruleName: rule.name,
+            policyVersion: '1.0',
           },
         };
       }
@@ -933,6 +994,7 @@ export class Veto {
           source: 'local',
           ruleId: firstAllowRule.id,
           ruleName: firstAllowRule.name,
+          policyVersion: '1.0',
         },
       };
     }
@@ -1630,6 +1692,284 @@ export class Veto {
     }
   }
 
+  private async handleLocalApprovalFlow(
+    context: ValidationContext,
+    rule: Rule,
+    reason: string
+  ): Promise<ValidationResult> {
+    const metadataBase = {
+      source: 'local',
+      ruleId: rule.id,
+      ruleName: rule.name,
+      policyVersion: '1.0',
+    };
+
+    const callbackUrl = this.localApprovalConfig.callbackUrl;
+    if (!callbackUrl) {
+      this.logger.warn('Local require_approval rule matched without callback URL', {
+        tool: context.toolName,
+        ruleId: rule.id,
+      });
+
+      return {
+        decision: 'deny',
+        reason: 'Approval callback URL is not configured (approval.callbackUrl)',
+        metadata: {
+          ...metadataBase,
+          approval_error: 'missing_callback_url',
+        },
+      };
+    }
+
+    const payload: Record<string, unknown> = {
+      tool_name: context.toolName,
+      arguments: context.arguments,
+      reason,
+      rule: {
+        id: rule.id,
+        name: rule.name,
+        description: rule.description,
+      },
+      context: {
+        call_id: context.callId,
+        timestamp: context.timestamp.toISOString(),
+        session_id: this.sessionId,
+        agent_id: this.agentId,
+        custom: context.custom,
+      },
+    };
+
+    try {
+      const approvalResponse = await this.sendLocalApprovalRequest(payload);
+      const decision = this.normalizeApprovalDecision(
+        approvalResponse[this.localApprovalConfig.responseSchema.decisionField]
+      );
+      const responseReason = this.extractLocalApprovalReason(approvalResponse);
+
+      if (decision === 'allow') {
+        return {
+          decision: 'allow',
+          reason: responseReason ?? `Approved by local approver for rule: ${rule.name}`,
+          metadata: {
+            ...metadataBase,
+            approval_source: callbackUrl,
+          },
+        };
+      }
+
+      if (decision === 'deny') {
+        return {
+          decision: 'deny',
+          reason: responseReason ?? `Denied by local approver for rule: ${rule.name}`,
+          metadata: {
+            ...metadataBase,
+            approval_source: callbackUrl,
+          },
+        };
+      }
+
+      this.logger.warn('Approval callback returned invalid decision payload', {
+        tool: context.toolName,
+        ruleId: rule.id,
+        decisionField: this.localApprovalConfig.responseSchema.decisionField,
+      });
+
+      return {
+        decision: 'deny',
+        reason: `Approval callback response missing valid "${this.localApprovalConfig.responseSchema.decisionField}" decision`,
+        metadata: {
+          ...metadataBase,
+          approval_source: callbackUrl,
+          approval_error: 'invalid_response',
+        },
+      };
+    } catch (error) {
+      if (error instanceof LocalApprovalTimeoutError) {
+        if (this.localApprovalConfig.timeoutBehavior === 'allow') {
+          this.logger.warn('Approval callback timed out, allowing by configuration', {
+            tool: context.toolName,
+            ruleId: rule.id,
+            timeoutMs: this.localApprovalConfig.timeoutMs,
+          });
+
+          return {
+            decision: 'allow',
+            reason: 'Approval callback timed out; allowed by timeoutBehavior=allow',
+            metadata: {
+              ...metadataBase,
+              approval_source: callbackUrl,
+              approval_timeout: true,
+            },
+          };
+        }
+
+        this.logger.warn('Approval callback timed out, blocking by configuration', {
+          tool: context.toolName,
+          ruleId: rule.id,
+          timeoutMs: this.localApprovalConfig.timeoutMs,
+        });
+
+        return {
+          decision: 'deny',
+          reason: 'Approval callback timed out waiting for human review',
+          metadata: {
+            ...metadataBase,
+            approval_source: callbackUrl,
+            approval_timeout: true,
+          },
+        };
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn('Approval callback request failed', {
+        tool: context.toolName,
+        ruleId: rule.id,
+        error: message,
+      });
+
+      return {
+        decision: 'deny',
+        reason: `Approval callback failed: ${message}`,
+        metadata: {
+          ...metadataBase,
+          approval_source: callbackUrl,
+          approval_error: 'request_failed',
+        },
+      };
+    }
+  }
+
+  private async sendLocalApprovalRequest(
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const callbackUrl = this.localApprovalConfig.callbackUrl;
+    if (!callbackUrl) {
+      throw new Error('Approval callback URL is not configured');
+    }
+
+    const controller = new AbortController();
+    const fetchPromise = fetch(callbackUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const response = await this.withTimeout(
+      fetchPromise,
+      this.localApprovalConfig.timeoutMs,
+      () => controller.abort()
+    );
+
+    if (!response.ok) {
+      throw new Error(`Approval callback returned status ${response.status}`);
+    }
+
+    let body: unknown;
+
+    try {
+      body = await response.json() as unknown;
+    } catch {
+      const text = typeof response.text === 'function'
+        ? await response.text()
+        : '';
+
+      if (!text.trim()) {
+        body = {};
+      } else {
+        try {
+          body = JSON.parse(text) as unknown;
+        } catch {
+          throw new Error('Approval callback must return a JSON object');
+        }
+      }
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new Error('Approval callback must return a JSON object');
+    }
+
+    return body as Record<string, unknown>;
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    onTimeout: () => void
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            onTimeout();
+            reject(new LocalApprovalTimeoutError(timeoutMs));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  private extractLocalApprovalReason(response: Record<string, unknown>): string | undefined {
+    const reason = response[this.localApprovalConfig.responseSchema.reasonField];
+    if (typeof reason === 'string' && reason.trim().length > 0) {
+      return reason;
+    }
+    return undefined;
+  }
+
+  private normalizeApprovalDecision(value: unknown): 'allow' | 'deny' | null {
+    if (typeof value === 'boolean') {
+      return value ? 'allow' : 'deny';
+    }
+
+    if (typeof value === 'number') {
+      if (value === 1) return 'allow';
+      if (value === 0) return 'deny';
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (
+      normalized === 'allow'
+      || normalized === 'allowed'
+      || normalized === 'approve'
+      || normalized === 'approved'
+      || normalized === 'yes'
+      || normalized === 'true'
+      || normalized === 'ok'
+    ) {
+      return 'allow';
+    }
+
+    if (
+      normalized === 'deny'
+      || normalized === 'denied'
+      || normalized === 'block'
+      || normalized === 'blocked'
+      || normalized === 'reject'
+      || normalized === 'rejected'
+      || normalized === 'no'
+      || normalized === 'false'
+    ) {
+      return 'deny';
+    }
+
+    return null;
+  }
+
   /**
    * Build history summary for API.
    */
@@ -1974,6 +2314,13 @@ export class Veto {
    */
   getHistoryStats(): HistoryStats {
     return this.historyTracker.getStats();
+  }
+
+  /**
+   * Export decision history as JSON or CSV.
+   */
+  exportDecisions(format: DecisionExportFormat = 'json'): string {
+    return this.historyTracker.exportDecisions(format);
   }
 
   /**

@@ -22,6 +22,19 @@ describe('Policy IR v1 Schema Validator', () => {
       const data = loadFixture('valid-full.yaml');
       expect(() => validatePolicyIR(data)).not.toThrow();
     });
+
+    it('should accept require_approval action', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'require-human',
+            name: 'Require human approval',
+            action: 'require_approval',
+          },
+        ],
+      })).not.toThrow();
+    });
   });
 
   describe('invalid documents', () => {

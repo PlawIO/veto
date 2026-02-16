@@ -8,8 +8,13 @@ providing context to validators about previous calls.
 from typing import Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
+import csv
+import io
+import json
 
 from veto.types.config import (
+    DecisionExportFormat,
+    DecisionExportRecord,
     ToolCallHistoryEntry,
     ValidationResult,
 )
@@ -126,9 +131,7 @@ class HistoryTracker:
         Args:
             tool_name: Name of the tool to filter by
         """
-        return [
-            entry for entry in self._entries if entry.tool_name == tool_name
-        ]
+        return [entry for entry in self._entries if entry.tool_name == tool_name]
 
     def get_by_time_range(
         self,
@@ -143,11 +146,7 @@ class HistoryTracker:
             until: End of the time range (defaults to now)
         """
         until = until or datetime.now()
-        return [
-            entry
-            for entry in self._entries
-            if since <= entry.timestamp <= until
-        ]
+        return [entry for entry in self._entries if since <= entry.timestamp <= until]
 
     def get_denied(self) -> list[ToolCallHistoryEntry]:
         """Get entries that were denied."""
@@ -175,9 +174,7 @@ class HistoryTracker:
         modified_count = 0
 
         for entry in self._entries:
-            tool_counts[entry.tool_name] = (
-                tool_counts.get(entry.tool_name, 0) + 1
-            )
+            tool_counts[entry.tool_name] = tool_counts.get(entry.tool_name, 0) + 1
 
             decision = entry.validation_result.decision
             if decision == "allow":
@@ -194,3 +191,97 @@ class HistoryTracker:
             modified_calls=modified_count,
             calls_by_tool=tool_counts,
         )
+
+    def export_decisions(self, format: DecisionExportFormat = "json") -> str:
+        """Export decision history as JSON or CSV."""
+        records = self._to_export_records()
+
+        if format == "json":
+            return json.dumps(
+                [
+                    {
+                        "timestamp": record.timestamp,
+                        "tool_name": record.tool_name,
+                        "arguments": record.arguments,
+                        "policy_version": record.policy_version,
+                        "rule_id": record.rule_id,
+                        "decision": record.decision,
+                        "reason": record.reason,
+                    }
+                    for record in records
+                ],
+                indent=2,
+            )
+
+        if format == "csv":
+            return self._to_csv(records)
+
+        raise ValueError(f"Unsupported decision export format: {format}")
+
+    def _to_export_records(self) -> list[DecisionExportRecord]:
+        records: list[DecisionExportRecord] = []
+
+        for entry in self._entries:
+            metadata = entry.validation_result.metadata or {}
+            records.append(
+                DecisionExportRecord(
+                    timestamp=entry.timestamp.isoformat(),
+                    tool_name=entry.tool_name,
+                    arguments=entry.arguments,
+                    policy_version=self._extract_metadata_string(
+                        metadata, ["policyVersion", "policy_version"]
+                    ),
+                    rule_id=self._extract_metadata_string(
+                        metadata, ["ruleId", "rule_id"]
+                    ),
+                    decision=entry.validation_result.decision,
+                    reason=entry.validation_result.reason,
+                )
+            )
+
+        return records
+
+    def _extract_metadata_string(
+        self,
+        metadata: dict[str, Any],
+        keys: list[str],
+    ) -> Optional[str]:
+        for key in keys:
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+            if isinstance(value, (int, float, bool)):
+                return str(value)
+
+        return None
+
+    def _to_csv(self, records: list[DecisionExportRecord]) -> str:
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+
+        writer.writerow(
+            [
+                "timestamp",
+                "tool_name",
+                "arguments",
+                "policy_version",
+                "rule_id",
+                "decision",
+                "reason",
+            ]
+        )
+
+        for record in records:
+            writer.writerow(
+                [
+                    record.timestamp,
+                    record.tool_name,
+                    json.dumps(record.arguments),
+                    record.policy_version or "",
+                    record.rule_id or "",
+                    record.decision,
+                    record.reason or "",
+                ]
+            )
+
+        return output.getvalue().rstrip("\n")

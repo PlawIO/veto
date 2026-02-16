@@ -141,7 +141,7 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
         },
         "Action": {
             "type": "string",
-            "enum": ["block", "warn", "log", "allow"],
+            "enum": ["block", "warn", "log", "allow", "require_approval"],
             "description": "Action to take when the rule matches.",
         },
         "Settings": {

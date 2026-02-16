@@ -244,7 +244,7 @@ function parseAndValidateLLMOutput(raw: string): LLMOutput {
     'starts_with', 'ends_with', 'matches',
     'greater_than', 'less_than', 'in', 'not_in',
   ]);
-  const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow']);
+  const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow', 'require_approval']);
   const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low', 'info']);
 
   for (const rule of obj.rules) {

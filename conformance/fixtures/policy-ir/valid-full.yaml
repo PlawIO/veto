@@ -7,7 +7,7 @@ rules:
     description: Payments over $10,000 require manual approval
     enabled: true
     severity: critical
-    action: block
+    action: require_approval
     tools:
       - process_payment
       - schedule_transfer

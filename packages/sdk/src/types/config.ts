@@ -66,6 +66,24 @@ export interface ToolCallHistoryEntry {
 }
 
 /**
+ * Supported formats when exporting decision history.
+ */
+export type DecisionExportFormat = 'json' | 'csv';
+
+/**
+ * Serializable decision record returned by exportDecisions.
+ */
+export interface DecisionExportRecord {
+  timestamp: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  policy_version: string | null;
+  rule_id: string | null;
+  decision: ValidationDecision;
+  reason: string | null;
+}
+
+/**
  * Validator function type for custom validation logic.
  *
  * @param context - Context about the tool call being validated
