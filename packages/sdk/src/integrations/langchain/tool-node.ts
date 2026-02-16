@@ -46,7 +46,6 @@ export function createVetoToolNode(
   return async (state: { messages: any[] }) => {
     const lastMessage = state.messages[state.messages.length - 1];
 
-    // Check if the last message has tool_calls (AIMessage from LangChain)
     const toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> =
       lastMessage?.tool_calls ?? [];
 
@@ -54,7 +53,9 @@ export function createVetoToolNode(
       return toolNode.invoke(state);
     }
 
-    // Validate each tool call
+    // Validate ALL tool calls before deciding
+    const denied: Array<{ callId: string; reason: string; name: string; args: Record<string, unknown> }> = [];
+
     for (const tc of toolCalls) {
       const callId = tc.id ?? generateToolCallId();
 
@@ -66,33 +67,35 @@ export function createVetoToolNode(
 
       if (!result.allowed) {
         const reason = result.validationResult?.reason ?? 'Policy violation';
+        denied.push({ callId, reason, name: tc.name, args: tc.args });
         if (onDeny) await onDeny(tc.name, tc.args, reason);
+      } else {
+        if (onAllow) await onAllow(tc.name, tc.args);
+      }
+    }
 
-        let ToolMessage: any;
-        try {
-          const mod = await import('@langchain/core/messages');
-          ToolMessage = mod.ToolMessage;
-        } catch {
-          return {
-            messages: [{
-              content: `Tool call denied by Veto: ${reason}`,
-              tool_call_id: callId,
-            }],
-          };
-        }
-
+    if (denied.length > 0) {
+      let ToolMessage: any;
+      try {
+        const mod = await import('@langchain/core/messages');
+        ToolMessage = mod.ToolMessage;
+      } catch {
         return {
-          messages: [new ToolMessage({
-            content: `Tool call denied by Veto: ${reason}`,
-            tool_call_id: callId,
-          })],
+          messages: denied.map(d => ({
+            content: `Tool call denied by Veto: ${d.reason}`,
+            tool_call_id: d.callId,
+          })),
         };
       }
 
-      if (onAllow) await onAllow(tc.name, tc.args);
+      return {
+        messages: denied.map(d => new ToolMessage({
+          content: `Tool call denied by Veto: ${d.reason}`,
+          tool_call_id: d.callId,
+        })),
+      };
     }
 
-    // All tool calls allowed, delegate to real ToolNode
     return toolNode.invoke(state);
   };
 }

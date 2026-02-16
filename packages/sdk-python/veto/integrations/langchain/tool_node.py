@@ -71,6 +71,9 @@ def create_veto_tool_node(
             result_pass: dict[str, Any] = await tool_node.ainvoke(state)
             return result_pass
 
+        # Validate ALL tool calls before deciding
+        denied: list[dict[str, Any]] = []
+
         for tc in tool_calls:
             if isinstance(tc, dict):
                 name = tc.get("name", "")
@@ -92,33 +95,37 @@ def create_veto_tool_node(
             if not validation.allowed:
                 reason = validation.validation_result.reason or "Policy violation"
                 logger.info("BLOCKED %s: %s", name, reason)
+                denied.append({"call_id": call_id, "reason": reason})
 
                 if on_deny is not None:
                     await on_deny(name, args, reason)
+            else:
+                logger.info("ALLOWED %s", name)
+                if on_allow is not None:
+                    await on_allow(name, args)
 
-                try:
-                    from langchain_core.messages import ToolMessage
-                    return {
-                        "messages": [
-                            ToolMessage(
-                                content=f"Tool call denied by Veto: {reason}",
-                                tool_call_id=call_id,
-                            )
-                        ]
-                    }
-                except ImportError:
-                    return {
-                        "messages": [
-                            {
-                                "content": f"Tool call denied by Veto: {reason}",
-                                "tool_call_id": call_id,
-                            }
-                        ]
-                    }
-
-            logger.info("ALLOWED %s", name)
-            if on_allow is not None:
-                await on_allow(name, args)
+        if denied:
+            try:
+                from langchain_core.messages import ToolMessage
+                return {
+                    "messages": [
+                        ToolMessage(
+                            content=f"Tool call denied by Veto: {d['reason']}",
+                            tool_call_id=d["call_id"],
+                        )
+                        for d in denied
+                    ]
+                }
+            except ImportError:
+                return {
+                    "messages": [
+                        {
+                            "content": f"Tool call denied by Veto: {d['reason']}",
+                            "tool_call_id": d["call_id"],
+                        }
+                        for d in denied
+                    ]
+                }
 
         result_allowed: dict[str, Any] = await tool_node.ainvoke(state)
         return result_allowed

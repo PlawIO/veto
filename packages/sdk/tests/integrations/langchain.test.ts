@@ -238,7 +238,7 @@ describe('LangGraph ToolNode Wrapper', () => {
       expect(onDeny).toHaveBeenCalledWith('rm', {}, 'Not allowed');
     });
 
-    it('should return denial for only the specific denied call, not all calls', async () => {
+    it('should validate all calls and return denial messages only for denied ones', async () => {
       const veto = {
         validateToolCall: vi.fn()
           .mockResolvedValueOnce({
@@ -251,6 +251,12 @@ describe('LangGraph ToolNode Wrapper', () => {
             allowed: false,
             validationResult: { decision: 'deny', reason: 'Blocked' },
             originalCall: { id: 'tc_2', name: 'delete_file', arguments: {} },
+            finalArguments: {},
+          })
+          .mockResolvedValueOnce({
+            allowed: true,
+            validationResult: { decision: 'allow' },
+            originalCall: { id: 'tc_3', name: 'read_file', arguments: {} },
             finalArguments: {},
           }),
       } as any;
@@ -272,9 +278,52 @@ describe('LangGraph ToolNode Wrapper', () => {
 
       const result = await vetoNode(state);
 
+      expect(veto.validateToolCall).toHaveBeenCalledTimes(3);
       expect(result.messages).toHaveLength(1);
       expect(result.messages[0].content).toContain('Blocked');
       expect(result.messages[0].tool_call_id).toBe('tc_2');
+      expect(toolNode.invoke).not.toHaveBeenCalled();
+    });
+
+    it('should return denial messages for multiple denied calls', async () => {
+      const veto = {
+        validateToolCall: vi.fn()
+          .mockResolvedValueOnce({
+            allowed: false,
+            validationResult: { decision: 'deny', reason: 'No search' },
+            originalCall: { id: 'tc_1', name: 'search', arguments: {} },
+            finalArguments: {},
+          })
+          .mockResolvedValueOnce({
+            allowed: false,
+            validationResult: { decision: 'deny', reason: 'No delete' },
+            originalCall: { id: 'tc_2', name: 'delete_file', arguments: {} },
+            finalArguments: {},
+          }),
+      } as any;
+
+      const toolNode = { invoke: vi.fn() };
+      const vetoNode = createVetoToolNode(veto, toolNode);
+
+      const state = {
+        messages: [
+          {
+            tool_calls: [
+              { name: 'search', args: {}, id: 'tc_1' },
+              { name: 'delete_file', args: {}, id: 'tc_2' },
+            ],
+          },
+        ],
+      };
+
+      const result = await vetoNode(state);
+
+      expect(veto.validateToolCall).toHaveBeenCalledTimes(2);
+      expect(result.messages).toHaveLength(2);
+      expect(result.messages[0].content).toContain('No search');
+      expect(result.messages[0].tool_call_id).toBe('tc_1');
+      expect(result.messages[1].content).toContain('No delete');
+      expect(result.messages[1].tool_call_id).toBe('tc_2');
       expect(toolNode.invoke).not.toHaveBeenCalled();
     });
   });
