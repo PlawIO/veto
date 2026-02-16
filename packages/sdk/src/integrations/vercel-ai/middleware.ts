@@ -227,6 +227,8 @@ export function createVetoMiddleware(
                 controller.enqueue(bufferedChunk);
               }
             }
+            controller.enqueue(chunk);
+            return;
           }
 
           controller.enqueue(chunk);
