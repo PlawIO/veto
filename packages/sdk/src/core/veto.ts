@@ -130,6 +130,8 @@ interface VetoConfigFile {
     timeout?: number;
     callbackUrl?: string;
     timeoutBehavior?: 'block' | 'allow';
+    /** Forward custom context to the approval webhook. Defaults to false to avoid leaking sensitive data. */
+    includeCustomContext?: boolean;
     responseSchema?: {
       decisionField?: string;
       reasonField?: string;
@@ -163,6 +165,7 @@ interface LocalApprovalConfig {
   callbackUrl?: string;
   timeoutMs: number;
   timeoutBehavior: 'block' | 'allow';
+  includeCustomContext: boolean;
   responseSchema: {
     decisionField: string;
     reasonField: string;
@@ -442,6 +445,7 @@ export class Veto {
       callbackUrl: config.approval?.callbackUrl,
       timeoutMs: config.approval?.timeout ?? 30_000,
       timeoutBehavior: config.approval?.timeoutBehavior ?? 'block',
+      includeCustomContext: config.approval?.includeCustomContext ?? false,
       responseSchema: {
         decisionField: config.approval?.responseSchema?.decisionField ?? 'decision',
         reasonField: config.approval?.responseSchema?.reasonField ?? 'reason',
@@ -1721,6 +1725,16 @@ export class Veto {
       };
     }
 
+    const approvalContext: Record<string, unknown> = {
+      call_id: context.callId,
+      timestamp: context.timestamp.toISOString(),
+      session_id: this.sessionId,
+      agent_id: this.agentId,
+    };
+    if (this.localApprovalConfig.includeCustomContext && context.custom) {
+      approvalContext.custom = context.custom;
+    }
+
     const payload: Record<string, unknown> = {
       tool_name: context.toolName,
       arguments: context.arguments,
@@ -1730,13 +1744,7 @@ export class Veto {
         name: rule.name,
         description: rule.description,
       },
-      context: {
-        call_id: context.callId,
-        timestamp: context.timestamp.toISOString(),
-        session_id: this.sessionId,
-        agent_id: this.agentId,
-        custom: context.custom,
-      },
+      context: approvalContext,
     };
 
     try {
