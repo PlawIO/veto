@@ -43,6 +43,12 @@ importers:
       "@google/genai":
         specifier: ^1.34.0
         version: 1.34.0
+      "@langchain/core":
+        specifier: ">=0.2.0"
+        version: 0.2.36(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
+      ai:
+        specifier: ">=3.0.0"
+        version: 6.0.86(zod@3.25.76)
       ajv:
         specifier: ^8.17.1
         version: 8.17.1
@@ -58,7 +64,7 @@ importers:
         version: 20.19.27
       "@vitest/coverage-v8":
         specifier: ^4.0.16
-        version: 4.0.16(vitest@4.0.16(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2))
+        version: 4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2))
       browser-use-node:
         specifier: ^0.1.11
         version: 0.1.11(devtools-protocol@0.0.1583009)(ignore@5.3.2)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))(ws@8.19.0)
@@ -73,9 +79,34 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.16
-        version: 4.0.16(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2)
+        version: 4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2)
 
 packages:
+  "@ai-sdk/gateway@3.0.46":
+    resolution:
+      {
+        integrity: sha512-zH1UbNRjG5woOXXFOrVCZraqZuFTtmPvLardMGcgLkzpxKV0U3tAGoyWKSZ862H+eBJfI/Hf2yj/zzGJcCkycg==,
+      }
+    engines: { node: ">=18" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  "@ai-sdk/provider-utils@4.0.15":
+    resolution:
+      {
+        integrity: sha512-8XiKWbemmCbvNN0CLR9u3PQiet4gtEVIrX4zzLxnCj06AwsEDJwJVBbKrEI4t6qE8XRSIvU2irka0dcpziKW6w==,
+      }
+    engines: { node: ">=18" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  "@ai-sdk/provider@3.0.8":
+    resolution:
+      {
+        integrity: sha512-oGMAgGoQdBXbZqNG0Ze56CHjDZ1IDYOwGYxYjO5KLSlz5HiNQ9udIXsPZ61VWaHGZ5XW/jyjmr6t2xz2jGVwbQ==,
+      }
+    engines: { node: ">=18" }
+
   "@anthropic-ai/sdk@0.20.9":
     resolution:
       {
@@ -1060,6 +1091,13 @@ packages:
       }
     engines: { node: ">= 8" }
 
+  "@opentelemetry/api@1.9.0":
+    resolution:
+      {
+        integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==,
+      }
+    engines: { node: ">=8.0.0" }
+
   "@pkgjs/parseargs@0.11.0":
     resolution:
       {
@@ -1509,6 +1547,13 @@ packages:
       }
     engines: { node: ^18.18.0 || ^20.9.0 || >=21.1.0 }
 
+  "@vercel/oidc@3.1.0":
+    resolution:
+      {
+        integrity: sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w==,
+      }
+    engines: { node: ">= 20" }
+
   "@vitest/coverage-v8@4.0.16":
     resolution:
       {
@@ -1607,6 +1652,15 @@ packages:
         integrity: sha512-kja8j7PjmncONqaTsB8fQ+wE2mSU2DJ9D4XKoJ5PFWIdRMa6SLSN1ff4mOr4jCbfRSsxR4keIiySJU0N9T5hIQ==,
       }
     engines: { node: ">= 8.0.0" }
+
+  ai@6.0.86:
+    resolution:
+      {
+        integrity: sha512-U2W2LBCHA/pr0Ui7vmmsjBiLEzBbZF3yVHNy7Rbzn7IX+SvoQPFM5rN74hhfVzZoE8zBuGD4nLLk+j0elGacvQ==,
+      }
+    engines: { node: ">=18" }
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   ajv@6.12.6:
     resolution:
@@ -2460,6 +2514,13 @@ packages:
         integrity: sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA==,
       }
 
+  eventsource-parser@3.0.6:
+    resolution:
+      {
+        integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==,
+      }
+    engines: { node: ">=18.0.0" }
+
   expect-type@1.3.0:
     resolution:
       {
@@ -3165,6 +3226,12 @@ packages:
     resolution:
       {
         integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==,
+      }
+
+  json-schema@0.4.0:
+    resolution:
+      {
+        integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==,
       }
 
   json-stable-stringify-without-jsonify@1.0.1:
@@ -4979,6 +5046,24 @@ packages:
       }
 
 snapshots:
+  "@ai-sdk/gateway@3.0.46(zod@3.25.76)":
+    dependencies:
+      "@ai-sdk/provider": 3.0.8
+      "@ai-sdk/provider-utils": 4.0.15(zod@3.25.76)
+      "@vercel/oidc": 3.1.0
+      zod: 3.25.76
+
+  "@ai-sdk/provider-utils@4.0.15(zod@3.25.76)":
+    dependencies:
+      "@ai-sdk/provider": 3.0.8
+      "@standard-schema/spec": 1.1.0
+      eventsource-parser: 3.0.6
+      zod: 3.25.76
+
+  "@ai-sdk/provider@3.0.8":
+    dependencies:
+      json-schema: 0.4.0
+
   "@anthropic-ai/sdk@0.20.9":
     dependencies:
       "@types/node": 18.19.130
@@ -5464,7 +5549,7 @@ snapshots:
 
   "@langchain/openai@0.0.34(ws@8.19.0)":
     dependencies:
-      "@langchain/core": 0.1.63(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
+      "@langchain/core": 0.2.36(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
       js-tiktoken: 1.0.21
       openai: 4.104.0(ws@8.19.0)(zod@3.25.76)
       zod: 3.25.76
@@ -5509,6 +5594,8 @@ snapshots:
     dependencies:
       "@nodelib/fs.scandir": 2.1.5
       fastq: 1.20.1
+
+  "@opentelemetry/api@1.9.0": {}
 
   "@pkgjs/parseargs@0.11.0":
     optional: true
@@ -5765,7 +5852,9 @@ snapshots:
       "@typescript-eslint/types": 8.52.0
       eslint-visitor-keys: 4.2.1
 
-  "@vitest/coverage-v8@4.0.16(vitest@4.0.16(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2))":
+  "@vercel/oidc@3.1.0": {}
+
+  "@vitest/coverage-v8@4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2))":
     dependencies:
       "@bcoe/v8-coverage": 1.0.2
       "@vitest/utils": 4.0.16
@@ -5778,7 +5867,7 @@ snapshots:
       obug: 2.1.1
       std-env: 3.10.0
       tinyrainbow: 3.0.3
-      vitest: 4.0.16(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2)
+      vitest: 4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -5836,6 +5925,14 @@ snapshots:
   agentkeepalive@4.6.0:
     dependencies:
       humanize-ms: 1.2.1
+
+  ai@6.0.86(zod@3.25.76):
+    dependencies:
+      "@ai-sdk/gateway": 3.0.46(zod@3.25.76)
+      "@ai-sdk/provider": 3.0.8
+      "@ai-sdk/provider-utils": 4.0.15(zod@3.25.76)
+      "@opentelemetry/api": 1.9.0
+      zod: 3.25.76
 
   ajv@6.12.6:
     dependencies:
@@ -6483,6 +6580,8 @@ snapshots:
 
   eventemitter3@5.0.1: {}
 
+  eventsource-parser@3.0.6: {}
+
   expect-type@1.3.0: {}
 
   expr-eval@2.0.2: {}
@@ -6931,6 +7030,8 @@ snapshots:
   json-schema-traverse@0.4.1: {}
 
   json-schema-traverse@1.0.0: {}
+
+  json-schema@0.4.0: {}
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
@@ -7764,7 +7865,7 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.2
 
-  vitest@4.0.16(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2):
+  vitest@4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:
       "@vitest/expect": 4.0.16
       "@vitest/mocker": 4.0.16(vite@7.3.0(@types/node@20.19.27)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2))
@@ -7787,6 +7888,7 @@ snapshots:
       vite: 7.3.0(@types/node@20.19.27)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      "@opentelemetry/api": 1.9.0
       "@types/node": 20.19.27
       jsdom: 25.0.1
     transitivePeerDependencies:

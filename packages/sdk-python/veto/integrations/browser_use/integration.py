@@ -144,7 +144,7 @@ async def wrap_browser_use(
             if action_name and action_name in actions_to_validate:
                 try:
                     arguments = params if isinstance(params, dict) else {"value": params}
-                    result = await veto._validate_tool_call(
+                    result = await veto.validate_tool_call(
                         ToolCall(
                             id=generate_tool_call_id(),
                             name=action_name,

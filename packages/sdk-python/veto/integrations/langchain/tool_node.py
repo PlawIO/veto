@@ -1,0 +1,161 @@
+"""
+LangGraph ToolNode wrapper for Veto.
+
+Validates every tool call from the model's response before delegating to
+the actual ``ToolNode`` for execution. Denied calls return a ``ToolMessage``
+with the denial reason instead of executing the tool.
+
+Usage::
+
+    from langgraph.prebuilt import ToolNode
+    from veto import Veto, VetoOptions
+    from veto.integrations.langchain import create_veto_tool_node
+
+    veto = await Veto.init(VetoOptions(api_key="your-key"))
+    tool_node = ToolNode([search_tool, email_tool])
+    veto_tool_node = create_veto_tool_node(veto, tool_node)
+
+    # Use veto_tool_node in your LangGraph graph
+    graph = StateGraph(MessagesState)
+    graph.add_node("tools", veto_tool_node)
+"""
+
+from __future__ import annotations
+
+import inspect
+import logging
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    from veto.core.veto import Veto
+
+from veto.types.tool import ToolCall
+from veto.utils.id import generate_tool_call_id
+
+logger = logging.getLogger("veto.integrations.langchain")
+
+
+def create_veto_tool_node(
+    veto: "Veto",
+    tool_node: Any,
+    *,
+    on_allow: Optional[Callable[..., Any]] = None,
+    on_deny: Optional[Callable[..., Any]] = None,
+) -> Callable[..., Any]:
+    """
+    Wrap a LangGraph ``ToolNode`` with Veto validation.
+
+    Returns an async function with the same signature as a LangGraph node
+    that validates each tool call in the last ``AIMessage`` before
+    delegating to the real ``ToolNode``.
+
+    Args:
+        veto: An initialized ``Veto`` instance.
+        tool_node: A LangGraph ``ToolNode`` instance.
+        on_allow: Optional callback ``(tool_name, args) -> None``.
+        on_deny: Optional callback ``(tool_name, args, reason) -> None``.
+
+    Returns:
+        An async function usable as a LangGraph node.
+    """
+
+    async def validated_tool_node(state: dict[str, Any]) -> dict[str, Any]:
+        messages = state.get("messages", [])
+        if not messages:
+            result: dict[str, Any] = await tool_node.ainvoke(state)
+            return result
+
+        last_message = messages[-1]
+        tool_calls = getattr(last_message, "tool_calls", None) or []
+
+        if not tool_calls:
+            result_pass: dict[str, Any] = await tool_node.ainvoke(state)
+            return result_pass
+
+        # Validate ALL tool calls before deciding.
+        # Track denied by index to avoid ID mismatch when tool calls lack an explicit id.
+        denied: list[dict[str, Any]] = []
+        denied_indices: set[int] = set()
+
+        for i, tc in enumerate(tool_calls):
+            if isinstance(tc, dict):
+                name = tc.get("name", "")
+                args = tc.get("args", {})
+                call_id = tc.get("id") or generate_tool_call_id()
+            else:
+                name = getattr(tc, "name", "")
+                args = getattr(tc, "args", {})
+                call_id = getattr(tc, "id", None) or generate_tool_call_id()
+
+            validation = await veto.validate_tool_call(
+                ToolCall(
+                    id=call_id,
+                    name=name,
+                    arguments=args if isinstance(args, dict) else {},
+                )
+            )
+
+            if not validation.allowed:
+                reason = validation.validation_result.reason or "Policy violation"
+                logger.info("BLOCKED %s: %s", name, reason)
+                denied.append({"call_id": call_id, "reason": reason})
+                denied_indices.add(i)
+
+                if on_deny is not None:
+                    ret = on_deny(name, args, reason)
+                    if inspect.isawaitable(ret):
+                        await ret
+            else:
+                logger.info("ALLOWED %s", name)
+                if on_allow is not None:
+                    ret = on_allow(name, args)
+                    if inspect.isawaitable(ret):
+                        await ret
+
+        if not denied:
+            result_allowed: dict[str, Any] = await tool_node.ainvoke(state)
+            return result_allowed
+
+        # Build denial messages
+        try:
+            from langchain_core.messages import ToolMessage
+            denial_messages = [
+                ToolMessage(
+                    content=f"Tool call denied by Veto: {d['reason']}",
+                    tool_call_id=d["call_id"],
+                )
+                for d in denied
+            ]
+        except ImportError:
+            denial_messages = [
+                {
+                    "content": f"Tool call denied by Veto: {d['reason']}",
+                    "tool_call_id": d["call_id"],
+                }
+                for d in denied
+            ]
+
+        # If ALL calls denied, return denials only
+        if len(denied) == len(tool_calls):
+            return {"messages": denial_messages}
+
+        # Partial denial — execute allowed calls, merge with denial messages
+        allowed_calls = [tc for i, tc in enumerate(tool_calls) if i not in denied_indices]
+        modified_messages = list(messages)
+        last_msg = modified_messages[-1]
+
+        # Create a shallow copy of the last message with filtered tool_calls
+        if hasattr(last_msg, "copy"):
+            modified_last = last_msg.copy(update={"tool_calls": allowed_calls})
+        else:
+            modified_last = type(last_msg)(**{**last_msg.__dict__, "tool_calls": allowed_calls})
+        modified_messages[-1] = modified_last
+
+        allowed_result: dict[str, Any] = await tool_node.ainvoke(
+            {**state, "messages": modified_messages}
+        )
+        return {
+            "messages": denial_messages + (allowed_result.get("messages") or []),
+        }
+
+    return validated_tool_node
