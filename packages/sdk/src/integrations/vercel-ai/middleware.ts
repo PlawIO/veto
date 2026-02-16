@@ -124,7 +124,7 @@ export function createVetoMiddleware(
       args = {};
     }
 
-    const result = await (veto as any).validateToolCall({
+    const result = await veto.validateToolCall({
       id: toolCallId || generateToolCallId(),
       name: toolName,
       arguments: args,

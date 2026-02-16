@@ -2243,8 +2243,12 @@ export class Veto {
 
   /**
    * Validate a tool call through the interceptor pipeline.
+   *
+   * Used internally by `wrap()` and by framework integrations
+   * (Vercel AI SDK, LangChain) to validate tool calls against
+   * configured rules and policies.
    */
-  private async validateToolCall(call: ToolCall): Promise<InterceptionResult> {
+  async validateToolCall(call: ToolCall): Promise<InterceptionResult> {
     const normalizedCall: ToolCall = {
       ...call,
       id: call.id || generateToolCallId(),

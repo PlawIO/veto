@@ -59,7 +59,7 @@ export function createVetoToolNode(
     for (const tc of toolCalls) {
       const callId = tc.id ?? generateToolCallId();
 
-      const result = await (veto as any).validateToolCall({
+      const result = await veto.validateToolCall({
         id: callId,
         name: tc.name,
         arguments: tc.args ?? {},

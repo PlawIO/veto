@@ -65,7 +65,7 @@ export function createVetoLangChainMiddleware(
       const args = tc.args ?? {};
       const callId = tc.id ?? generateToolCallId();
 
-      const result = await (veto as any).validateToolCall({
+      const result = await veto.validateToolCall({
         id: callId,
         name: toolName,
         arguments: args,
