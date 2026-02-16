@@ -1868,22 +1868,15 @@ export class Veto {
     }
 
     let body: unknown;
+    const text = await response.text();
 
-    try {
-      body = await response.json() as unknown;
-    } catch {
-      const text = typeof response.text === 'function'
-        ? await response.text()
-        : '';
-
-      if (!text.trim()) {
-        body = {};
-      } else {
-        try {
-          body = JSON.parse(text) as unknown;
-        } catch {
-          throw new Error('Approval callback must return a JSON object');
-        }
+    if (!text.trim()) {
+      body = {};
+    } else {
+      try {
+        body = JSON.parse(text) as unknown;
+      } catch {
+        throw new Error('Approval callback must return a JSON object');
       }
     }
 

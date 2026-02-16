@@ -453,7 +453,8 @@ rules:
         ok: true,
         status: 200,
         json: async () => ({ decision: 'approved', reason: 'Approved by treasury lead' }),
-        text: async () => '',
+        text: async () =>
+          JSON.stringify({ decision: 'approved', reason: 'Approved by treasury lead' }),
       });
 
       const handler = vi.fn().mockResolvedValue('transfer-complete');
@@ -507,7 +508,8 @@ rules:
         ok: true,
         status: 200,
         json: async () => ({ decision: 'deny', reason: 'Approval denied by reviewer' }),
-        text: async () => '',
+        text: async () =>
+          JSON.stringify({ decision: 'deny', reason: 'Approval denied by reviewer' }),
       });
 
       const handler = vi.fn();
