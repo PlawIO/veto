@@ -61,13 +61,15 @@ def create_veto_tool_node(
     async def validated_tool_node(state: dict[str, Any]) -> dict[str, Any]:
         messages = state.get("messages", [])
         if not messages:
-            return await tool_node.ainvoke(state)
+            result: dict[str, Any] = await tool_node.ainvoke(state)
+            return result
 
         last_message = messages[-1]
         tool_calls = getattr(last_message, "tool_calls", None) or []
 
         if not tool_calls:
-            return await tool_node.ainvoke(state)
+            result_pass: dict[str, Any] = await tool_node.ainvoke(state)
+            return result_pass
 
         for tc in tool_calls:
             if isinstance(tc, dict):
@@ -120,6 +122,7 @@ def create_veto_tool_node(
             if on_allow is not None:
                 await on_allow(name, args)
 
-        return await tool_node.ainvoke(state)
+        result_allowed: dict[str, Any] = await tool_node.ainvoke(state)
+        return result_allowed
 
     return validated_tool_node
