@@ -29,7 +29,7 @@ from uuid import UUID
 try:
     from langchain_core.callbacks import BaseCallbackHandler as _Base
 except ImportError:
-    _Base = object  # type: ignore[misc,assignment]
+    _Base = object
 
 logger = logging.getLogger("veto.integrations.langchain")
 
