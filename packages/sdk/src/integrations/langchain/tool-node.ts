@@ -54,7 +54,8 @@ export function createVetoToolNode(
     }
 
     // Validate ALL tool calls before deciding
-    const denied: Array<{ callId: string; reason: string; name: string; args: Record<string, unknown> }> = [];
+    const denied: Array<{ callId: string; reason: string }> = [];
+    const deniedIds = new Set<string>();
 
     for (const tc of toolCalls) {
       const callId = tc.id ?? generateToolCallId();
@@ -67,35 +68,47 @@ export function createVetoToolNode(
 
       if (!result.allowed) {
         const reason = result.validationResult?.reason ?? 'Policy violation';
-        denied.push({ callId, reason, name: tc.name, args: tc.args });
+        denied.push({ callId, reason });
+        deniedIds.add(callId);
         if (onDeny) await onDeny(tc.name, tc.args, reason);
       } else {
         if (onAllow) await onAllow(tc.name, tc.args);
       }
     }
 
-    if (denied.length > 0) {
-      let ToolMessage: any;
-      try {
-        const mod = await import('@langchain/core/messages');
-        ToolMessage = mod.ToolMessage;
-      } catch {
-        return {
-          messages: denied.map(d => ({
-            content: `Tool call denied by Veto: ${d.reason}`,
-            tool_call_id: d.callId,
-          })),
-        };
-      }
-
-      return {
-        messages: denied.map(d => new ToolMessage({
-          content: `Tool call denied by Veto: ${d.reason}`,
-          tool_call_id: d.callId,
-        })),
-      };
+    if (denied.length === 0) {
+      return toolNode.invoke(state);
     }
 
-    return toolNode.invoke(state);
+    // Build denial messages
+    let ToolMessage: any;
+    try {
+      const mod = await import('@langchain/core/messages');
+      ToolMessage = mod.ToolMessage;
+    } catch {
+      ToolMessage = null;
+    }
+
+    const denialMessages = denied.map(d =>
+      ToolMessage
+        ? new ToolMessage({ content: `Tool call denied by Veto: ${d.reason}`, tool_call_id: d.callId })
+        : { content: `Tool call denied by Veto: ${d.reason}`, tool_call_id: d.callId },
+    );
+
+    // If ALL calls denied, return denials only
+    if (denied.length === toolCalls.length) {
+      return { messages: denialMessages };
+    }
+
+    // Partial denial — execute allowed calls, merge with denial messages
+    const allowedCalls = toolCalls.filter((tc: any) => !deniedIds.has(tc.id ?? ''));
+    const modifiedMessages = [...state.messages];
+    const lastMsg = modifiedMessages[modifiedMessages.length - 1];
+    modifiedMessages[modifiedMessages.length - 1] = { ...lastMsg, tool_calls: allowedCalls };
+
+    const allowedResult = await toolNode.invoke({ ...state, messages: modifiedMessages });
+    return {
+      messages: [...denialMessages, ...(allowedResult?.messages ?? [])],
+    };
   };
 }

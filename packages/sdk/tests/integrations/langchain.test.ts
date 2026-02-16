@@ -238,7 +238,7 @@ describe('LangGraph ToolNode Wrapper', () => {
       expect(onDeny).toHaveBeenCalledWith('rm', {}, 'Not allowed');
     });
 
-    it('should validate all calls and return denial messages only for denied ones', async () => {
+    it('should execute allowed calls and return denial messages for denied ones on partial denial', async () => {
       const veto = {
         validateToolCall: vi.fn()
           .mockResolvedValueOnce({
@@ -261,7 +261,14 @@ describe('LangGraph ToolNode Wrapper', () => {
           }),
       } as any;
 
-      const toolNode = { invoke: vi.fn() };
+      const toolNode = {
+        invoke: vi.fn().mockResolvedValue({
+          messages: [
+            { content: 'search result', tool_call_id: 'tc_1' },
+            { content: 'file content', tool_call_id: 'tc_3' },
+          ],
+        }),
+      };
       const vetoNode = createVetoToolNode(veto, toolNode);
 
       const state = {
@@ -279,10 +286,18 @@ describe('LangGraph ToolNode Wrapper', () => {
       const result = await vetoNode(state);
 
       expect(veto.validateToolCall).toHaveBeenCalledTimes(3);
-      expect(result.messages).toHaveLength(1);
+      // toolNode invoked with only allowed calls
+      expect(toolNode.invoke).toHaveBeenCalledTimes(1);
+      const invokedState = toolNode.invoke.mock.calls[0][0];
+      expect(invokedState.messages[0].tool_calls).toHaveLength(2);
+      expect(invokedState.messages[0].tool_calls[0].name).toBe('search');
+      expect(invokedState.messages[0].tool_calls[1].name).toBe('read_file');
+      // Merged results: 1 denial + 2 allowed
+      expect(result.messages).toHaveLength(3);
       expect(result.messages[0].content).toContain('Blocked');
       expect(result.messages[0].tool_call_id).toBe('tc_2');
-      expect(toolNode.invoke).not.toHaveBeenCalled();
+      expect(result.messages[1].content).toBe('search result');
+      expect(result.messages[2].content).toBe('file content');
     });
 
     it('should return denial messages for multiple denied calls', async () => {

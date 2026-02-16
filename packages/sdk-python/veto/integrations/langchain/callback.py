@@ -36,10 +36,17 @@ class VetoCallbackHandler:
     Compatible with LangChain's callback system. Fires on tool
     start/end/error for logging and metrics. Does not block execution.
 
+    Note:
+        LangChain's ``BaseCallbackHandler`` methods are **synchronous**.
+        All user callbacks passed here must be synchronous functions.
+        For async callbacks, use ``VetoMiddleware`` or
+        ``create_veto_tool_node`` which support both sync and async
+        via ``inspect.isawaitable()``.
+
     Args:
-        on_tool_start: ``(tool_name: str, input_str: str) -> None``
-        on_tool_end: ``(tool_name: str, output: str) -> None``
-        on_tool_error: ``(tool_name: str, error: BaseException) -> None``
+        on_tool_start: Sync callback ``(tool_name: str, input_str: str) -> None``.
+        on_tool_end: Sync callback ``(tool_name: str, output: str) -> None``.
+        on_tool_error: Sync callback ``(tool_name: str, error: BaseException) -> None``.
     """
 
     name = "VetoCallbackHandler"

@@ -295,8 +295,15 @@ describe('Vercel AI SDK Middleware', () => {
       expect(chunks.some(c => c.type === 'text-delta')).toBe(true);
     });
 
-    it('should emit buffered tool-input events for allowed calls', async () => {
-      const veto = createMockVeto('allow');
+    it('should emit buffered tool-input events for allowed calls with unmodified args', async () => {
+      const veto = {
+        validateToolCall: vi.fn().mockResolvedValue({
+          allowed: true,
+          validationResult: { decision: 'allow' },
+          originalCall: { id: 'tc_1', name: 'search', arguments: { q: 'test' } },
+          finalArguments: { q: 'test' },
+        }),
+      } as any;
       const middleware = createVetoMiddleware(veto);
 
       const stream = createReadableStream([
@@ -320,6 +327,46 @@ describe('Vercel AI SDK Middleware', () => {
       expect(chunks.filter(c => c.type === 'tool-input-delta')).toHaveLength(1);
       expect(chunks.filter(c => c.type === 'tool-input-end')).toHaveLength(1);
       expect(chunks.filter(c => c.type === 'tool-call')).toHaveLength(1);
+    });
+
+    it('should skip buffered tool-input events when args are modified', async () => {
+      const veto = {
+        validateToolCall: vi.fn().mockResolvedValue({
+          allowed: true,
+          validationResult: { decision: 'allow' },
+          originalCall: { id: 'tc_1', name: 'send_email', arguments: {} },
+          finalArguments: { to: 'safe@example.com', body: 'sanitized' },
+        }),
+      } as any;
+
+      const middleware = createVetoMiddleware(veto);
+
+      const stream = createReadableStream([
+        { type: 'tool-input-start', id: 'tc_1', toolName: 'send_email' },
+        { type: 'tool-input-delta', id: 'tc_1', delta: '{"to":"evil@example.com",' },
+        { type: 'tool-input-delta', id: 'tc_1', delta: '"body":"original"}' },
+        { type: 'tool-input-end', id: 'tc_1' },
+        { type: 'tool-call', toolCallId: 'tc_1', toolName: 'send_email', input: '{"to":"evil@example.com","body":"original"}' },
+        { type: 'finish', usage: {} },
+      ]);
+
+      const result = await middleware.wrapStream!({
+        doStream: vi.fn().mockResolvedValue({ stream }),
+        doGenerate: vi.fn(),
+        params: {},
+        model: {},
+      });
+
+      const chunks = await collectStream(result.stream);
+
+      // Buffered events should be skipped since args were modified
+      expect(chunks.filter(c => c.type === 'tool-input-start')).toHaveLength(0);
+      expect(chunks.filter(c => c.type === 'tool-input-delta')).toHaveLength(0);
+      expect(chunks.filter(c => c.type === 'tool-input-end')).toHaveLength(0);
+      // Only the modified tool-call should be emitted
+      const toolCalls = chunks.filter(c => c.type === 'tool-call');
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls[0].input).toBe('{"to":"safe@example.com","body":"sanitized"}');
     });
 
     it('should throw on denied tool calls when throwOnDeny is true', async () => {

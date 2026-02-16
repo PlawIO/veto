@@ -137,7 +137,11 @@ export function createVetoMiddleware(
     }
 
     if (onAllow) await onAllow(toolName, args);
-    return { allowed: true, finalArgs: result.finalArguments ?? args };
+
+    // Only flag finalArgs when validation actually modified the arguments
+    const argsModified = result.finalArguments
+      && JSON.stringify(result.finalArguments) !== JSON.stringify(args);
+    return { allowed: true, finalArgs: argsModified ? result.finalArguments : undefined };
   }
 
   return {
@@ -208,18 +212,20 @@ export function createVetoMiddleware(
               return;
             }
 
-            if (buffer) {
-              for (const bufferedChunk of buffer.chunks) {
-                controller.enqueue(bufferedChunk);
-              }
-            }
-
             if (validation.finalArgs) {
+              // Args were modified — skip buffered tool-input events since
+              // their deltas reflect the original args, not the modified ones.
               controller.enqueue({
                 ...tc,
                 input: JSON.stringify(validation.finalArgs),
               });
               return;
+            }
+
+            if (buffer) {
+              for (const bufferedChunk of buffer.chunks) {
+                controller.enqueue(bufferedChunk);
+              }
             }
           }
 
