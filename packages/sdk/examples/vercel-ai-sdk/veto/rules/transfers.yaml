@@ -1,0 +1,19 @@
+version: "1.0"
+name: transfer-rules
+rules:
+  - id: block-large-transfers
+    name: Block Large Transfers
+    description: Transfers over $10,000 require manual approval
+    enabled: true
+    action: block
+    tools: [transfer_funds]
+    conditions:
+      - expression: "arguments.amount > 10000"
+  - id: block-external-transfers
+    name: Block External Transfers
+    description: Block transfers to external banks
+    enabled: true
+    action: block
+    tools: [transfer_funds]
+    conditions:
+      - expression: "arguments.to_account starts_with 'EXT-'"

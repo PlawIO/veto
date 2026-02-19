@@ -1,0 +1,17 @@
+{
+  "name": "mcp-example",
+  "version": "1.0.0",
+  "description": "Veto + MCP (Model Context Protocol) integration example",
+  "type": "module",
+  "scripts": {
+    "start": "tsx mcp_agent.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "veto-sdk": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0"
+  }
+}

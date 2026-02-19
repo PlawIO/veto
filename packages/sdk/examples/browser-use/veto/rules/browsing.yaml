@@ -1,0 +1,27 @@
+version: "1.0"
+name: browsing-rules
+rules:
+  - id: block-dangerous-urls
+    name: Block Dangerous URLs
+    description: Block navigation to known dangerous domains
+    enabled: true
+    action: block
+    tools: [go_to_url]
+    conditions:
+      - expression: "arguments.url contains 'malware'"
+  - id: block-admin-pages
+    name: Block Admin Pages
+    description: Prevent navigating to admin panels
+    enabled: true
+    action: block
+    tools: [go_to_url]
+    conditions:
+      - expression: "arguments.url contains '/admin'"
+  - id: block-sensitive-input
+    name: Block Password Input
+    description: Block typing passwords into forms
+    enabled: true
+    action: block
+    tools: [input_text]
+    conditions:
+      - expression: "arguments.text contains 'password123'"
