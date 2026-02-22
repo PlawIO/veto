@@ -7,6 +7,7 @@ that is handled by the Veto Cloud API.
 
 from typing import (
     Any,
+    Mapping,
     Callable,
     Literal,
     Optional,
@@ -14,6 +15,7 @@ from typing import (
     Union,
     Awaitable,
     Protocol,
+    cast,
     runtime_checkable,
 )
 from dataclasses import dataclass
@@ -933,21 +935,27 @@ class Veto:
             return False
 
         conditions_raw = rule.get("conditions")
-        conditions = (
-            [item for item in conditions_raw if isinstance(item, dict)]
+        conditions: Optional[list[Mapping[str, Any]]] = (
+            [
+                cast(Mapping[str, Any], item)
+                for item in conditions_raw
+                if isinstance(item, dict)
+            ]
             if isinstance(conditions_raw, list)
             else None
         )
 
         condition_groups_raw = rule.get("condition_groups")
-        condition_groups: Optional[list[list[dict[str, Any]]]] = None
+        condition_groups: Optional[list[list[Mapping[str, Any]]]] = None
         if isinstance(condition_groups_raw, list):
-            normalized_groups: list[list[dict[str, Any]]] = []
+            normalized_groups: list[list[Mapping[str, Any]]] = []
             for group in condition_groups_raw:
                 if not isinstance(group, list):
                     continue
                 normalized_group = [
-                    condition for condition in group if isinstance(condition, dict)
+                    cast(Mapping[str, Any], condition)
+                    for condition in group
+                    if isinstance(condition, dict)
                 ]
                 if normalized_group:
                     normalized_groups.append(normalized_group)

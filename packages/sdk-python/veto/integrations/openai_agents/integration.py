@@ -25,12 +25,12 @@ try:
         ToolOutputGuardrail,
     )
 except ImportError as import_error:
-    GuardrailFunctionOutput = None  # type: ignore[assignment]
-    InputGuardrail = None  # type: ignore[assignment]
-    OutputGuardrail = None  # type: ignore[assignment]
-    ToolGuardrailFunctionOutput = None  # type: ignore[assignment]
-    ToolInputGuardrail = None  # type: ignore[assignment]
-    ToolOutputGuardrail = None  # type: ignore[assignment]
+    GuardrailFunctionOutput = None
+    InputGuardrail = None
+    OutputGuardrail = None
+    ToolGuardrailFunctionOutput = None
+    ToolInputGuardrail = None
+    ToolOutputGuardrail = None
     _OPENAI_AGENTS_IMPORT_ERROR: Optional[ImportError] = import_error
 else:
     _OPENAI_AGENTS_IMPORT_ERROR = None
