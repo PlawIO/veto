@@ -71,6 +71,39 @@ class TestValidDocuments:
             }
         )
 
+    def test_accepts_sequence_constraints(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "rules": [
+                    {
+                        "id": "sequence",
+                        "name": "Sequence rule",
+                        "action": "block",
+                        "tools": ["send_email"],
+                        "blocked_by": [
+                            {
+                                "tool": "read_file",
+                                "conditions": [
+                                    {
+                                        "field": "arguments.path",
+                                        "operator": "starts_with",
+                                        "value": "/etc/secrets",
+                                    }
+                                ],
+                            }
+                        ],
+                        "requires": [
+                            {
+                                "tool": "verify_identity",
+                                "within": 300,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
 
 class TestInvalidDocuments:
     def test_missing_version(self) -> None:
@@ -125,6 +158,27 @@ class TestInvalidDocuments:
         data = _load_fixture("invalid-rule-missing-id.yaml")
         with pytest.raises(PolicySchemaError):
             validate_policy_ir(data)
+
+    def test_negative_within_rejected(self) -> None:
+        with pytest.raises(PolicySchemaError):
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [
+                        {
+                            "id": "bad-within",
+                            "name": "Bad within",
+                            "action": "block",
+                            "requires": [
+                                {
+                                    "tool": "verify_identity",
+                                    "within": -5,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
 
 
 class TestErrorQuality:

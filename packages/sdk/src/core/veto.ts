@@ -21,6 +21,7 @@ import type {
   ValidationContext,
   ValidationResult,
   LogLevel,
+  ToolCallHistoryEntry,
 } from '../types/config.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
@@ -1011,7 +1012,7 @@ export class Veto {
     let firstAllowRule: Rule | null = null;
 
     for (const rule of rules) {
-      if (!this.matchesLocalRule(rule, localContext)) {
+      if (!this.matchesLocalRule(rule, context, localContext)) {
         continue;
       }
 
@@ -1111,16 +1112,105 @@ export class Veto {
     };
   }
 
-  private matchesLocalRule(rule: Rule, context: Record<string, unknown>): boolean {
-    return evaluateConditionCollections(
+  private matchesLocalRule(
+    rule: Rule,
+    validationContext: ValidationContext,
+    localContext: Record<string, unknown>
+  ): boolean {
+    const conditionsMatch = evaluateConditionCollections(
       rule.conditions,
       rule.condition_groups,
-      context,
+      localContext,
       {
         evaluateExpression: (expression, evalContext) =>
           this.evaluateLocalExpression(expression, evalContext),
       }
     );
+
+    if (!conditionsMatch) {
+      return false;
+    }
+
+    return this.matchesLocalSequenceConstraints(
+      rule,
+      validationContext.callHistory,
+      validationContext.timestamp
+    );
+  }
+
+  private matchesLocalSequenceConstraints(
+    rule: Rule,
+    history: readonly ToolCallHistoryEntry[],
+    now: Date
+  ): boolean {
+    const blockedBy = rule.blocked_by ?? [];
+    const requires = rule.requires ?? [];
+
+    if (blockedBy.length === 0 && requires.length === 0) {
+      return true;
+    }
+
+    const blockedByMatched = blockedBy.some((constraint) =>
+      this.hasMatchingHistoryEntry(constraint, history, now)
+    );
+
+    const missingRequirement = requires.some((constraint) =>
+      !this.hasMatchingHistoryEntry(constraint, history, now)
+    );
+
+    return blockedByMatched || missingRequirement;
+  }
+
+  private hasMatchingHistoryEntry(
+    constraint: NonNullable<Rule['requires']>[number],
+    history: readonly ToolCallHistoryEntry[],
+    now: Date
+  ): boolean {
+    const nowMs = now.getTime();
+    const withinMs = typeof constraint.within === 'number'
+      ? Math.max(0, constraint.within) * 1000
+      : null;
+
+    return history.some((entry) => {
+      if (entry.toolName !== constraint.tool) {
+        return false;
+      }
+
+      if (entry.validationResult.decision === 'deny') {
+        return false;
+      }
+
+      if (withinMs !== null) {
+        const ageMs = nowMs - entry.timestamp.getTime();
+        if (ageMs < 0 || ageMs > withinMs) {
+          return false;
+        }
+      }
+
+      const historicalContext = this.buildHistoricalEvaluationContext(entry);
+
+      return evaluateConditionCollections(
+        constraint.conditions,
+        constraint.condition_groups,
+        historicalContext,
+        {
+          evaluateExpression: (expression, evalContext) =>
+            this.evaluateLocalExpression(expression, evalContext),
+        }
+      );
+    });
+  }
+
+  private buildHistoricalEvaluationContext(
+    historyEntry: ToolCallHistoryEntry
+  ): Record<string, unknown> {
+    return {
+      ...historyEntry.arguments,
+      tool_name: historyEntry.toolName,
+      arguments: historyEntry.arguments,
+      decision: historyEntry.validationResult.decision,
+      timestamp: historyEntry.timestamp.toISOString(),
+    };
   }
 
   private evaluateLocalExpression(

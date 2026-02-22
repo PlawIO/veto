@@ -15,6 +15,8 @@ from veto.rules.condition_evaluator import (
     evaluate_legacy_condition,
     evaluate_condition,
     evaluate_condition_collections,
+    has_matching_history_entry,
+    evaluate_sequence_constraints,
 )
 from veto.rules.patterns import (
     OUTPUT_PATTERNS,
@@ -36,6 +38,8 @@ __all__ = [
     "evaluate_legacy_condition",
     "evaluate_condition",
     "evaluate_condition_collections",
+    "has_matching_history_entry",
+    "evaluate_sequence_constraints",
     "OUTPUT_PATTERNS",
     "OUTPUT_PATTERN_SSN",
     "OUTPUT_PATTERN_CREDIT_CARD",

@@ -86,6 +86,16 @@ export const POLICY_IR_V1_SCHEMA = {
           },
           description: 'Alternative condition groups (OR between groups, AND within each group).',
         },
+        blocked_by: {
+          type: 'array',
+          items: { $ref: '#/$defs/SequenceConstraint' },
+          description: 'Block if any matching historical call is present.',
+        },
+        requires: {
+          type: 'array',
+          items: { $ref: '#/$defs/SequenceConstraint' },
+          description: 'Block unless each required historical call is present.',
+        },
         tags: {
           type: 'array',
           items: { type: 'string' },
@@ -177,6 +187,36 @@ export const POLICY_IR_V1_SCHEMA = {
         },
         value: {
           description: 'The value to compare the field against.',
+        },
+      },
+      additionalProperties: false,
+    },
+    SequenceConstraint: {
+      type: 'object',
+      required: ['tool'],
+      properties: {
+        tool: {
+          type: 'string',
+          minLength: 1,
+          description: 'Historical tool name to match.',
+        },
+        conditions: {
+          type: 'array',
+          items: { $ref: '#/$defs/Condition' },
+          description: 'Conditions that must ALL match on the historical call context.',
+        },
+        condition_groups: {
+          type: 'array',
+          items: {
+            type: 'array',
+            items: { $ref: '#/$defs/Condition' },
+          },
+          description: 'Alternative condition groups (OR between groups, AND within each group).',
+        },
+        within: {
+          type: 'number',
+          minimum: 0,
+          description: 'Optional time window in seconds relative to the current call.',
         },
       },
       additionalProperties: false,

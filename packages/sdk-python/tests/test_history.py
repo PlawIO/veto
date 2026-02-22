@@ -50,6 +50,19 @@ class TestHistoryTracker:
         # Oldest entries should be removed
         assert entries[0].tool_name == "tool_5"
 
+    def test_record_stores_argument_snapshot(self, history_tracker):
+        """Should preserve original arguments when caller mutates input later."""
+        args = {"nested": {"state": "before"}}
+        history_tracker.record(
+            tool_name="snapshot_tool",
+            args=args,
+            result=ValidationResult(decision="allow"),
+        )
+        args["nested"]["state"] = "after"
+
+        entries = history_tracker.get_all()
+        assert entries[0].arguments == {"nested": {"state": "before"}}
+
     def test_get_stats(self, history_tracker):
         """Should calculate stats correctly."""
         # Add allowed entry

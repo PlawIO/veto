@@ -46,7 +46,12 @@ export class HistoryTracker {
    * @param entry - The history entry to add
    */
   add(entry: ToolCallHistoryEntry): void {
-    this.entries.push(entry);
+    const snapshotEntry: ToolCallHistoryEntry = {
+      ...entry,
+      arguments: this.cloneArguments(entry.arguments),
+    };
+
+    this.entries.push(snapshotEntry);
 
     // Remove oldest entries if we exceed max size
     while (this.entries.length > this.maxSize) {
@@ -60,8 +65,8 @@ export class HistoryTracker {
     }
 
     this.logger.debug('History entry added', {
-      toolName: entry.toolName,
-      decision: entry.validationResult.decision,
+      toolName: snapshotEntry.toolName,
+      decision: snapshotEntry.validationResult.decision,
       historySize: this.entries.length,
     });
   }
@@ -89,6 +94,26 @@ export class HistoryTracker {
       timestamp: new Date(),
       durationMs,
     });
+  }
+
+  private cloneArguments(args: Record<string, unknown>): Record<string, unknown> {
+    const structuredCloneImpl = globalThis.structuredClone as
+      | ((value: Record<string, unknown>) => Record<string, unknown>)
+      | undefined;
+
+    if (structuredCloneImpl) {
+      try {
+        return structuredCloneImpl(args);
+      } catch {
+        // Fall through to a safer but less expressive clone strategy.
+      }
+    }
+
+    try {
+      return JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
+    } catch {
+      return { ...args };
+    }
   }
 
   /**
