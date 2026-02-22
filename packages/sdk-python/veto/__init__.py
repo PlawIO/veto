@@ -82,6 +82,16 @@ from veto.deterministic.regex_safety import is_safe_pattern
 from veto.core.interceptor import InterceptionResult
 from veto.core.history import HistoryStats
 from veto.core.output_validator import OutputValidationResult
+from veto.core.events import (
+    EventWebhookConfig,
+    WebhookEvent,
+    WebhookEventType,
+    WebhookFormat,
+    format_slack_payload,
+    format_pagerduty_payload,
+    format_generic_payload,
+    format_cef_payload,
+)
 
 # Policy IR validation
 from veto.rules.schema_validator import (
@@ -176,6 +186,14 @@ __all__ = [
     "InterceptionResult",
     "HistoryStats",
     "OutputValidationResult",
+    "EventWebhookConfig",
+    "WebhookEvent",
+    "WebhookEventType",
+    "WebhookFormat",
+    "format_slack_payload",
+    "format_pagerduty_payload",
+    "format_generic_payload",
+    "format_cef_payload",
     # Provider adapters
     "to_openai",
     "from_openai",

@@ -47,6 +47,13 @@ from veto.core.output_validator import (
     OutputValidator,
     OutputValidatorOptions,
 )
+from veto.core.events import (
+    EventWebhookConfig,
+    EventWebhookEmitter,
+    WebhookEvent,
+    WebhookEventType,
+    parse_event_webhook_config,
+)
 from veto.cloud.client import VetoCloudClient, VetoCloudConfig, ApprovalTimeoutError
 from veto.cloud.types import ToolRegistration, ToolParameter, ApprovalPollOptions
 from veto.cloud.policy_cache import PolicyCache
@@ -187,6 +194,7 @@ class Veto:
         rules: LoadedRulesState,
         output_rules: LoadedOutputRulesState,
         validation_mode: ValidationMode,
+        event_webhook_config: Optional[EventWebhookConfig],
     ):
         self._logger = logger
         self._mode: VetoMode = options.mode or "strict"
@@ -194,6 +202,10 @@ class Veto:
         self._cloud_client = cloud_client
         self._rules = rules
         self._output_rules = output_rules
+        self._event_webhook_emitter = EventWebhookEmitter(
+            event_webhook_config,
+            self._logger,
+        )
 
         # Approval options
         self._on_approval_required = options.on_approval_required
@@ -282,6 +294,7 @@ class Veto:
                 agent_id=self._agent_id,
                 user_id=self._user_id,
                 role=self._role,
+                on_after_validation=self._emit_decision_event,
                 output_validator=self._output_validator,
             )
         )
@@ -345,6 +358,7 @@ class Veto:
         rules_dir = resolved_config_dir / "rules"
         recursive_rules = True
         config_validation_mode: Optional[ValidationMode] = None
+        event_webhook_config: Optional[EventWebhookConfig] = None
 
         config_path = resolved_config_dir / "veto.config.yaml"
         if config_path.exists():
@@ -366,6 +380,13 @@ class Veto:
                         recursive_value = rules_config.get("recursive")
                         if isinstance(recursive_value, bool):
                             recursive_rules = recursive_value
+
+                    events_config = config_data.get("events")
+                    if isinstance(events_config, dict):
+                        event_webhook_config = parse_event_webhook_config(
+                            events_config.get("webhook"),
+                            logger,
+                        )
             except Exception as exc:
                 logger.warn(
                     "Failed to parse veto.config.yaml for rules configuration",
@@ -396,6 +417,7 @@ class Veto:
             rules,
             output_rules,
             validation_mode,
+            event_webhook_config,
         )
 
     @staticmethod
@@ -1658,6 +1680,65 @@ class Veto:
 
         return None
 
+    def _is_budget_exceeded_result(self, result: ValidationResult) -> bool:
+        metadata = result.metadata
+        if not metadata:
+            return False
+
+        raw_flag = metadata.get("budgetExceeded", metadata.get("budget_exceeded"))
+        if isinstance(raw_flag, bool):
+            return raw_flag
+
+        if isinstance(raw_flag, str):
+            normalized_flag = raw_flag.strip().lower()
+            if normalized_flag in ("true", "1", "budget_exceeded"):
+                return True
+
+        raw_event_type = metadata.get("eventType", metadata.get("event_type"))
+        return isinstance(raw_event_type, str) and raw_event_type.strip().lower() == "budget_exceeded"
+
+    def _resolve_decision_event_type(
+        self, result: ValidationResult
+    ) -> Optional[WebhookEventType]:
+        if self._is_budget_exceeded_result(result):
+            return "budget_exceeded"
+
+        if result.decision == "deny":
+            return "deny"
+
+        if result.decision == "require_approval":
+            return "require_approval"
+
+        return None
+
+    def _emit_decision_event(
+        self,
+        context: ValidationContext,
+        result: ValidationResult,
+    ) -> None:
+        event_type = self._resolve_decision_event_type(result)
+        if event_type is None:
+            return
+
+        severity = self._extract_metadata_severity(result.metadata)
+        if event_type == "budget_exceeded" and severity is None:
+            severity = "high"
+
+        self._event_webhook_emitter.emit(
+            WebhookEvent(
+                event_type=event_type,
+                tool_name=context.tool_name,
+                arguments=context.arguments,
+                decision=result.decision,
+                reason=result.reason,
+                rule_id=self._extract_metadata_string(
+                    result.metadata, ["ruleId", "rule_id"]
+                ),
+                severity=severity,
+                timestamp=context.timestamp.isoformat(),
+            )
+        )
+
     def _to_guard_result(self, result: ValidationResult) -> GuardResult:
         decision: Literal["allow", "deny", "require_approval"] = "allow"
         if result.decision == "deny":
@@ -1709,6 +1790,8 @@ class Veto:
             validation_result,
             aggregated_result.total_duration_ms,
         )
+
+        self._emit_decision_event(context, validation_result)
 
         return self._to_guard_result(validation_result)
 

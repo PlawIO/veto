@@ -55,6 +55,12 @@ import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import type { LocalValidationResult } from '../deterministic/types.js';
 import { OutputValidator, type OutputValidationResult } from './output-validator.js';
+import {
+  EventWebhookEmitter,
+  resolveEventWebhookConfig,
+  type VetoWebhookEvent,
+  type VetoWebhookEventType,
+} from './events.js';
 
 /**
  * Veto operating mode.
@@ -175,6 +181,14 @@ interface VetoConfigFile {
     window?: 'session';
   };
   costs?: Record<string, number | string>;
+  events?: {
+    webhook?: {
+      url?: string;
+      on?: VetoWebhookEventType[];
+      min_severity?: RuleSeverity;
+      format?: 'slack' | 'pagerduty' | 'generic' | 'cef';
+    };
+  };
 }
 
 /**
@@ -321,6 +335,7 @@ export class Veto {
   private readonly budgetTracker: BudgetTracker | null;
   private readonly interceptor: Interceptor;
   private readonly outputValidator: OutputValidator;
+  private readonly eventWebhookEmitter: EventWebhookEmitter;
 
   // Configuration
   private readonly configDir: string;
@@ -498,6 +513,11 @@ export class Veto {
     // Approval hook
     this.onApprovalRequired = options.onApprovalRequired;
 
+    this.eventWebhookEmitter = new EventWebhookEmitter(
+      resolveEventWebhookConfig(config.events?.webhook, this.logger),
+      this.logger
+    );
+
     // Resolve tracking options
     this.sessionId = options.sessionId ?? process.env.VETO_SESSION_ID ?? generateId('session');
     this.agentId = options.agentId ?? process.env.VETO_AGENT_ID;
@@ -602,6 +622,9 @@ export class Veto {
       agentId: this.agentId,
       userId: this.userId,
       role: this.role,
+      onAfterValidation: (context, result) => {
+        this.emitDecisionEvent(context, result);
+      },
       outputValidator: this.outputValidator,
     });
 
@@ -2142,6 +2165,73 @@ export class Veto {
     return null;
   }
 
+  private isBudgetExceededResult(result: ValidationResult): boolean {
+    const metadata = result.metadata;
+    if (!metadata) return false;
+
+    const rawFlag = metadata.budgetExceeded ?? metadata.budget_exceeded;
+    if (typeof rawFlag === 'boolean') {
+      return rawFlag;
+    }
+
+    if (typeof rawFlag === 'string') {
+      const normalizedFlag = rawFlag.trim().toLowerCase();
+      if (
+        normalizedFlag === 'true'
+        || normalizedFlag === '1'
+        || normalizedFlag === 'budget_exceeded'
+      ) {
+        return true;
+      }
+    }
+
+    const rawEventType = metadata.eventType ?? metadata.event_type;
+    return (
+      typeof rawEventType === 'string'
+      && rawEventType.trim().toLowerCase() === 'budget_exceeded'
+    );
+  }
+
+  private resolveDecisionEventType(result: ValidationResult): VetoWebhookEventType | null {
+    if (this.isBudgetExceededResult(result)) {
+      return 'budget_exceeded';
+    }
+
+    if (result.decision === 'deny') {
+      return 'deny';
+    }
+
+    if (result.decision === 'require_approval') {
+      return 'require_approval';
+    }
+
+    return null;
+  }
+
+  private emitDecisionEvent(
+    context: ValidationContext,
+    result: ValidationResult
+  ): void {
+    const eventType = this.resolveDecisionEventType(result);
+    if (!eventType) return;
+
+    const severityFromMetadata = this.extractMetadataSeverity(result.metadata);
+    const event: VetoWebhookEvent = {
+      eventType,
+      toolName: context.toolName,
+      arguments: context.arguments,
+      decision: result.decision,
+      reason: result.reason,
+      ruleId: this.extractMetadataString(result.metadata, ['ruleId', 'rule_id']),
+      severity: eventType === 'budget_exceeded'
+        ? severityFromMetadata ?? 'high'
+        : severityFromMetadata,
+      timestamp: context.timestamp.toISOString(),
+    };
+
+    this.eventWebhookEmitter.emit(event);
+  }
+
   private toGuardResult(result: ValidationResult): GuardResult {
     const metadata = result.metadata;
     const ruleId = this.extractMetadataString(metadata, ['ruleId', 'rule_id']);
@@ -2505,7 +2595,22 @@ export class Veto {
       id: call.id || generateToolCallId(),
     };
 
-    return this.interceptor.intercept(normalizedCall);
+    try {
+      return await this.interceptor.intercept(normalizedCall);
+    } catch (error) {
+      if (error instanceof BudgetExceededError) {
+        this.eventWebhookEmitter.emit({
+          eventType: 'budget_exceeded',
+          toolName: normalizedCall.name,
+          arguments: normalizedCall.arguments,
+          decision: 'deny',
+          reason: error.message,
+          severity: 'high',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -2547,6 +2652,8 @@ export class Veto {
       validationResult,
       aggregatedResult.totalDurationMs
     );
+
+    this.emitDecisionEvent(validationContext, validationResult);
 
     return this.toGuardResult(validationResult);
   }
