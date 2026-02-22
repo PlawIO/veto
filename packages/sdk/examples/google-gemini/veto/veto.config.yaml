@@ -1,0 +1,6 @@
+version: "1.0"
+mode: "strict"
+logging:
+  level: "info"
+rules:
+  directory: "./rules"

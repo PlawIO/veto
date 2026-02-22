@@ -8,6 +8,7 @@ providing context to validators about previous calls.
 from typing import Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
+from copy import deepcopy
 import csv
 import io
 import json
@@ -57,7 +58,14 @@ class HistoryTracker:
         Args:
             entry: The history entry to add
         """
-        self._entries.append(entry)
+        snapshot = ToolCallHistoryEntry(
+            tool_name=entry.tool_name,
+            arguments=self._clone_arguments(entry.arguments),
+            validation_result=entry.validation_result,
+            timestamp=entry.timestamp,
+            duration_ms=entry.duration_ms,
+        )
+        self._entries.append(snapshot)
 
         # Remove oldest entries if we exceed max size
         while len(self._entries) > self._max_size:
@@ -73,8 +81,8 @@ class HistoryTracker:
         self._logger.debug(
             "History entry added",
             {
-                "tool_name": entry.tool_name,
-                "decision": entry.validation_result.decision,
+                "tool_name": snapshot.tool_name,
+                "decision": snapshot.validation_result.decision,
                 "history_size": len(self._entries),
             },
         )
@@ -106,6 +114,12 @@ class HistoryTracker:
                 duration_ms=duration_ms,
             )
         )
+
+    def _clone_arguments(self, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return deepcopy(args)
+        except Exception:
+            return dict(args)
 
     def get_all(self) -> list[ToolCallHistoryEntry]:
         """

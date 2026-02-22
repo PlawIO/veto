@@ -21,6 +21,7 @@ import type {
   ValidationContext,
   ValidationResult,
   LogLevel,
+  ToolCallHistoryEntry,
 } from '../types/config.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
@@ -32,8 +33,9 @@ import { fromMCP, isMCPTool } from '../providers/adapters.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
-  RuleCondition,
+  RuleSeverity,
   RuleSet,
+  OutputRule,
   ToolCallContext,
   ToolCallHistorySummary,
   ValidationAPIResponse,
@@ -41,6 +43,8 @@ import type {
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { validatePolicyIR } from '../rules/schema-validator.js';
+import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
+import { resolvePolicyPackExtends } from '../rules/policy-packs.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import { KernelClient } from '../kernel/client.js';
 import type { CustomConfig, CustomToolCall, CustomResponse } from '../custom/types.js';
@@ -50,7 +54,13 @@ import { VetoCloudClient, ApprovalTimeoutError } from '../cloud/client.js';
 import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import type { LocalValidationResult } from '../deterministic/types.js';
-import { isSafePattern } from '../deterministic/regex-safety.js';
+import { OutputValidator, type OutputValidationResult } from './output-validator.js';
+import {
+  EventWebhookEmitter,
+  resolveEventWebhookConfig,
+  type VetoWebhookEvent,
+  type VetoWebhookEventType,
+} from './events.js';
 
 /**
  * Veto operating mode.
@@ -84,6 +94,27 @@ export interface WrappedTools {
   definitions: ToolDefinition[];
   /** Wrapped handler functions keyed by tool name */
   implementations: Record<string, WrappedHandler>;
+}
+
+/**
+ * Optional per-call context for standalone guard checks.
+ */
+export interface GuardContext {
+  sessionId?: string;
+  agentId?: string;
+  userId?: string;
+  role?: string;
+}
+
+/**
+ * Standalone validation result returned by `guard()`.
+ */
+export interface GuardResult {
+  decision: 'allow' | 'deny' | 'require_approval';
+  reason?: string;
+  ruleId?: string;
+  severity?: RuleSeverity;
+  approvalId?: string;
 }
 
 /**
@@ -150,6 +181,14 @@ interface VetoConfigFile {
     window?: 'session';
   };
   costs?: Record<string, number | string>;
+  events?: {
+    webhook?: {
+      url?: string;
+      on?: VetoWebhookEventType[];
+      min_severity?: RuleSeverity;
+      format?: 'slack' | 'pagerduty' | 'generic' | 'cef';
+    };
+  };
 }
 
 /**
@@ -157,8 +196,11 @@ interface VetoConfigFile {
  */
 interface LoadedRulesState {
   allRules: Rule[];
+  allOutputRules: OutputRule[];
   rulesByTool: Map<string, Rule[]>;
+  outputRulesByTool: Map<string, OutputRule[]>;
   globalRules: Rule[];
+  globalOutputRules: OutputRule[];
 }
 
 interface LocalApprovalConfig {
@@ -213,6 +255,18 @@ export interface VetoOptions {
    * Can also be set via VETO_AGENT_ID environment variable.
    */
   agentId?: string;
+
+  /**
+   * User ID for tracking.
+   * Can also be set via VETO_USER_ID environment variable.
+   */
+  userId?: string;
+
+  /**
+   * Role for tracking.
+   * Can also be set via VETO_ROLE environment variable.
+   */
+  role?: string;
 
   /**
    * Additional validators to run alongside rule-based validation.
@@ -280,6 +334,8 @@ export class Veto {
   private readonly historyTracker: HistoryTracker;
   private readonly budgetTracker: BudgetTracker | null;
   private readonly interceptor: Interceptor;
+  private readonly outputValidator: OutputValidator;
+  private readonly eventWebhookEmitter: EventWebhookEmitter;
 
   // Configuration
   private readonly configDir: string;
@@ -293,6 +349,8 @@ export class Veto {
   private readonly apiRetryDelay: number;
   private readonly sessionId?: string;
   private readonly agentId?: string;
+  private readonly userId?: string;
+  private readonly role?: string;
 
   // Kernel client (lazy initialized or injected)
   private kernelClient: KernelClient | null = null;
@@ -455,9 +513,16 @@ export class Veto {
     // Approval hook
     this.onApprovalRequired = options.onApprovalRequired;
 
+    this.eventWebhookEmitter = new EventWebhookEmitter(
+      resolveEventWebhookConfig(config.events?.webhook, this.logger),
+      this.logger
+    );
+
     // Resolve tracking options
     this.sessionId = options.sessionId ?? process.env.VETO_SESSION_ID ?? generateId('session');
     this.agentId = options.agentId ?? process.env.VETO_AGENT_ID;
+    this.userId = options.userId ?? process.env.VETO_USER_ID;
+    this.role = options.role ?? process.env.VETO_ROLE;
 
     this.logger.info('Veto configuration loaded', {
       configDir: this.configDir,
@@ -470,6 +535,7 @@ export class Veto {
       customModel: this.customConfig?.model,
       cloudBaseUrl: this.cloudConfig?.baseUrl,
       rulesLoaded: rules.allRules.length,
+      outputRulesLoaded: rules.allOutputRules.length,
     });
 
     this.logger.info(`Veto running in ${this.startupMode} mode`);
@@ -542,11 +608,24 @@ export class Veto {
     }
 
     // Initialize interceptor
+    this.outputValidator = new OutputValidator({
+      logger: this.logger,
+      getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
+    });
+
     this.interceptor = new Interceptor({
       logger: this.logger,
       validationEngine: this.validationEngine,
       historyTracker: this.historyTracker,
       budgetTracker: this.budgetTracker ?? undefined,
+      sessionId: this.sessionId,
+      agentId: this.agentId,
+      userId: this.userId,
+      role: this.role,
+      onAfterValidation: (context, result) => {
+        this.emitDecisionEvent(context, result);
+      },
+      outputValidator: this.outputValidator,
     });
 
     this.logger.info('Veto initialized successfully');
@@ -621,8 +700,11 @@ export class Veto {
   ): LoadedRulesState {
     const state: LoadedRulesState = {
       allRules: [],
+      allOutputRules: [],
       rulesByTool: new Map(),
+      outputRulesByTool: new Map(),
       globalRules: [],
+      globalOutputRules: [],
     };
 
     if (!existsSync(rulesDir)) {
@@ -639,19 +721,37 @@ export class Veto {
         const parsed = parseYaml(content) as RuleSet | Rule[] | Record<string, unknown>;
 
         let rules: Rule[] = [];
+        let outputRules: OutputRule[] = [];
 
         if (Array.isArray(parsed)) {
           rules = parsed as Rule[];
-        } else if (parsed && typeof parsed === 'object' && 'rules' in parsed) {
-          validatePolicyIR(parsed);
-          rules = (parsed as RuleSet).rules ?? [];
-        } else if (parsed && typeof parsed === 'object' && 'id' in parsed) {
-          rules = [parsed as unknown as Rule];
+        } else if (parsed && typeof parsed === 'object') {
+          const parsedObject = resolvePolicyPackExtends(
+            parsed as Record<string, unknown>,
+            filePath,
+            parseYaml
+          );
+
+          if ('rules' in parsedObject || 'output_rules' in parsedObject) {
+            const normalizedForSchema = 'rules' in parsedObject
+              ? parsedObject
+              : { ...parsedObject, rules: [] };
+            validatePolicyIR(normalizedForSchema);
+
+            rules = Array.isArray(normalizedForSchema.rules)
+              ? normalizedForSchema.rules as Rule[]
+              : [];
+            outputRules = Array.isArray(normalizedForSchema.output_rules)
+              ? normalizedForSchema.output_rules as OutputRule[]
+              : [];
+          } else if ('id' in parsedObject) {
+            rules = [parsed as unknown as Rule];
+          }
         }
 
         // Process and index rules
         for (const rule of rules) {
-          if (!rule.enabled) continue;
+          if (rule.enabled === false) continue;
 
           state.allRules.push(rule);
 
@@ -666,9 +766,27 @@ export class Veto {
           }
         }
 
+        // Process and index output rules
+        for (const outputRule of outputRules) {
+          if (outputRule.enabled === false) continue;
+
+          state.allOutputRules.push(outputRule);
+
+          if (!outputRule.tools || outputRule.tools.length === 0) {
+            state.globalOutputRules.push(outputRule);
+          } else {
+            for (const toolName of outputRule.tools) {
+              const existing = state.outputRulesByTool.get(toolName) ?? [];
+              existing.push(outputRule);
+              state.outputRulesByTool.set(toolName, existing);
+            }
+          }
+        }
+
         logger.debug('Loaded rules from file', {
           path: filePath,
           count: rules.length,
+          outputCount: outputRules.length,
         });
       } catch (error) {
         logger.error(
@@ -683,6 +801,9 @@ export class Veto {
       total: state.allRules.length,
       global: state.globalRules.length,
       toolSpecific: state.rulesByTool.size,
+      outputTotal: state.allOutputRules.length,
+      outputGlobal: state.globalOutputRules.length,
+      outputToolSpecific: state.outputRulesByTool.size,
     });
 
     return state;
@@ -725,6 +846,45 @@ export class Veto {
     return [...this.rules.globalRules, ...toolSpecific];
   }
 
+  private getOutputRulesForTool(toolName: string): OutputRule[] {
+    const toolSpecific = this.rules.outputRulesByTool.get(toolName) ?? [];
+    return [...this.rules.globalOutputRules, ...toolSpecific];
+  }
+
+  private isGuardEvaluation(context: ValidationContext): boolean {
+    return context.source === 'guard';
+  }
+
+  private shouldApplyLogModeOverride(context: ValidationContext): boolean {
+    return this.mode === 'log' && !this.isGuardEvaluation(context);
+  }
+
+  private resolveSessionId(context: ValidationContext): string | undefined {
+    return context.sessionId ?? this.sessionId;
+  }
+
+  private resolveAgentId(context: ValidationContext): string | undefined {
+    return context.agentId ?? this.agentId;
+  }
+
+  private resolveUserId(context: ValidationContext): string | undefined {
+    return context.userId ?? this.userId;
+  }
+
+  private resolveRole(context: ValidationContext): string | undefined {
+    return context.role ?? this.role;
+  }
+
+  private toLocalRuleMetadata(rule: Rule): Record<string, unknown> {
+    return {
+      source: 'local',
+      ruleId: rule.id,
+      ruleName: rule.name,
+      severity: rule.severity,
+      policyVersion: '1.0',
+    };
+  }
+
   /**
    * Validate a tool call with the external API.
    */
@@ -743,8 +903,10 @@ export class Veto {
       tool_name: context.toolName,
       arguments: context.arguments,
       timestamp: context.timestamp.toISOString(),
-      session_id: this.sessionId,
-      agent_id: this.agentId,
+      session_id: this.resolveSessionId(context),
+      agent_id: this.resolveAgentId(context),
+      user_id: this.resolveUserId(context),
+      role: this.resolveRole(context),
       call_history: this.buildHistorySummary(context.callHistory),
       custom: context.custom,
     };
@@ -772,7 +934,7 @@ export class Veto {
     }
 
     // All retries failed - use fail mode
-    return this.handleAPIFailure(lastError?.message ?? 'API unavailable');
+    return this.handleAPIFailure(lastError?.message ?? 'API unavailable', context);
   }
 
   /**
@@ -844,7 +1006,7 @@ export class Veto {
       };
     } else {
       // API returned block decision
-      if (this.mode === 'log') {
+      if (this.shouldApplyLogModeOverride(context)) {
         // Log mode: log the block but allow the call
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
@@ -877,8 +1039,8 @@ export class Veto {
   /**
    * Handle API failure. In log mode, always allow. In strict mode, block.
    */
-  private handleAPIFailure(reason: string): ValidationResult {
-    if (this.mode === 'log') {
+  private handleAPIFailure(reason: string, context: ValidationContext): ValidationResult {
+    if (this.shouldApplyLogModeOverride(context)) {
       this.logger.warn('API unavailable (log mode, allowing)', { reason });
       return {
         decision: 'allow',
@@ -910,14 +1072,15 @@ export class Veto {
     let firstAllowRule: Rule | null = null;
 
     for (const rule of rules) {
-      if (!this.matchesLocalRule(rule, localContext)) {
+      if (!this.matchesLocalRule(rule, context, localContext)) {
         continue;
       }
 
       const reason = rule.description ?? `Matched rule: ${rule.name}`;
+      const metadata = this.toLocalRuleMetadata(rule);
 
       if (rule.action === 'require_approval') {
-        if (this.mode === 'log') {
+        if (this.shouldApplyLogModeOverride(context)) {
           this.logger.warn('Tool call would require approval locally (log mode)', {
             tool: context.toolName,
             ruleId: rule.id,
@@ -929,11 +1092,16 @@ export class Veto {
             reason: `[LOG MODE] Would require approval: ${reason}`,
             metadata: {
               blocked_in_strict_mode: true,
-              source: 'local',
-              ruleId: rule.id,
-              ruleName: rule.name,
-              policyVersion: '1.0',
+              ...metadata,
             },
+          };
+        }
+
+        if (this.isGuardEvaluation(context)) {
+          return {
+            decision: 'require_approval',
+            reason,
+            metadata,
           };
         }
 
@@ -941,7 +1109,7 @@ export class Veto {
       }
 
       if (rule.action === 'block') {
-        if (this.mode === 'log') {
+        if (this.shouldApplyLogModeOverride(context)) {
           this.logger.warn('Tool call would be blocked locally (log mode)', {
             tool: context.toolName,
             ruleId: rule.id,
@@ -952,10 +1120,7 @@ export class Veto {
             reason: `[LOG MODE] Would block: ${reason}`,
             metadata: {
               blocked_in_strict_mode: true,
-              source: 'local',
-              ruleId: rule.id,
-              ruleName: rule.name,
-              policyVersion: '1.0',
+              ...metadata,
             },
           };
         }
@@ -968,12 +1133,7 @@ export class Veto {
         return {
           decision: 'deny',
           reason,
-          metadata: {
-            source: 'local',
-            ruleId: rule.id,
-            ruleName: rule.name,
-            policyVersion: '1.0',
-          },
+          metadata,
         };
       }
 
@@ -994,12 +1154,7 @@ export class Veto {
       return {
         decision: 'allow',
         reason: firstAllowRule.description ?? `Allowed by rule: ${firstAllowRule.name}`,
-        metadata: {
-          source: 'local',
-          ruleId: firstAllowRule.id,
-          ruleName: firstAllowRule.name,
-          policyVersion: '1.0',
-        },
+        metadata: this.toLocalRuleMetadata(firstAllowRule),
       };
     }
 
@@ -1011,39 +1166,137 @@ export class Veto {
       ...context.arguments,
       tool_name: context.toolName,
       arguments: context.arguments,
-      session_id: this.sessionId,
-      agent_id: this.agentId,
+      session_id: this.resolveSessionId(context),
+      agent_id: this.resolveAgentId(context),
+      user_id: this.resolveUserId(context),
+      role: this.resolveRole(context),
       custom: context.custom,
     };
   }
 
-  private matchesLocalRule(rule: Rule, context: Record<string, unknown>): boolean {
-    if (rule.conditions && rule.conditions.length > 0) {
-      return rule.conditions.every((condition) => this.matchesLocalCondition(condition, context));
+  private matchesLocalRule(
+    rule: Rule,
+    validationContext: ValidationContext,
+    localContext: Record<string, unknown>
+  ): boolean {
+    if (!this.matchesLocalRuleAgents(rule, this.resolveAgentId(validationContext))) {
+      return false;
     }
 
-    if (rule.condition_groups && rule.condition_groups.length > 0) {
-      return rule.condition_groups.some((group) =>
-        group.every((condition) => this.matchesLocalCondition(condition, context))
-      );
+    const conditionsMatch = evaluateConditionCollections(
+      rule.conditions,
+      rule.condition_groups,
+      localContext,
+      {
+        now: validationContext.timestamp,
+        evaluateExpression: (expression, evalContext) =>
+          this.evaluateLocalExpression(expression, evalContext),
+      }
+    );
+
+    if (!conditionsMatch) {
+      return false;
     }
 
-    return true;
+    return this.matchesLocalSequenceConstraints(
+      rule,
+      validationContext.callHistory,
+      validationContext.timestamp
+    );
   }
 
-  private matchesLocalCondition(
-    condition: RuleCondition,
-    context: Record<string, unknown>
+  private matchesLocalRuleAgents(rule: Rule, agentId?: string): boolean {
+    if (!rule.agents) {
+      return true;
+    }
+
+    if (Array.isArray(rule.agents)) {
+      const allowedAgents = this.normalizeAgentScope(rule.agents);
+      return agentId !== undefined && allowedAgents.includes(agentId);
+    }
+
+    const excludedAgents = this.normalizeAgentScope(rule.agents.not);
+    return agentId === undefined || !excludedAgents.includes(agentId);
+  }
+
+  private normalizeAgentScope(scope: readonly unknown[]): string[] {
+    return scope.filter((value): value is string => typeof value === 'string');
+  }
+
+  private matchesLocalSequenceConstraints(
+    rule: Rule,
+    history: readonly ToolCallHistoryEntry[],
+    now: Date
   ): boolean {
-    if (condition.expression) {
-      return this.evaluateLocalExpression(condition.expression, context);
+    const blockedBy = rule.blocked_by ?? [];
+    const requires = rule.requires ?? [];
+
+    if (blockedBy.length === 0 && requires.length === 0) {
+      return true;
     }
 
-    if (condition.field && condition.operator) {
-      return this.evaluateLocalLegacyCondition(condition, context);
-    }
+    const blockedByMatched = blockedBy.some((constraint) =>
+      this.hasMatchingHistoryEntry(constraint, history, now)
+    );
 
-    return true;
+    const missingRequirement = requires.some((constraint) =>
+      !this.hasMatchingHistoryEntry(constraint, history, now)
+    );
+
+    return blockedByMatched || missingRequirement;
+  }
+
+  private hasMatchingHistoryEntry(
+    constraint: NonNullable<Rule['requires']>[number],
+    history: readonly ToolCallHistoryEntry[],
+    now: Date
+  ): boolean {
+    const nowMs = now.getTime();
+    const withinMs = typeof constraint.within === 'number'
+      ? Math.max(0, constraint.within) * 1000
+      : null;
+
+    return history.some((entry) => {
+      if (entry.toolName !== constraint.tool) {
+        return false;
+      }
+
+      if (entry.validationResult.decision === 'deny') {
+        return false;
+      }
+
+      if (withinMs !== null) {
+        const ageMs = nowMs - entry.timestamp.getTime();
+        if (ageMs < 0 || ageMs > withinMs) {
+          return false;
+        }
+      }
+
+      const historicalContext = this.buildHistoricalEvaluationContext(entry);
+
+      return evaluateConditionCollections(
+        constraint.conditions,
+        constraint.condition_groups,
+        historicalContext,
+        {
+          now: entry.timestamp,
+          evaluateExpression: (expression, evalContext) =>
+            this.evaluateLocalExpression(expression, evalContext),
+        }
+      );
+    });
+  }
+
+  private buildHistoricalEvaluationContext(
+    historyEntry: ToolCallHistoryEntry
+  ): Record<string, unknown> {
+    return {
+      ...historyEntry.arguments,
+      tool_name: historyEntry.toolName,
+      arguments: historyEntry.arguments,
+      decision: historyEntry.validationResult.decision,
+      timestamp: historyEntry.timestamp.toISOString(),
+    };
   }
 
   private evaluateLocalExpression(
@@ -1074,85 +1327,6 @@ export class Veto {
       });
       return false;
     }
-  }
-
-  private evaluateLocalLegacyCondition(
-    condition: RuleCondition,
-    context: Record<string, unknown>
-  ): boolean {
-    const fieldValue = this.resolveLocalField(condition.field!, context);
-    const expected = condition.value;
-
-    switch (condition.operator) {
-      case 'equals':
-        return fieldValue === expected;
-      case 'not_equals':
-        return fieldValue !== expected;
-      case 'contains':
-        if (typeof fieldValue === 'string' && typeof expected === 'string') {
-          return fieldValue.includes(expected);
-        }
-        if (Array.isArray(fieldValue)) {
-          return fieldValue.includes(expected);
-        }
-        return false;
-      case 'not_contains':
-        if (typeof fieldValue === 'string' && typeof expected === 'string') {
-          return !fieldValue.includes(expected);
-        }
-        if (Array.isArray(fieldValue)) {
-          return !fieldValue.includes(expected);
-        }
-        return true;
-      case 'starts_with':
-        return typeof fieldValue === 'string' && typeof expected === 'string'
-          && fieldValue.startsWith(expected);
-      case 'ends_with':
-        return typeof fieldValue === 'string' && typeof expected === 'string'
-          && fieldValue.endsWith(expected);
-      case 'matches':
-        if (typeof fieldValue !== 'string' || typeof expected !== 'string') {
-          return false;
-        }
-        if (expected.length > 256 || !isSafePattern(expected)) {
-          return false;
-        }
-        try {
-          return new RegExp(expected).test(fieldValue);
-        } catch {
-          return false;
-        }
-      case 'greater_than':
-        return Number(fieldValue) > Number(expected);
-      case 'less_than':
-        return Number(fieldValue) < Number(expected);
-      case 'in':
-        return Array.isArray(expected) && expected.includes(fieldValue);
-      case 'not_in':
-        return Array.isArray(expected) && !expected.includes(fieldValue);
-      default:
-        return false;
-    }
-  }
-
-  private resolveLocalField(
-    field: string,
-    context: Record<string, unknown>
-  ): unknown {
-    const parts = field.split('.');
-    let current: unknown = context;
-
-    for (const part of parts) {
-      if (current === null || current === undefined) {
-        return undefined;
-      }
-      if (typeof current !== 'object') {
-        return undefined;
-      }
-      current = (current as Record<string, unknown>)[part];
-    }
-
-    return current;
   }
 
   /**
@@ -1199,7 +1373,7 @@ export class Veto {
       return this.handleKernelResponse(response, context);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return this.handleKernelFailure(reason);
+      return this.handleKernelFailure(reason, context);
     }
   }
 
@@ -1229,7 +1403,7 @@ export class Veto {
       };
     } else {
       // Kernel returned block decision
-      if (this.mode === 'log') {
+      if (this.shouldApplyLogModeOverride(context)) {
         // Log mode: log the block but allow the call
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
@@ -1262,8 +1436,11 @@ export class Veto {
   /**
    * Handle kernel failure. In log mode, always allow. In strict mode, block.
    */
-  private handleKernelFailure(reason: string): ValidationResult {
-    if (this.mode === 'log') {
+  private handleKernelFailure(
+    reason: string,
+    context: ValidationContext
+  ): ValidationResult {
+    if (this.shouldApplyLogModeOverride(context)) {
       this.logger.warn('Kernel unavailable (log mode, allowing)', { reason });
       return {
         decision: 'allow',
@@ -1326,7 +1503,7 @@ export class Veto {
       return this.handleCustomResponse(response, context);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return this.handleCustomFailure(reason);
+      return this.handleCustomFailure(reason, context);
     }
   }
 
@@ -1356,7 +1533,7 @@ export class Veto {
       };
     } else {
       // Custom provider returned block decision
-      if (this.mode === 'log') {
+      if (this.shouldApplyLogModeOverride(context)) {
         // Log mode: log the block but allow the call
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
@@ -1389,8 +1566,11 @@ export class Veto {
   /**
    * Handle custom provider failure. In log mode, always allow. In strict mode, block.
    */
-  private handleCustomFailure(reason: string): ValidationResult {
-    if (this.mode === 'log') {
+  private handleCustomFailure(
+    reason: string,
+    context: ValidationContext
+  ): ValidationResult {
+    if (this.shouldApplyLogModeOverride(context)) {
       this.logger.warn('Custom provider unavailable (log mode, allowing)', { reason });
       return {
         decision: 'allow',
@@ -1428,30 +1608,35 @@ export class Veto {
    * Returns null if the policy is not eligible for local validation.
    */
   private tryLocalDeterministic(
-    toolName: string,
-    args: Record<string, unknown>
+    context: ValidationContext
   ): LocalValidationResult | null {
     if (!this.policyCache) return null;
 
-    const policy = this.policyCache.get(toolName);
+    const policy = this.policyCache.get(context.toolName);
     if (!policy) return null;
 
     if (policy.mode !== 'deterministic') return null;
     if (policy.hasSessionConstraints || policy.hasRateLimits) return null;
 
-    const result = validateDeterministic(toolName, args, policy.constraints);
+    const result = validateDeterministic(
+      context.toolName,
+      context.arguments,
+      policy.constraints
+    );
 
     this.getCloudClient().logDecision({
-      tool_name: toolName,
-      arguments: args,
+      tool_name: context.toolName,
+      arguments: context.arguments,
       decision: result.decision,
       reason: result.reason,
       mode: 'deterministic',
       latency_ms: result.latencyMs,
       source: 'client',
       context: {
-        session_id: this.sessionId,
-        agent_id: this.agentId,
+        session_id: this.resolveSessionId(context),
+        agent_id: this.resolveAgentId(context),
+        user_id: this.resolveUserId(context),
+        role: this.resolveRole(context),
       },
     });
 
@@ -1466,10 +1651,7 @@ export class Veto {
     context: ValidationContext
   ): Promise<ValidationResult> {
     // Fast path: try client-side deterministic validation
-    const localResult = this.tryLocalDeterministic(
-      context.toolName,
-      context.arguments
-    );
+    const localResult = this.tryLocalDeterministic(context);
     if (localResult) {
       if (localResult.decision === 'allow') {
         this.logger.debug('Local deterministic validation allowed', {
@@ -1479,7 +1661,7 @@ export class Veto {
         return { decision: 'allow', reason: localResult.reason };
       }
 
-      if (this.mode === 'log') {
+      if (this.shouldApplyLogModeOverride(context)) {
         this.logger.warn('Tool call would be blocked locally (log mode)', {
           tool: context.toolName,
           reason: localResult.reason,
@@ -1507,8 +1689,10 @@ export class Veto {
     const apiContext: Record<string, unknown> = {
       call_id: context.callId,
       timestamp: context.timestamp.toISOString(),
-      session_id: this.sessionId,
-      agent_id: this.agentId,
+      session_id: this.resolveSessionId(context),
+      agent_id: this.resolveAgentId(context),
+      user_id: this.resolveUserId(context),
+      role: this.resolveRole(context),
     };
     if (context.custom) {
       apiContext.custom = context.custom;
@@ -1530,16 +1714,31 @@ export class Veto {
       }
 
       // Handle require_approval decision
-      if (
-        response.decision === 'require_approval' &&
-        response.approval_id
-      ) {
-        return this.handleApprovalFlow(
-          context,
-          response.approval_id,
-          response.reason,
-          Object.keys(metadata).length > 0 ? metadata : undefined
-        );
+      if (response.decision === 'require_approval') {
+        const metadataWithApproval = response.approval_id
+          ? { ...metadata, approvalId: response.approval_id }
+          : metadata;
+
+        if (this.isGuardEvaluation(context)) {
+          return {
+            decision: 'require_approval',
+            reason: response.reason,
+            metadata: Object.keys(metadataWithApproval).length > 0
+              ? metadataWithApproval
+              : undefined,
+          };
+        }
+
+        if (response.approval_id) {
+          return this.handleApprovalFlow(
+            context,
+            response.approval_id,
+            response.reason,
+            Object.keys(metadataWithApproval).length > 0
+              ? metadataWithApproval
+              : undefined
+          );
+        }
       }
 
       if (response.decision === 'allow') {
@@ -1554,7 +1753,7 @@ export class Veto {
       }
 
       // Cloud returned deny
-      if (this.mode === 'log') {
+      if (this.shouldApplyLogModeOverride(context)) {
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
           reason: response.reason,
@@ -1578,7 +1777,7 @@ export class Veto {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
 
-      if (this.mode === 'log') {
+      if (this.shouldApplyLogModeOverride(context)) {
         this.logger.warn('Cloud unavailable (log mode, allowing)', {
           reason,
         });
@@ -1701,12 +1900,7 @@ export class Veto {
     rule: Rule,
     reason: string
   ): Promise<ValidationResult> {
-    const metadataBase = {
-      source: 'local',
-      ruleId: rule.id,
-      ruleName: rule.name,
-      policyVersion: '1.0',
-    };
+    const metadataBase = this.toLocalRuleMetadata(rule);
 
     const callbackUrl = this.localApprovalConfig.callbackUrl;
     if (!callbackUrl) {
@@ -1728,8 +1922,8 @@ export class Veto {
     const approvalContext: Record<string, unknown> = {
       call_id: context.callId,
       timestamp: context.timestamp.toISOString(),
-      session_id: this.sessionId,
-      agent_id: this.agentId,
+      session_id: this.resolveSessionId(context),
+      agent_id: this.resolveAgentId(context),
     };
     if (this.localApprovalConfig.includeCustomContext && context.custom) {
       approvalContext.custom = context.custom;
@@ -1971,6 +2165,140 @@ export class Veto {
     return null;
   }
 
+  private isBudgetExceededResult(result: ValidationResult): boolean {
+    const metadata = result.metadata;
+    if (!metadata) return false;
+
+    const rawFlag = metadata.budgetExceeded ?? metadata.budget_exceeded;
+    if (typeof rawFlag === 'boolean') {
+      return rawFlag;
+    }
+
+    if (typeof rawFlag === 'string') {
+      const normalizedFlag = rawFlag.trim().toLowerCase();
+      if (
+        normalizedFlag === 'true'
+        || normalizedFlag === '1'
+        || normalizedFlag === 'budget_exceeded'
+      ) {
+        return true;
+      }
+    }
+
+    const rawEventType = metadata.eventType ?? metadata.event_type;
+    return (
+      typeof rawEventType === 'string'
+      && rawEventType.trim().toLowerCase() === 'budget_exceeded'
+    );
+  }
+
+  private resolveDecisionEventType(result: ValidationResult): VetoWebhookEventType | null {
+    if (this.isBudgetExceededResult(result)) {
+      return 'budget_exceeded';
+    }
+
+    if (result.decision === 'deny') {
+      return 'deny';
+    }
+
+    if (result.decision === 'require_approval') {
+      return 'require_approval';
+    }
+
+    return null;
+  }
+
+  private emitDecisionEvent(
+    context: ValidationContext,
+    result: ValidationResult
+  ): void {
+    const eventType = this.resolveDecisionEventType(result);
+    if (!eventType) return;
+
+    const severityFromMetadata = this.extractMetadataSeverity(result.metadata);
+    const event: VetoWebhookEvent = {
+      eventType,
+      toolName: context.toolName,
+      arguments: context.arguments,
+      decision: result.decision,
+      reason: result.reason,
+      ruleId: this.extractMetadataString(result.metadata, ['ruleId', 'rule_id']),
+      severity: eventType === 'budget_exceeded'
+        ? severityFromMetadata ?? 'high'
+        : severityFromMetadata,
+      timestamp: context.timestamp.toISOString(),
+    };
+
+    this.eventWebhookEmitter.emit(event);
+  }
+
+  private toGuardResult(result: ValidationResult): GuardResult {
+    const metadata = result.metadata;
+    const ruleId = this.extractMetadataString(metadata, ['ruleId', 'rule_id']);
+    const approvalId = this.extractMetadataString(metadata, ['approvalId', 'approval_id']);
+    const severity = this.extractMetadataSeverity(metadata);
+
+    const decision: GuardResult['decision'] =
+      result.decision === 'deny' || result.decision === 'require_approval'
+        ? result.decision
+        : 'allow';
+
+    return {
+      decision,
+      reason: result.reason,
+      ruleId,
+      severity,
+      approvalId,
+    };
+  }
+
+  private extractMetadataString(
+    metadata: Record<string, unknown> | undefined,
+    keys: string[]
+  ): string | undefined {
+    if (!metadata) return undefined;
+
+    for (const key of keys) {
+      const value = metadata[key];
+
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+      }
+
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractMetadataSeverity(
+    metadata: Record<string, unknown> | undefined
+  ): RuleSeverity | undefined {
+    if (!metadata) return undefined;
+
+    const raw =
+      metadata.severity
+      ?? metadata.ruleSeverity
+      ?? metadata.rule_severity;
+
+    if (typeof raw !== 'string') return undefined;
+
+    const normalized = raw.trim().toLowerCase();
+    if (
+      normalized === 'critical'
+      || normalized === 'high'
+      || normalized === 'medium'
+      || normalized === 'low'
+      || normalized === 'info'
+    ) {
+      return normalized;
+    }
+
+    return undefined;
+  }
+
   /**
    * Build history summary for API.
    */
@@ -1989,6 +2317,14 @@ export class Veto {
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private validateOutputOrThrow(toolName: string, output: unknown): unknown {
+    const outputResult = this.validateOutput(toolName, output);
+    if (outputResult.decision === 'block') {
+      throw new Error(outputResult.reason ?? `Tool output blocked for ${toolName}`);
+    }
+    return outputResult.output;
   }
 
 
@@ -2067,7 +2403,8 @@ export class Veto {
 
         // Execute the original function with potentially modified arguments
         const finalArgs = result.finalArguments ?? input;
-        return originalFunc.call(tool, finalArgs);
+        const executionResult = await originalFunc.call(tool, finalArgs);
+        return veto.validateOutputOrThrow(toolName, executionResult);
       };
 
       // Replace func
@@ -2094,7 +2431,8 @@ export class Veto {
 
           // Call original invoke with potentially modified arguments
           const finalArgs = result.finalArguments ?? input;
-          return originalInvoke.call(tool, finalArgs, ...rest);
+          const executionResult = await originalInvoke.call(tool, finalArgs, ...rest);
+          return veto.validateOutputOrThrow(toolName, executionResult);
         };
       }
 
@@ -2136,9 +2474,11 @@ export class Veto {
 
           const finalArgs = result.finalArguments ?? callArgs;
           if (args.length === 1 && typeof args[0] === 'object') {
-            return originalFunc.call(tool, finalArgs);
+            const executionResult = await originalFunc.call(tool, finalArgs);
+            return veto.validateOutputOrThrow(toolName, executionResult);
           }
-          return originalFunc.apply(tool, args);
+          const executionResult = await originalFunc.apply(tool, args);
+          return veto.validateOutputOrThrow(toolName, executionResult);
         };
 
         wrapped[key] = wrappedFunc;
@@ -2234,7 +2574,8 @@ export class Veto {
       }
 
       const finalArgs = result.finalArguments ?? callArgs;
-      return serverClient.callTool({ name: args.name, arguments: finalArgs });
+      const executionResult = await serverClient.callTool({ name: args.name, arguments: finalArgs });
+      return veto.validateOutputOrThrow(args.name, executionResult) as MCPToolResult;
     };
 
     this.logger.debug('MCP tools wrapped', { count: tools.length });
@@ -2254,7 +2595,67 @@ export class Veto {
       id: call.id || generateToolCallId(),
     };
 
-    return this.interceptor.intercept(normalizedCall);
+    try {
+      return await this.interceptor.intercept(normalizedCall);
+    } catch (error) {
+      if (error instanceof BudgetExceededError) {
+        this.eventWebhookEmitter.emit({
+          eventType: 'budget_exceeded',
+          toolName: normalizedCall.name,
+          arguments: normalizedCall.arguments,
+          decision: 'deny',
+          reason: error.message,
+          severity: 'high',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Validate and transform tool output against configured output rules.
+   */
+  validateOutput(toolName: string, output: unknown): OutputValidationResult {
+    return this.outputValidator.validate(toolName, output);
+  }
+
+  /**
+   * Run a standalone guard check without wrapping or executing a tool.
+   *
+   * Unlike interceptor execution, this returns raw validation outcomes in log mode.
+   */
+  async guard(
+    toolName: string,
+    args: Record<string, unknown>,
+    context: GuardContext = {}
+  ): Promise<GuardResult> {
+    const validationContext: ValidationContext = {
+      toolName,
+      arguments: args,
+      callId: generateToolCallId(),
+      timestamp: new Date(),
+      callHistory: this.historyTracker.getAll(),
+      sessionId: context.sessionId ?? this.sessionId,
+      agentId: context.agentId ?? this.agentId,
+      userId: context.userId ?? this.userId,
+      role: context.role ?? this.role,
+      source: 'guard',
+    };
+
+    const aggregatedResult = await this.validationEngine.validate(validationContext);
+    const validationResult = aggregatedResult.finalResult;
+
+    this.historyTracker.record(
+      toolName,
+      args,
+      validationResult,
+      aggregatedResult.totalDurationMs
+    );
+
+    this.emitDecisionEvent(validationContext, validationResult);
+
+    return this.toGuardResult(validationResult);
   }
 
 

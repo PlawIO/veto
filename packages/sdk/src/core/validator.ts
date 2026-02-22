@@ -187,6 +187,16 @@ export class ValidationEngine {
             reason: result.reason,
           });
           break;
+        } else if (result.decision === 'require_approval') {
+          // Stop on approval requirement so callers can route to HITL flows.
+          finalResult = result;
+          this.logger.info('Tool call requires approval by validator', {
+            toolName: context.toolName,
+            callId: context.callId,
+            validator: validator.name,
+            reason: result.reason,
+          });
+          break;
         } else if (result.decision === 'modify' && result.modifiedArguments) {
           // Update context with modified arguments for next validator
           currentContext = {

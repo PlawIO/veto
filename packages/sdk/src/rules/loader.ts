@@ -10,8 +10,9 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import type { Logger } from '../utils/logger.js';
-import type { Rule, RuleSet, LoadedRules } from './types.js';
+import type { Rule, RuleSet, LoadedRules, OutputRule } from './types.js';
 import { validatePolicyIR, PolicySchemaError } from './schema-validator.js';
+import { resolvePolicyPackExtends } from './policy-packs.js';
 
 /**
  * Options for the rule loader.
@@ -48,8 +49,11 @@ export class RuleLoader {
   private loadedRules: LoadedRules = {
     ruleSets: [],
     allRules: [],
+    allOutputRules: [],
     rulesByTool: new Map(),
+    outputRulesByTool: new Map(),
     globalRules: [],
+    globalOutputRules: [],
     sourceFiles: [],
   };
 
@@ -123,9 +127,15 @@ export class RuleLoader {
       return;
     }
 
-    this.validateAgainstSchema(parsed, filePath);
+    const parsedObject = resolvePolicyPackExtends(
+      parsed as Record<string, unknown>,
+      filePath,
+      this.yamlParser
+    );
 
-    const ruleSet = this.parseRuleSet(parsed as Record<string, unknown>, filePath);
+    this.validateAgainstSchema(parsedObject, filePath);
+
+    const ruleSet = this.parseRuleSet(parsedObject, filePath);
     if (ruleSet) {
       this.loadedRules.ruleSets.push(ruleSet);
       this.loadedRules.sourceFiles.push(filePath);
@@ -153,9 +163,15 @@ export class RuleLoader {
       return;
     }
 
-    this.validateAgainstSchema(parsed, sourceName);
+    const parsedObject = resolvePolicyPackExtends(
+      parsed as Record<string, unknown>,
+      sourceName,
+      this.yamlParser
+    );
 
-    const ruleSet = this.parseRuleSet(parsed as Record<string, unknown>, sourceName);
+    this.validateAgainstSchema(parsedObject, sourceName);
+
+    const ruleSet = this.parseRuleSet(parsedObject, sourceName);
     if (ruleSet) {
       this.loadedRules.ruleSets.push(ruleSet);
       this.loadedRules.sourceFiles.push(sourceName);
@@ -204,14 +220,27 @@ export class RuleLoader {
   }
 
   /**
+   * Get output rules applicable to a specific tool.
+   */
+  getOutputRulesForTool(toolName: string): OutputRule[] {
+    const toolSpecific = this.loadedRules.outputRulesByTool.get(toolName) ?? [];
+    return [...this.loadedRules.globalOutputRules, ...toolSpecific].filter(
+      (rule) => rule.enabled
+    );
+  }
+
+  /**
    * Clear all loaded rules.
    */
   clear(): void {
     this.loadedRules = {
       ruleSets: [],
       allRules: [],
+      allOutputRules: [],
       rulesByTool: new Map(),
+      outputRulesByTool: new Map(),
       globalRules: [],
+      globalOutputRules: [],
       sourceFiles: [],
     };
     this.logger.debug('Cleared all rules');
@@ -314,7 +343,11 @@ export class RuleLoader {
       version: (data.version as string) ?? '1.0',
       name: (data.name as string) ?? source,
       description: data.description as string | undefined,
+      extends: data.extends as string | undefined,
       rules: rules.map((r, i) => this.parseRule(r, `${source}:rule-${i}`)),
+      output_rules: Array.isArray(data.output_rules)
+        ? data.output_rules.map((r, i) => this.parseOutputRule(r, `${source}:output-rule-${i}`))
+        : undefined,
       settings: data.settings as RuleSet['settings'],
     };
   }
@@ -337,8 +370,37 @@ export class RuleLoader {
       severity: (ruleData.severity as Rule['severity']) ?? 'medium',
       action: (ruleData.action as Rule['action']) ?? 'block',
       tools: ruleData.tools as string[] | undefined,
+      agents: ruleData.agents as Rule['agents'],
       conditions: ruleData.conditions as Rule['conditions'],
       condition_groups: ruleData.condition_groups as Rule['condition_groups'],
+      blocked_by: ruleData.blocked_by as Rule['blocked_by'],
+      requires: ruleData.requires as Rule['requires'],
+      tags: ruleData.tags as string[] | undefined,
+      metadata: ruleData.metadata as Record<string, unknown> | undefined,
+    };
+  }
+
+  /**
+   * Parse a single output rule from YAML data.
+   */
+  private parseOutputRule(data: unknown, source: string): OutputRule {
+    if (!data || typeof data !== 'object') {
+      throw new Error(`Invalid output rule at ${source}`);
+    }
+
+    const ruleData = data as Record<string, unknown>;
+
+    return {
+      id: (ruleData.id as string) ?? `auto-output-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: (ruleData.name as string) ?? 'Unnamed Output Rule',
+      description: ruleData.description as string | undefined,
+      enabled: ruleData.enabled !== false,
+      severity: (ruleData.severity as OutputRule['severity']) ?? 'medium',
+      action: (ruleData.action as OutputRule['action']) ?? 'log',
+      tools: ruleData.tools as string[] | undefined,
+      output_conditions: ruleData.output_conditions as OutputRule['output_conditions'],
+      output_condition_groups: ruleData.output_condition_groups as OutputRule['output_condition_groups'],
+      redact_with: ruleData.redact_with as string | undefined,
       tags: ruleData.tags as string[] | undefined,
       metadata: ruleData.metadata as Record<string, unknown> | undefined,
     };
@@ -349,8 +411,11 @@ export class RuleLoader {
    */
   private buildIndex(): void {
     this.loadedRules.allRules = [];
+    this.loadedRules.allOutputRules = [];
     this.loadedRules.rulesByTool = new Map();
+    this.loadedRules.outputRulesByTool = new Map();
     this.loadedRules.globalRules = [];
+    this.loadedRules.globalOutputRules = [];
 
     for (const ruleSet of this.loadedRules.ruleSets) {
       for (const rule of ruleSet.rules) {
@@ -368,12 +433,29 @@ export class RuleLoader {
           }
         }
       }
+
+      for (const outputRule of ruleSet.output_rules ?? []) {
+        this.loadedRules.allOutputRules.push(outputRule);
+
+        if (!outputRule.tools || outputRule.tools.length === 0) {
+          this.loadedRules.globalOutputRules.push(outputRule);
+        } else {
+          for (const toolName of outputRule.tools) {
+            const existing = this.loadedRules.outputRulesByTool.get(toolName) ?? [];
+            existing.push(outputRule);
+            this.loadedRules.outputRulesByTool.set(toolName, existing);
+          }
+        }
+      }
     }
 
     this.logger.debug('Built rule index', {
       totalRules: this.loadedRules.allRules.length,
       globalRules: this.loadedRules.globalRules.length,
       toolsWithRules: this.loadedRules.rulesByTool.size,
+      totalOutputRules: this.loadedRules.allOutputRules.length,
+      globalOutputRules: this.loadedRules.globalOutputRules.length,
+      toolsWithOutputRules: this.loadedRules.outputRulesByTool.size,
     });
   }
 }

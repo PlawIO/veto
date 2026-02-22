@@ -35,6 +35,129 @@ describe('Policy IR v1 Schema Validator', () => {
         ],
       })).not.toThrow();
     });
+
+    it('should accept output rules with redact action', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        output_rules: [
+          {
+            id: 'redact-output',
+            name: 'Redact output',
+            action: 'redact',
+            output_conditions: [
+              {
+                field: 'output.email',
+                operator: 'matches',
+                value: '[^@]+@[^@]+',
+              },
+            ],
+            redact_with: '[REDACTED]',
+          },
+        ],
+      })).not.toThrow();
+    });
+
+    it('should accept extends field', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        extends: '@veto/coding-agent',
+      })).not.toThrow();
+    });
+
+    it('should accept blocked_by and requires sequence constraints', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'sequence',
+            name: 'Sequence rule',
+            action: 'block',
+            tools: ['send_email'],
+            blocked_by: [
+              {
+                tool: 'read_file',
+                conditions: [
+                  {
+                    field: 'arguments.path',
+                    operator: 'starts_with',
+                    value: '/etc/secrets',
+                  },
+                ],
+              },
+            ],
+            requires: [
+              {
+                tool: 'verify_identity',
+                within: 300,
+              },
+            ],
+          },
+        ],
+      })).not.toThrow();
+    });
+
+    it('should accept within_hours and outside_hours operators', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'block-off-hours',
+            name: 'Block outside business hours',
+            action: 'block',
+            conditions: [
+              {
+                field: 'context.time',
+                operator: 'outside_hours',
+                value: {
+                  start: '09:00',
+                  end: '17:00',
+                  timezone: 'America/New_York',
+                  days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+                },
+              },
+            ],
+          },
+          {
+            id: 'allow-in-window',
+            name: 'Allow in work hours',
+            action: 'allow',
+            conditions: [
+              {
+                field: 'context.time',
+                operator: 'within_hours',
+                value: {
+                  start: '09:00',
+                  end: '17:00',
+                  timezone: 'America/New_York',
+                },
+              },
+            ],
+          },
+        ],
+      })).not.toThrow();
+    });
+
+    it('should accept rule agents include and exclude scopes', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'agent-allow',
+            name: 'Allow only specific agents',
+            action: 'block',
+            agents: ['agent-a', 'agent-b'],
+          },
+          {
+            id: 'agent-exclude',
+            name: 'Exclude specific agents',
+            action: 'block',
+            agents: {
+              not: ['agent-c'],
+            },
+          },
+        ],
+      })).not.toThrow();
+    });
   });
 
   describe('invalid documents', () => {
@@ -70,6 +193,20 @@ describe('Policy IR v1 Schema Validator', () => {
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);
     });
 
+    it('should reject bad output action', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [],
+        output_rules: [
+          {
+            id: 'bad-output-action',
+            name: 'Bad output action',
+            action: 'allow',
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
     it('should reject bad operator', () => {
       const data = loadFixture('invalid-bad-operator.yaml');
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);
@@ -83,6 +220,86 @@ describe('Policy IR v1 Schema Validator', () => {
     it('should reject rule missing id', () => {
       const data = loadFixture('invalid-rule-missing-id.yaml');
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);
+    });
+
+    it('should reject negative requires.within values', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'bad-within',
+            name: 'Bad within',
+            action: 'block',
+            requires: [
+              {
+                tool: 'verify_identity',
+                within: -5,
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
+    it('should reject invalid agents scope', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'bad-agents',
+            name: 'Bad agents scope',
+            action: 'block',
+            agents: {
+              not: 'agent-a',
+            },
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
+    it('should reject non-object values for time operators', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'bad-time-value',
+            name: 'Bad time operator value',
+            action: 'block',
+            conditions: [
+              {
+                field: 'context.time',
+                operator: 'within_hours',
+                value: '09:00-17:00',
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
+    it('should reject invalid day abbreviations for time operators', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'bad-time-day',
+            name: 'Bad time day',
+            action: 'block',
+            conditions: [
+              {
+                field: 'context.time',
+                operator: 'outside_hours',
+                value: {
+                  start: '09:00',
+                  end: '17:00',
+                  timezone: 'UTC',
+                  days: ['monday'],
+                },
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
     });
   });
 

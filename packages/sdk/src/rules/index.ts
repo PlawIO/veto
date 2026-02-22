@@ -11,3 +11,5 @@ export * from './rule-validator.js';
 export * from './expression-validator.js';
 export * from './schema-validator.js';
 export * from './policy-ir-schema.js';
+export * from './condition-evaluator.js';
+export * from './patterns.js';

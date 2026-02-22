@@ -15,7 +15,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 /**
  * Validation decision for a tool call.
  */
-export type ValidationDecision = 'allow' | 'deny' | 'modify';
+export type ValidationDecision = 'allow' | 'deny' | 'modify' | 'require_approval';
 
 /**
  * Result of validating a tool call.
@@ -45,6 +45,16 @@ export interface ValidationContext {
   timestamp: Date;
   /** History of previous tool calls in this session */
   callHistory: readonly ToolCallHistoryEntry[];
+  /** Session identifier for this call (falls back to instance-level session when omitted) */
+  sessionId?: string;
+  /** Agent identifier for this call (falls back to instance-level agent when omitted) */
+  agentId?: string;
+  /** User identifier for this call (falls back to instance-level user when omitted) */
+  userId?: string;
+  /** Role for this call (falls back to instance-level role when omitted) */
+  role?: string;
+  /** Indicates whether validation is being run for interception or standalone guard checks */
+  source?: 'interceptor' | 'guard';
   /** Custom context data passed by the user */
   custom?: Record<string, unknown>;
 }

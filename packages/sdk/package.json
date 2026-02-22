@@ -81,6 +81,7 @@
   },
   "files": [
     "dist",
+    "packs",
     "README.md"
   ],
   "exports": {
@@ -131,6 +132,10 @@
     "./integrations/langchain": {
       "types": "./dist/integrations/langchain/index.d.ts",
       "import": "./dist/integrations/langchain/index.js"
+    },
+    "./integrations/openai-agents": {
+      "types": "./dist/integrations/openai-agents/index.d.ts",
+      "import": "./dist/integrations/openai-agents/index.js"
     }
   },
   "dependencies": {

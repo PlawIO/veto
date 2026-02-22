@@ -5,8 +5,10 @@ Core module exports for Veto.
 from veto.core.veto import (
     Veto,
     ToolCallDeniedError,
+    GuardResult,
     VetoOptions,
     VetoMode,
+    ValidationMode,
     WrappedTools,
     WrappedHandler,
 )
@@ -31,13 +33,31 @@ from veto.core.interceptor import (
     InterceptorOptions,
     InterceptionResult,
 )
+from veto.core.output_validator import (
+    OutputValidator,
+    OutputValidatorOptions,
+    OutputValidationResult,
+)
+from veto.core.events import (
+    EventWebhookConfig,
+    WebhookEvent,
+    WebhookEventType,
+    WebhookFormat,
+    EventWebhookEmitter,
+    format_slack_payload,
+    format_pagerduty_payload,
+    format_generic_payload,
+    format_cef_payload,
+)
 
 __all__ = [
     # Veto
     "Veto",
     "ToolCallDeniedError",
+    "GuardResult",
     "VetoOptions",
     "VetoMode",
+    "ValidationMode",
     "WrappedTools",
     "WrappedHandler",
     # Validator
@@ -55,4 +75,18 @@ __all__ = [
     "Interceptor",
     "InterceptorOptions",
     "InterceptionResult",
+    # Output validator
+    "OutputValidator",
+    "OutputValidatorOptions",
+    "OutputValidationResult",
+    # Events
+    "EventWebhookConfig",
+    "WebhookEvent",
+    "WebhookEventType",
+    "WebhookFormat",
+    "EventWebhookEmitter",
+    "format_slack_payload",
+    "format_pagerduty_payload",
+    "format_generic_payload",
+    "format_cef_payload",
 ]

@@ -1,0 +1,72 @@
+version: "1.0"
+name: browser-automation-pack
+description: Safety defaults for browser automation agents.
+rules:
+  - id: browser-automation-block-malicious-urls
+    name: Block malicious URL navigation
+    description: Prevent navigation to dangerous URL schemes and loopback targets.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - navigate
+      - goto
+      - open_url
+    condition_groups:
+      - - field: arguments.url
+          operator: starts_with
+          value: "javascript:"
+      - - field: arguments.url
+          operator: starts_with
+          value: "data:"
+      - - field: arguments.url
+          operator: starts_with
+          value: "file:"
+      - - field: arguments.url
+          operator: contains
+          value: localhost
+      - - field: arguments.url
+          operator: contains
+          value: 127.0.0.1
+
+  - id: browser-automation-block-password-input
+    name: Block password field input
+    description: Prevent automation from typing into password fields.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - type
+      - fill
+      - input_text
+    condition_groups:
+      - - field: arguments.selector
+          operator: contains
+          value: password
+      - - field: arguments.field
+          operator: contains
+          value: password
+      - - field: arguments.name
+          operator: contains
+          value: password
+
+  - id: browser-automation-block-form-submissions
+    name: Block automated form submission
+    description: Prevent direct submission actions in browser flows.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - click
+      - submit_form
+      - press_key
+    condition_groups:
+      - - field: arguments.selector
+          operator: contains
+          value: 'type="submit"'
+      - - field: arguments.selector
+          operator: contains
+          value: button[type=submit]
+      - - field: arguments.key
+          operator: equals
+          value: Enter

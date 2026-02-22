@@ -4,7 +4,13 @@
  * @module core
  */
 
-export { Veto, ToolCallDeniedError, type VetoOptions } from './veto.js';
+export {
+  Veto,
+  ToolCallDeniedError,
+  type VetoOptions,
+  type GuardContext,
+  type GuardResult,
+} from './veto.js';
 export {
   ValidationEngine,
   createPassthroughValidator,
@@ -31,3 +37,15 @@ export {
   type InterceptorOptions,
   type InterceptionResult,
 } from './interceptor.js';
+export {
+  EventWebhookEmitter,
+  formatSlackPayload,
+  formatPagerDutyPayload,
+  formatGenericPayload,
+  formatCefPayload,
+  resolveEventWebhookConfig,
+  type EventWebhookConfig,
+  type VetoWebhookEvent,
+  type VetoWebhookEventType,
+  type VetoWebhookFormat,
+} from './events.js';

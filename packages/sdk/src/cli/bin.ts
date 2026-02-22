@@ -30,6 +30,7 @@ Commands:
 
 Options:
   --force, -f          Force overwrite existing files (init)
+  --pack <name>        Scaffold with a built-in policy pack (init)
   --quiet, -q          Suppress output
   --help, -h           Show help
 
@@ -53,6 +54,7 @@ Test Options:
 
 Examples:
   veto init                          Initialize Veto in current directory
+  veto init --pack coding-agent      Initialize with extends: "@veto/coding-agent"
   veto init --force                  Reinitialize, overwriting existing files
   veto learn --runs 10               Observe 10 tool calls then generate policies
   veto learn --duration 30m          Observe for 30 minutes
@@ -82,7 +84,7 @@ function parseArgs(args: string[]): ParsedArgs {
   const valueFlags = new Set([
     'runs', 'duration', 'output', 'margin',
     'input', 'file', 'provider', 'model',
-    'policy', 'format',
+    'policy', 'format', 'pack',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -232,6 +234,7 @@ async function main(): Promise<void> {
     case 'init': {
       const result = await init({
         force: flags['force'],
+        pack: values['pack'],
         quiet: flags['quiet'],
       });
       process.exit(result.success ? 0 : 1);

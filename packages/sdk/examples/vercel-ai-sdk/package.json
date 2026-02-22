@@ -1,0 +1,20 @@
+{
+  "name": "vercel-ai-sdk-example",
+  "version": "1.0.0",
+  "description": "Veto + Vercel AI SDK integration example",
+  "type": "module",
+  "scripts": {
+    "start": "tsx vercel_agent.ts"
+  },
+  "dependencies": {
+    "ai": "^4.3.0",
+    "@ai-sdk/openai": "^1.3.0",
+    "dotenv": "^16.0.0",
+    "veto-sdk": "file:../..",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0"
+  }
+}

@@ -12,7 +12,12 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
     "title": "Veto Policy IR v1",
     "description": "Canonical intermediate representation for Veto policies. Consumed by TypeScript and Python SDK loaders.",
     "type": "object",
-    "required": ["version", "rules"],
+    "required": ["version"],
+    "anyOf": [
+        {"required": ["rules"]},
+        {"required": ["output_rules"]},
+        {"required": ["extends"]},
+    ],
     "properties": {
         "version": {
             "const": "1.0",
@@ -27,10 +32,20 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
             "type": "string",
             "description": "Detailed description of this policy set.",
         },
+        "extends": {
+            "type": "string",
+            "minLength": 1,
+            "description": 'Optional built-in policy pack name to inherit from (e.g., "@veto/coding-agent").',
+        },
         "rules": {
             "type": "array",
             "items": {"$ref": "#/$defs/Rule"},
             "description": "Ordered list of rules in this policy.",
+        },
+        "output_rules": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/OutputRule"},
+            "description": "Ordered list of output rules in this policy.",
         },
         "settings": {
             "$ref": "#/$defs/Settings",
@@ -72,6 +87,9 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "items": {"type": "string", "minLength": 1},
                     "description": "Tools this rule applies to. Empty or absent means all tools.",
                 },
+                "agents": {
+                    "$ref": "#/$defs/AgentScope",
+                },
                 "conditions": {
                     "type": "array",
                     "items": {"$ref": "#/$defs/Condition"},
@@ -85,6 +103,16 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     },
                     "description": "Alternative condition groups (OR between groups, AND within each group).",
                 },
+                "blocked_by": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/SequenceConstraint"},
+                    "description": "Block if any matching historical call is present.",
+                },
+                "requires": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/SequenceConstraint"},
+                    "description": "Block unless each required historical call is present.",
+                },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -94,6 +122,70 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "type": "object",
                     "additionalProperties": True,
                     "description": "Arbitrary key-value metadata attached to this rule.",
+                },
+            },
+            "additionalProperties": False,
+        },
+        "OutputRule": {
+            "type": "object",
+            "required": ["id", "name", "action"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Unique identifier for this output rule.",
+                },
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable name for this output rule.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Detailed description of what this output rule does.",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether this output rule is active.",
+                },
+                "severity": {
+                    "$ref": "#/$defs/Severity",
+                },
+                "action": {
+                    "$ref": "#/$defs/OutputAction",
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "Tools this output rule applies to. Empty or absent means all tools.",
+                },
+                "output_conditions": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/Condition"},
+                    "description": "Conditions that must ALL be met for the output rule to trigger (AND logic).",
+                },
+                "output_condition_groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/Condition"},
+                    },
+                    "description": "Alternative output condition groups (OR between groups, AND within each group).",
+                },
+                "redact_with": {
+                    "type": "string",
+                    "description": "Replacement string used for redact action.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for categorization.",
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "description": "Arbitrary key-value metadata attached to this output rule.",
                 },
             },
             "additionalProperties": False,
@@ -114,6 +206,104 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "description": "The value to compare the field against.",
                 },
             },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "operator": {
+                                "enum": ["within_hours", "outside_hours"],
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "value": {"$ref": "#/$defs/TimeWindowValue"},
+                        }
+                    },
+                }
+            ],
+            "additionalProperties": False,
+        },
+        "TimeWindowValue": {
+            "type": "object",
+            "required": ["start", "end", "timezone"],
+            "properties": {
+                "start": {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                    "description": "Start time in HH:MM 24-hour format.",
+                },
+                "end": {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                    "description": "End time in HH:MM 24-hour format.",
+                },
+                "timezone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": 'IANA timezone identifier (e.g., "America/New_York").',
+                },
+                "days": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                    },
+                    "description": "Optional day filter. If omitted, applies every day.",
+                },
+            },
+            "additionalProperties": False,
+        },
+        "AgentScope": {
+            "oneOf": [
+                {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "Rule applies only to these agents.",
+                },
+                {
+                    "type": "object",
+                    "required": ["not"],
+                    "properties": {
+                        "not": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                            "description": "Rule applies to all agents except those listed here.",
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            ],
+            "description": "Optional agent scope filter for this rule.",
+        },
+        "SequenceConstraint": {
+            "type": "object",
+            "required": ["tool"],
+            "properties": {
+                "tool": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Historical tool name to match.",
+                },
+                "conditions": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/Condition"},
+                    "description": "Conditions that must ALL match on the historical call context.",
+                },
+                "condition_groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/Condition"},
+                    },
+                    "description": "Alternative condition groups (OR between groups, AND within each group).",
+                },
+                "within": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Optional time window in seconds relative to the current call.",
+                },
+            },
             "additionalProperties": False,
         },
         "Operator": {
@@ -130,6 +320,8 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 "less_than",
                 "in",
                 "not_in",
+                "outside_hours",
+                "within_hours",
             ],
             "description": "Comparison operator.",
         },
@@ -143,6 +335,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
             "type": "string",
             "enum": ["block", "warn", "log", "allow", "require_approval"],
             "description": "Action to take when the rule matches.",
+        },
+        "OutputAction": {
+            "type": "string",
+            "enum": ["block", "redact", "log"],
+            "description": "Action to take when the output rule matches.",
         },
         "Settings": {
             "type": "object",

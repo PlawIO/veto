@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 LogLevel = Literal["debug", "info", "warn", "error", "silent"]
 
 # Validation decision for a tool call
-ValidationDecision = Literal["allow", "deny", "modify"]
+ValidationDecision = Literal["allow", "deny", "modify", "require_approval"]
 
 # Export format for decision history
 DecisionExportFormat = Literal["json", "csv"]
@@ -71,6 +71,11 @@ class ValidationContext:
     call_id: str
     timestamp: datetime
     call_history: list[ToolCallHistoryEntry] = field(default_factory=list)
+    session_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    user_id: Optional[str] = None
+    role: Optional[str] = None
+    source: Optional[Literal["interceptor", "guard"]] = None
     custom: Optional[dict[str, Any]] = None
 
 

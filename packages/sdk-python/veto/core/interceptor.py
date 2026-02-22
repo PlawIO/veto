@@ -5,7 +5,7 @@ This module handles intercepting tool calls from the AI model
 and routing them through the validation pipeline.
 """
 
-from typing import Any, Callable, Optional, Union, Awaitable
+from typing import Any, Callable, Optional, Protocol, Union, Awaitable
 from dataclasses import dataclass
 from datetime import datetime
 import inspect
@@ -17,6 +17,14 @@ from veto.utils.logger import Logger
 from veto.utils.id import generate_tool_call_id
 from veto.core.validator import ValidationEngine, AggregatedValidationResult
 from veto.core.history import HistoryTracker
+from veto.core.output_validator import OutputValidationResult
+
+
+class OutputValidationProtocol(Protocol):
+    def validate(
+        self, tool_name: str, output: Any
+    ) -> Union[OutputValidationResult, Awaitable[OutputValidationResult]]:
+        ...
 
 
 @dataclass
@@ -26,6 +34,10 @@ class InterceptorOptions:
     logger: Logger
     validation_engine: ValidationEngine
     history_tracker: Optional[HistoryTracker] = None
+    session_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    user_id: Optional[str] = None
+    role: Optional[str] = None
     custom_context: Optional[dict[str, Any]] = None
     on_before_validation: Optional[
         Callable[[ValidationContext], Union[None, Awaitable[None]]]
@@ -40,6 +52,7 @@ class InterceptorOptions:
             [ValidationContext, ValidationResult], Union[None, Awaitable[None]]
         ]
     ] = None
+    output_validator: Optional[OutputValidationProtocol] = None
 
 
 @dataclass
@@ -77,10 +90,15 @@ class Interceptor:
         self._logger = options.logger
         self._validation_engine = options.validation_engine
         self._history_tracker = options.history_tracker
+        self._session_id = options.session_id
+        self._agent_id = options.agent_id
+        self._user_id = options.user_id
+        self._role = options.role
         self._custom_context = options.custom_context
         self._on_before_validation = options.on_before_validation
         self._on_after_validation = options.on_after_validation
         self._on_denied = options.on_denied
+        self._output_validator = options.output_validator
 
     async def intercept(self, call: ToolCall) -> InterceptionResult:
         """
@@ -110,6 +128,11 @@ class Interceptor:
                 if self._history_tracker
                 else []
             ),
+            session_id=self._session_id,
+            agent_id=self._agent_id,
+            user_id=self._user_id,
+            role=self._role,
+            source="interceptor",
             custom=self._custom_context,
         )
 
@@ -296,6 +319,35 @@ class Interceptor:
                 content = handler_result
             duration_ms = (time.perf_counter() - start_time) * 1000
 
+            final_content = content
+            if self._output_validator is not None:
+                output_validation = self._output_validator.validate(call.name, content)
+                if inspect.isawaitable(output_validation):
+                    output_result = await output_validation
+                else:
+                    output_result = output_validation
+
+                if output_result.decision == "block":
+                    self._logger.warn(
+                        "Tool output blocked",
+                        {
+                            "tool_name": call.name,
+                            "reason": output_result.reason,
+                            "matched_rule_ids": output_result.matched_rule_ids,
+                        },
+                    )
+                    return ToolResult(
+                        tool_call_id=call.id or generate_tool_call_id(),
+                        tool_name=call.name,
+                        content={
+                            "error": "Tool output blocked",
+                            "reason": output_result.reason,
+                        },
+                        is_error=True,
+                    )
+
+                final_content = output_result.output
+
             self._logger.debug(
                 "Tool executed successfully",
                 {
@@ -307,7 +359,7 @@ class Interceptor:
             return ToolResult(
                 tool_call_id=call.id or generate_tool_call_id(),
                 tool_name=call.name,
-                content=content,
+                content=final_content,
                 is_error=False,
             )
         except Exception as error:

@@ -31,6 +31,9 @@ rules:
     enabled: true
     severity: info
     action: allow
+    agents:
+      - analyst-agent
+      - support-agent
     tools:
       - get_balance
       - list_transactions
@@ -44,6 +47,21 @@ rules:
       - field: arguments.url
         operator: starts_with
         value: "https://external."
+
+  - id: block-off-hours-wire-transfers
+    name: Block wire transfers outside weekday business hours
+    severity: high
+    action: block
+    tools:
+      - wire_transfer
+    conditions:
+      - field: context.time
+        operator: outside_hours
+        value:
+          start: "09:00"
+          end: "17:00"
+          timezone: "America/New_York"
+          days: ["mon", "tue", "wed", "thu", "fri"]
 
   - id: block-regex-match
     name: Block SQL injection patterns
@@ -70,6 +88,45 @@ rules:
         - field: arguments.confirmed
           operator: not_equals
           value: true
+
+  - id: block-after-secret-read
+    name: Block send after secret file read
+    severity: high
+    action: block
+    tools:
+      - send_email
+    blocked_by:
+      - tool: read_file
+        conditions:
+          - field: arguments.path
+            operator: starts_with
+            value: "/etc/secrets"
+
+  - id: require-auth-before-transfer
+    name: Require verification before transfer
+    severity: critical
+    action: block
+    agents:
+      not:
+        - internal-auditor
+    tools:
+      - transfer_funds
+    requires:
+      - tool: verify_identity
+        within: 300
+output_rules:
+  - id: redact-pii
+    name: Redact PII fields
+    enabled: true
+    severity: high
+    action: redact
+    tools:
+      - get_customer_profile
+    output_conditions:
+      - field: output.email
+        operator: matches
+        value: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+    redact_with: "[REDACTED_EMAIL]"
 settings:
   default_action: allow
   fail_mode: closed
