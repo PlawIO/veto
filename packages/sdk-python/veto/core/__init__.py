@@ -8,6 +8,7 @@ from veto.core.veto import (
     GuardResult,
     VetoOptions,
     VetoMode,
+    ValidationMode,
     WrappedTools,
     WrappedHandler,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "GuardResult",
     "VetoOptions",
     "VetoMode",
+    "ValidationMode",
     "WrappedTools",
     "WrappedHandler",
     # Validator

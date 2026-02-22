@@ -52,11 +52,18 @@ from veto.cloud.types import ToolRegistration, ToolParameter, ApprovalPollOption
 from veto.cloud.policy_cache import PolicyCache
 from veto.deterministic.validator import validate_deterministic
 from veto.deterministic.types import LocalValidationResult
-from veto.rules import validate_policy_ir, PolicySchemaError
+from veto.rules import (
+    evaluate_condition_collections,
+    evaluate_sequence_constraints,
+    rule_applies_to_agent,
+    validate_policy_ir,
+    PolicySchemaError,
+)
 
 
 # Veto operating mode
 VetoMode = Literal["strict", "log"]
+ValidationMode = Literal["cloud", "local"]
 
 # Wrapped handler function type
 WrappedHandler = Callable[[dict[str, Any]], Awaitable[Any]]
@@ -91,6 +98,13 @@ class LoadedOutputRulesState:
 
 
 @dataclass
+class LoadedRulesState:
+    all_rules: list[dict[str, Any]]
+    rules_by_tool: dict[str, list[dict[str, Any]]]
+    global_rules: list[dict[str, Any]]
+
+
+@dataclass
 class VetoOptions:
     """Options for creating a Veto instance."""
 
@@ -112,6 +126,8 @@ class VetoOptions:
     role: Optional[str] = None
     # Path to veto directory (contains veto.config.yaml and rules/)
     config_dir: Optional[str] = None
+    # Validation mode: "cloud" (default) or "local" for YAML-only local evaluation
+    validation_mode: Optional[ValidationMode] = None
     # Additional validators to run (in addition to cloud validation)
     validators: Optional[list[Union[Validator, NamedValidator]]] = None
     # API timeout in milliseconds
@@ -161,11 +177,15 @@ class Veto:
         options: VetoOptions,
         logger: Logger,
         cloud_client: VetoCloudClient,
+        rules: LoadedRulesState,
         output_rules: LoadedOutputRulesState,
+        validation_mode: ValidationMode,
     ):
         self._logger = logger
         self._mode: VetoMode = options.mode or "strict"
+        self._validation_mode: ValidationMode = validation_mode
         self._cloud_client = cloud_client
+        self._rules = rules
         self._output_rules = output_rules
 
         # Approval options
@@ -188,7 +208,9 @@ class Veto:
             "Veto configuration loaded",
             {
                 "mode": self._mode,
+                "validation_mode": self._validation_mode,
                 "base_url": cloud_client._base_url,
+                "rules_loaded": len(rules.all_rules),
                 "output_rules_loaded": len(output_rules.all_output_rules),
             },
         )
@@ -201,18 +223,31 @@ class Veto:
             )
         )
 
-        # Add the cloud validator
-        async def validate_with_cloud(ctx: ValidationContext) -> ValidationResult:
-            return await self._validate_with_cloud(ctx)
+        # Add the primary rule validator based on validation mode.
+        if self._validation_mode == "local":
+            async def validate_with_local(ctx: ValidationContext) -> ValidationResult:
+                return await self._validate_with_local(ctx)
 
-        self._validation_engine.add_validator(
-            NamedValidator(
-                name="veto-cloud-validator",
-                description="Validates tool calls via Veto Cloud API",
-                priority=50,
-                validate=validate_with_cloud,
+            self._validation_engine.add_validator(
+                NamedValidator(
+                    name="veto-local-validator",
+                    description="Validates tool calls via local YAML rules",
+                    priority=50,
+                    validate=validate_with_local,
+                )
             )
-        )
+        else:
+            async def validate_with_cloud(ctx: ValidationContext) -> ValidationResult:
+                return await self._validate_with_cloud(ctx)
+
+            self._validation_engine.add_validator(
+                NamedValidator(
+                    name="veto-cloud-validator",
+                    description="Validates tool calls via Veto Cloud API",
+                    priority=50,
+                    validate=validate_with_cloud,
+                )
+            )
 
         # Add any additional validators
         if options.validators:
@@ -302,6 +337,7 @@ class Veto:
         resolved_config_dir = Path(options.config_dir or "./veto").resolve()
         rules_dir = resolved_config_dir / "rules"
         recursive_rules = True
+        config_validation_mode: Optional[ValidationMode] = None
 
         config_path = resolved_config_dir / "veto.config.yaml"
         if config_path.exists():
@@ -309,6 +345,12 @@ class Veto:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config_data = yaml.safe_load(f)
                 if isinstance(config_data, dict):
+                    validation_config = config_data.get("validation")
+                    if isinstance(validation_config, dict):
+                        raw_mode = validation_config.get("mode")
+                        if raw_mode in ("cloud", "local"):
+                            config_validation_mode = raw_mode
+
                     rules_config = config_data.get("rules")
                     if isinstance(rules_config, dict):
                         rules_directory = rules_config.get("directory")
@@ -319,17 +361,35 @@ class Veto:
                             recursive_rules = recursive_value
             except Exception as exc:
                 logger.warn(
-                    "Failed to parse veto.config.yaml for output rules configuration",
+                    "Failed to parse veto.config.yaml for rules configuration",
                     {"error": str(exc), "path": str(config_path)},
                 )
 
+        validation_mode = (
+            options.validation_mode
+            or config_validation_mode
+            or "cloud"
+        )
+
+        rules = cls._load_rules(
+            rules_dir=rules_dir,
+            recursive=recursive_rules,
+            logger=logger,
+        )
         output_rules = cls._load_output_rules(
             rules_dir=rules_dir,
             recursive=recursive_rules,
             logger=logger,
         )
 
-        return cls(options, logger, cloud_client, output_rules)
+        return cls(
+            options,
+            logger,
+            cloud_client,
+            rules,
+            output_rules,
+            validation_mode,
+        )
 
     @staticmethod
     def _find_yaml_files(rules_dir: Path, recursive: bool) -> list[Path]:
@@ -348,6 +408,88 @@ class Veto:
             for p in rules_dir.iterdir()
             if p.is_file() and p.suffix.lower() in {".yaml", ".yml"}
         ]
+
+    @classmethod
+    def _load_rules(
+        cls,
+        rules_dir: Path,
+        recursive: bool,
+        logger: Logger,
+    ) -> LoadedRulesState:
+        state = LoadedRulesState(
+            all_rules=[],
+            rules_by_tool={},
+            global_rules=[],
+        )
+
+        yaml_files = cls._find_yaml_files(rules_dir, recursive)
+        for file_path in yaml_files:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    parsed = yaml.safe_load(f)
+            except Exception as exc:
+                logger.error(
+                    "Failed to read rule file",
+                    {"path": str(file_path)},
+                    exc,
+                )
+                continue
+
+            if not isinstance(parsed, dict):
+                continue
+
+            parsed_for_validation: dict[str, Any] = dict(parsed)
+            if (
+                "rules" not in parsed_for_validation
+                and "output_rules" in parsed_for_validation
+            ):
+                parsed_for_validation["rules"] = []
+
+            if (
+                "rules" not in parsed_for_validation
+                and "output_rules" not in parsed_for_validation
+            ):
+                continue
+
+            try:
+                validate_policy_ir(parsed_for_validation)
+            except PolicySchemaError as exc:
+                logger.error(
+                    "Skipping invalid policy file during rule load",
+                    {"path": str(file_path), "error_count": len(exc.errors)},
+                    exc,
+                )
+                continue
+
+            rules_raw = parsed_for_validation.get("rules")
+            if not isinstance(rules_raw, list):
+                continue
+
+            for rule in rules_raw:
+                if not isinstance(rule, dict):
+                    continue
+
+                if rule.get("enabled") is False:
+                    continue
+
+                normalized_rule = dict(rule)
+                normalized_rule.setdefault("enabled", True)
+                normalized_rule.setdefault("severity", "medium")
+                normalized_rule.setdefault("action", "block")
+
+                state.all_rules.append(normalized_rule)
+
+                tools = normalized_rule.get("tools")
+                if isinstance(tools, list) and tools:
+                    for tool_name in tools:
+                        if not isinstance(tool_name, str):
+                            continue
+                        tool_rules = state.rules_by_tool.setdefault(tool_name, [])
+                        tool_rules.append(normalized_rule)
+                else:
+                    state.global_rules.append(normalized_rule)
+
+        return state
 
     @classmethod
     def _load_output_rules(
@@ -591,6 +733,10 @@ class Veto:
     def _resolve_role(self, context: ValidationContext) -> Optional[str]:
         return context.role if context.role is not None else self._role
 
+    def _get_rules_for_tool(self, tool_name: str) -> list[dict[str, Any]]:
+        tool_specific = self._rules.rules_by_tool.get(tool_name, [])
+        return [*self._rules.global_rules, *tool_specific]
+
     def _get_output_rules_for_tool(self, tool_name: str) -> list[dict[str, Any]]:
         tool_specific = self._output_rules.output_rules_by_tool.get(tool_name, [])
         return [*self._output_rules.global_output_rules, *tool_specific]
@@ -604,6 +750,194 @@ class Veto:
         if result.decision == "block":
             raise RuntimeError(result.reason or f"Tool output blocked for {tool_name}")
         return result.output
+
+    def _build_local_evaluation_context(
+        self, context: ValidationContext
+    ) -> dict[str, Any]:
+        local_context: dict[str, Any] = dict(context.arguments)
+        local_context["tool_name"] = context.tool_name
+        local_context["arguments"] = dict(context.arguments)
+        local_context["session_id"] = self._resolve_session_id(context)
+        local_context["agent_id"] = self._resolve_agent_id(context)
+        local_context["user_id"] = self._resolve_user_id(context)
+        local_context["role"] = self._resolve_role(context)
+        local_context["custom"] = context.custom
+        return local_context
+
+    def _to_local_rule_metadata(self, rule: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source": "local",
+            "rule_id": rule.get("id"),
+            "rule_name": rule.get("name"),
+            "severity": rule.get("severity"),
+            "policy_version": "1.0",
+        }
+
+    def _matches_local_rule(
+        self,
+        rule: dict[str, Any],
+        context: ValidationContext,
+        local_context: dict[str, Any],
+    ) -> bool:
+        if not rule_applies_to_agent(rule, self._resolve_agent_id(context)):
+            return False
+
+        conditions_raw = rule.get("conditions")
+        conditions = (
+            [item for item in conditions_raw if isinstance(item, dict)]
+            if isinstance(conditions_raw, list)
+            else None
+        )
+
+        condition_groups_raw = rule.get("condition_groups")
+        condition_groups: Optional[list[list[dict[str, Any]]]] = None
+        if isinstance(condition_groups_raw, list):
+            normalized_groups: list[list[dict[str, Any]]] = []
+            for group in condition_groups_raw:
+                if not isinstance(group, list):
+                    continue
+                normalized_group = [
+                    condition for condition in group if isinstance(condition, dict)
+                ]
+                if normalized_group:
+                    normalized_groups.append(normalized_group)
+            condition_groups = normalized_groups if normalized_groups else None
+
+        conditions_match = evaluate_condition_collections(
+            conditions=conditions,
+            condition_groups=condition_groups,
+            context=local_context,
+        )
+        if not conditions_match:
+            return False
+
+        return evaluate_sequence_constraints(
+            rule=rule,
+            call_history=context.call_history,
+            now=context.timestamp,
+        )
+
+    async def _validate_with_local(
+        self, context: ValidationContext
+    ) -> ValidationResult:
+        """Validate a tool call locally against YAML rules."""
+        rules = self._get_rules_for_tool(context.tool_name)
+        if not rules:
+            self._logger.debug(
+                "No rules for tool, allowing",
+                {"tool": context.tool_name},
+            )
+            return ValidationResult(decision="allow")
+
+        local_context = self._build_local_evaluation_context(context)
+        first_allow_rule: Optional[dict[str, Any]] = None
+
+        for rule in rules:
+            if not self._matches_local_rule(rule, context, local_context):
+                continue
+
+            rule_name = rule.get("name") if isinstance(rule.get("name"), str) else "Unnamed Rule"
+            reason = (
+                rule.get("description")
+                if isinstance(rule.get("description"), str)
+                else f"Matched rule: {rule_name}"
+            )
+            metadata = self._to_local_rule_metadata(rule)
+            action = rule.get("action")
+
+            if action == "require_approval":
+                if self._should_apply_log_mode_override(context):
+                    self._logger.warn(
+                        "Tool call would require approval locally (log mode)",
+                        {
+                            "tool": context.tool_name,
+                            "rule_id": rule.get("id"),
+                            "reason": reason,
+                        },
+                    )
+                    return ValidationResult(
+                        decision="allow",
+                        reason=f"[LOG MODE] Would require approval: {reason}",
+                        metadata={**metadata, "blocked_in_strict_mode": True},
+                    )
+
+                if self._is_guard_evaluation(context):
+                    return ValidationResult(
+                        decision="require_approval",
+                        reason=reason,
+                        metadata=metadata,
+                    )
+
+                self._logger.warn(
+                    "Tool call blocked by local approval rule (no approval flow configured)",
+                    {
+                        "tool": context.tool_name,
+                        "rule_id": rule.get("id"),
+                        "reason": reason,
+                    },
+                )
+                return ValidationResult(
+                    decision="deny",
+                    reason=f"Approval required: {reason}",
+                    metadata=metadata,
+                )
+
+            if action == "block":
+                if self._should_apply_log_mode_override(context):
+                    self._logger.warn(
+                        "Tool call would be blocked locally (log mode)",
+                        {
+                            "tool": context.tool_name,
+                            "rule_id": rule.get("id"),
+                            "reason": reason,
+                        },
+                    )
+                    return ValidationResult(
+                        decision="allow",
+                        reason=f"[LOG MODE] Would block: {reason}",
+                        metadata={**metadata, "blocked_in_strict_mode": True},
+                    )
+
+                self._logger.warn(
+                    "Tool call blocked by local rule",
+                    {
+                        "tool": context.tool_name,
+                        "rule_id": rule.get("id"),
+                        "reason": reason,
+                    },
+                )
+                return ValidationResult(
+                    decision="deny",
+                    reason=reason,
+                    metadata=metadata,
+                )
+
+            if action == "allow" and first_allow_rule is None:
+                first_allow_rule = rule
+
+            if action in ("warn", "log"):
+                self._logger.warn(
+                    "Local rule matched with non-blocking action",
+                    {
+                        "tool": context.tool_name,
+                        "action": action,
+                        "rule_id": rule.get("id"),
+                    },
+                )
+
+        if first_allow_rule:
+            first_allow_reason = (
+                first_allow_rule.get("description")
+                if isinstance(first_allow_rule.get("description"), str)
+                else f"Allowed by rule: {first_allow_rule.get('name', 'Unnamed Rule')}"
+            )
+            return ValidationResult(
+                decision="allow",
+                reason=first_allow_reason,
+                metadata=self._to_local_rule_metadata(first_allow_rule),
+            )
+
+        return ValidationResult(decision="allow")
 
     def _try_local_deterministic(
         self, context: ValidationContext
@@ -880,8 +1214,8 @@ class Veto:
         Wrap tools with Veto validation.
 
         This method:
-        1. Extracts tool signatures and registers them with Veto Cloud
-        2. Wraps each tool to intercept calls and validate against cloud policies
+        1. Extracts tool signatures and registers them with Veto Cloud (cloud mode only)
+        2. Wraps each tool to intercept calls and validate against configured policies
 
         Args:
             tools: Array of tools to wrap (LangChain, custom, etc.)
@@ -903,12 +1237,13 @@ class Veto:
         import asyncio
 
         # Register tools with cloud (fire and forget, don't block wrapping)
-        try:
-            asyncio.get_running_loop()
-            asyncio.create_task(self._register_tools_with_cloud(tools))
-        except RuntimeError:
-            # No running event loop — run synchronously
-            asyncio.run(self._register_tools_with_cloud(tools))
+        if self._validation_mode == "cloud":
+            try:
+                asyncio.get_running_loop()
+                asyncio.create_task(self._register_tools_with_cloud(tools))
+            except RuntimeError:
+                # No running event loop — run synchronously
+                asyncio.run(self._register_tools_with_cloud(tools))
 
         return [self.wrap_tool(tool) for tool in tools]
 
@@ -1305,6 +1640,7 @@ __all__ = [
     "GuardResult",
     "VetoOptions",
     "VetoMode",
+    "ValidationMode",
     "WrappedTools",
     "WrappedHandler",
 ]
