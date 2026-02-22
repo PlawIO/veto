@@ -105,6 +105,19 @@ export { VetoCloudClient, ApprovalTimeoutError } from './cloud/client.js';
 export type { InterceptionResult } from './core/interceptor.js';
 export type { HistoryStats } from './core/history.js';
 export type { OutputValidationResult } from './core/output-validator.js';
+export type {
+  EventWebhookConfig,
+  VetoWebhookEvent,
+  VetoWebhookEventType,
+  VetoWebhookFormat,
+} from './core/events.js';
+export {
+  formatSlackPayload,
+  formatPagerDutyPayload,
+  formatGenericPayload,
+  formatCefPayload,
+  resolveEventWebhookConfig,
+} from './core/events.js';
 
 // Budget
 export {

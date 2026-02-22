@@ -37,3 +37,15 @@ export {
   type InterceptorOptions,
   type InterceptionResult,
 } from './interceptor.js';
+export {
+  EventWebhookEmitter,
+  formatSlackPayload,
+  formatPagerDutyPayload,
+  formatGenericPayload,
+  formatCefPayload,
+  resolveEventWebhookConfig,
+  type EventWebhookConfig,
+  type VetoWebhookEvent,
+  type VetoWebhookEventType,
+  type VetoWebhookFormat,
+} from './events.js';
