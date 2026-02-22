@@ -76,6 +76,22 @@ async function main() {
         const vetoCall = fromAnthropicToolUse(block);
         console.log(`  Tool: ${vetoCall.name}(${JSON.stringify(vetoCall.arguments)})`);
 
+        // Optional preflight: run guard() without executing the tool.
+        const guard = await veto.guard(vetoCall.name, vetoCall.arguments, {
+          sessionId: 'anthropic-example-session',
+          agentId: 'anthropic-example-agent',
+        });
+
+        if (guard.decision !== 'allow') {
+          console.log(
+            `  Guard decision: ${guard.decision} (${guard.reason ?? 'no reason'})`
+            + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+            + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+            + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}`
+          );
+          continue;
+        }
+
         const wrapped = veto.wrap([{
           name: vetoCall.name,
           handler: async (args: Record<string, unknown>) => toolHandlers[vetoCall.name](args),

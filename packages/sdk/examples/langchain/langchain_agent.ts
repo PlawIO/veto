@@ -46,6 +46,28 @@ async function main() {
   // 2. Wrap tools — types preserved, validation injected
   const tools = veto.wrap([getBalance, transferFunds]);
 
+  // Optional preflight examples using guard() without executing tools.
+  const preflightChecks = [
+    { name: 'transfer_funds', args: { amount: 500, from_account: 'ACC-001', to_account: 'ACC-002' } },
+    { name: 'transfer_funds', args: { amount: 50000, from_account: 'ACC-001', to_account: 'ACC-003' } },
+  ];
+
+  console.log('--- Guard preflight checks ---');
+  for (const check of preflightChecks) {
+    const guard = await veto.guard(check.name, check.args, {
+      sessionId: 'langchain-example-session',
+      agentId: 'langchain-example-agent',
+    });
+    console.log(
+      `  ${check.name} -> ${guard.decision}`
+      + `${guard.reason ? ` (${guard.reason})` : ''}`
+      + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+      + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+      + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}`
+    );
+  }
+  console.log('');
+
   // 3. Create LangChain agent with wrapped tools
   const agent = createAgent({
     model: 'google-genai:gemini-2.0-flash',

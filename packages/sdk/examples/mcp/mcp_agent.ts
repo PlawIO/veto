@@ -74,6 +74,22 @@ async function main() {
   for (const call of calls) {
     console.log(`--- callTool: ${call.name}(${JSON.stringify(call.arguments)}) ---`);
     try {
+      // Optional preflight: run guard() without forwarding to MCP server.
+      const guard = await veto.guard(call.name, call.arguments ?? {}, {
+        sessionId: 'mcp-example-session',
+        agentId: 'mcp-example-agent',
+      });
+
+      if (guard.decision !== 'allow') {
+        console.log(
+          `  Guard decision: ${guard.decision} (${guard.reason ?? 'no reason'})`
+          + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+          + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+          + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}\n`
+        );
+        continue;
+      }
+
       const result = await callTool(call);
       const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
       console.log(`  Result: ${text}\n`);

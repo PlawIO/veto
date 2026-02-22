@@ -35,6 +35,28 @@ async function main() {
   const wrapped = veto.wrap([getBalance, transferFunds]);
   const wrappedMap = Object.fromEntries(wrapped.map(t => [t.name, t]));
 
+  // Optional preflight examples using guard() without executing tools.
+  const preflightChecks = [
+    { name: 'transfer_funds', args: { amount: 500, from_account: 'ACC-001', to_account: 'ACC-002' } },
+    { name: 'transfer_funds', args: { amount: 50000, from_account: 'ACC-001', to_account: 'ACC-003' } },
+  ];
+
+  console.log('--- Guard preflight checks ---');
+  for (const check of preflightChecks) {
+    const guard = await veto.guard(check.name, check.args, {
+      sessionId: 'vercel-example-session',
+      agentId: 'vercel-example-agent',
+    });
+    console.log(
+      `  ${check.name} -> ${guard.decision}`
+      + `${guard.reason ? ` (${guard.reason})` : ''}`
+      + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+      + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+      + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}`
+    );
+  }
+  console.log('');
+
   // Create Vercel AI SDK tools, delegating to Veto-wrapped handlers
   const tools = {
     get_balance: aiTool({

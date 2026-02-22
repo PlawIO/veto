@@ -15,6 +15,29 @@ async function main() {
 
   const veto = await Veto.init();
 
+  // Optional preflight examples using guard() without executing browser actions.
+  const preflightChecks = [
+    { name: 'go_to_url', args: { url: 'https://example.com/dashboard' } },
+    { name: 'go_to_url', args: { url: 'https://malware.example.com' } },
+    { name: 'input_text', args: { selector: '#password', text: 'super-secret' } },
+  ];
+
+  console.log('--- Guard preflight checks ---');
+  for (const check of preflightChecks) {
+    const guard = await veto.guard(check.name, check.args, {
+      sessionId: 'browser-use-example-session',
+      agentId: 'browser-use-example-agent',
+    });
+    console.log(
+      `  ${check.name} -> ${guard.decision}`
+      + `${guard.reason ? ` (${guard.reason})` : ''}`
+      + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+      + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+      + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}`
+    );
+  }
+  console.log('');
+
   // Wrap browser-use with Veto validation
   // Returns a Controller that validates actions before execution
   const controller = await wrapBrowserUse(veto, {

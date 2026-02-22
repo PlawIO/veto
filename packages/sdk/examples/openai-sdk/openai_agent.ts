@@ -84,6 +84,22 @@ async function main() {
         const vetoCall = fromOpenAIToolCall(toolCall);
         console.log(`  Tool: ${vetoCall.name}(${JSON.stringify(vetoCall.arguments)})`);
 
+        // Optional preflight: run guard() without executing the tool.
+        const guard = await veto.guard(vetoCall.name, vetoCall.arguments, {
+          sessionId: 'openai-example-session',
+          agentId: 'openai-example-agent',
+        });
+
+        if (guard.decision !== 'allow') {
+          console.log(
+            `  Guard decision: ${guard.decision} (${guard.reason ?? 'no reason'})`
+            + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+            + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+            + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}`
+          );
+          continue;
+        }
+
         // Validate with Veto before executing
         const wrapped = veto.wrap([{
           name: vetoCall.name,

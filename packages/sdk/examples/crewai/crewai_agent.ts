@@ -61,6 +61,22 @@ async function main() {
     console.log(`--- ${call.tool}(${JSON.stringify(call.args)}) ---`);
 
     try {
+      // Optional preflight: run guard() before calling execute().
+      const guard = await veto.guard(call.tool, call.args, {
+        sessionId: 'crewai-example-session',
+        agentId: 'crewai-example-agent',
+      });
+
+      if (guard.decision !== 'allow') {
+        console.log(
+          `  Guard decision: ${guard.decision} (${guard.reason ?? 'no reason'})`
+          + `${guard.ruleId ? ` [rule=${guard.ruleId}]` : ''}`
+          + `${guard.severity ? ` [severity=${guard.severity}]` : ''}`
+          + `${guard.approvalId ? ` [approval=${guard.approvalId}]` : ''}\n`
+        );
+        continue;
+      }
+
       const result = await tool.execute(call.args);
       console.log(`  Result: ${result}\n`);
     } catch (e) {
