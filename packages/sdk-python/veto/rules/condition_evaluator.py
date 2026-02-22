@@ -147,6 +147,33 @@ def evaluate_condition_collections(
     return True
 
 
+def _normalize_agent_ids(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [value for value in raw if isinstance(value, str)]
+
+
+def evaluate_agent_scope(agents: Any, agent_id: Optional[str]) -> bool:
+    """Evaluate a rule ``agents`` scope against an agent identifier."""
+    if agents is None:
+        return True
+
+    if isinstance(agents, list):
+        allowed_agents = _normalize_agent_ids(agents)
+        return agent_id is not None and agent_id in allowed_agents
+
+    if isinstance(agents, Mapping):
+        excluded_agents = _normalize_agent_ids(agents.get("not"))
+        return agent_id is None or agent_id not in excluded_agents
+
+    return True
+
+
+def rule_applies_to_agent(rule: Mapping[str, Any], agent_id: Optional[str]) -> bool:
+    """Return True when a rule applies to the provided agent ID."""
+    return evaluate_agent_scope(rule.get("agents"), agent_id)
+
+
 def _get_history_field(entry: Any, key: str) -> Any:
     if isinstance(entry, Mapping):
         return entry.get(key)

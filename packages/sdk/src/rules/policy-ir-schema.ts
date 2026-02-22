@@ -73,6 +73,9 @@ export const POLICY_IR_V1_SCHEMA = {
           items: { type: 'string', minLength: 1 },
           description: 'Tools this rule applies to. Empty or absent means all tools.',
         },
+        agents: {
+          $ref: '#/$defs/AgentScope',
+        },
         conditions: {
           type: 'array',
           items: { $ref: '#/$defs/Condition' },
@@ -190,6 +193,28 @@ export const POLICY_IR_V1_SCHEMA = {
         },
       },
       additionalProperties: false,
+    },
+    AgentScope: {
+      oneOf: [
+        {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+          description: 'Rule applies only to these agents.',
+        },
+        {
+          type: 'object',
+          required: ['not'],
+          properties: {
+            not: {
+              type: 'array',
+              items: { type: 'string', minLength: 1 },
+              description: 'Rule applies to all agents except those listed here.',
+            },
+          },
+          additionalProperties: false,
+        },
+      ],
+      description: 'Optional agent scope filter for this rule.',
     },
     SequenceConstraint: {
       type: 'object',

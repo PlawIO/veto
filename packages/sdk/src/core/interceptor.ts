@@ -42,6 +42,14 @@ export interface InterceptorOptions {
   historyTracker?: HistoryTracker;
   /** Budget tracker (optional) */
   budgetTracker?: BudgetTracker;
+  /** Default session identifier for validation context */
+  sessionId?: string;
+  /** Default agent identifier for validation context */
+  agentId?: string;
+  /** Default user identifier for validation context */
+  userId?: string;
+  /** Default role for validation context */
+  role?: string;
   /** Custom context data for validators */
   customContext?: Record<string, unknown>;
   /** Hook called before validation */
@@ -108,6 +116,10 @@ export class Interceptor {
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker?: HistoryTracker;
   private readonly budgetTracker?: BudgetTracker;
+  private readonly sessionId?: string;
+  private readonly agentId?: string;
+  private readonly userId?: string;
+  private readonly role?: string;
   private readonly customContext?: Record<string, unknown>;
   private readonly onBeforeValidation?: (
     context: ValidationContext
@@ -127,6 +139,10 @@ export class Interceptor {
     this.validationEngine = options.validationEngine;
     this.historyTracker = options.historyTracker;
     this.budgetTracker = options.budgetTracker;
+    this.sessionId = options.sessionId;
+    this.agentId = options.agentId;
+    this.userId = options.userId;
+    this.role = options.role;
     this.customContext = options.customContext;
     this.onBeforeValidation = options.onBeforeValidation;
     this.onAfterValidation = options.onAfterValidation;
@@ -155,6 +171,10 @@ export class Interceptor {
       callId,
       timestamp: new Date(),
       callHistory: this.historyTracker?.getAll() ?? [],
+      sessionId: this.sessionId,
+      agentId: this.agentId,
+      userId: this.userId,
+      role: this.role,
       source: 'interceptor',
       custom: this.customContext,
     };

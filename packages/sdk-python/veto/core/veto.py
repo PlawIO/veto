@@ -106,6 +106,10 @@ class VetoOptions:
     session_id: Optional[str] = None
     # Optional agent ID for tracking
     agent_id: Optional[str] = None
+    # Optional user ID for tracking
+    user_id: Optional[str] = None
+    # Optional role for tracking
+    role: Optional[str] = None
     # Path to veto directory (contains veto.config.yaml and rules/)
     config_dir: Optional[str] = None
     # Additional validators to run (in addition to cloud validation)
@@ -177,6 +181,8 @@ class Veto:
         # Resolve tracking options
         self._session_id = options.session_id or os.environ.get("VETO_SESSION_ID")
         self._agent_id = options.agent_id or os.environ.get("VETO_AGENT_ID")
+        self._user_id = options.user_id or os.environ.get("VETO_USER_ID")
+        self._role = options.role or os.environ.get("VETO_ROLE")
 
         self._logger.info(
             "Veto configuration loaded",
@@ -230,6 +236,10 @@ class Veto:
                 logger=self._logger,
                 validation_engine=self._validation_engine,
                 history_tracker=self._history_tracker,
+                session_id=self._session_id,
+                agent_id=self._agent_id,
+                user_id=self._user_id,
+                role=self._role,
                 output_validator=self._output_validator,
             )
         )
@@ -575,6 +585,12 @@ class Veto:
     def _resolve_agent_id(self, context: ValidationContext) -> Optional[str]:
         return context.agent_id if context.agent_id is not None else self._agent_id
 
+    def _resolve_user_id(self, context: ValidationContext) -> Optional[str]:
+        return context.user_id if context.user_id is not None else self._user_id
+
+    def _resolve_role(self, context: ValidationContext) -> Optional[str]:
+        return context.role if context.role is not None else self._role
+
     def _get_output_rules_for_tool(self, tool_name: str) -> list[dict[str, Any]]:
         tool_specific = self._output_rules.output_rules_by_tool.get(tool_name, [])
         return [*self._output_rules.global_output_rules, *tool_specific]
@@ -617,6 +633,8 @@ class Veto:
                 "context": {
                     "session_id": self._resolve_session_id(context),
                     "agent_id": self._resolve_agent_id(context),
+                    "user_id": self._resolve_user_id(context),
+                    "role": self._resolve_role(context),
                 },
             }
         )
@@ -664,6 +682,8 @@ class Veto:
             "timestamp": context.timestamp.isoformat(),
             "session_id": self._resolve_session_id(context),
             "agent_id": self._resolve_agent_id(context),
+            "user_id": self._resolve_user_id(context),
+            "role": self._resolve_role(context),
         }
 
         if context.custom:
@@ -1199,6 +1219,8 @@ class Veto:
         *,
         session_id: str | None = None,
         agent_id: str | None = None,
+        user_id: str | None = None,
+        role: str | None = None,
     ) -> GuardResult:
         """Run a standalone guard check without wrapping or executing a tool."""
         context = ValidationContext(
@@ -1209,6 +1231,8 @@ class Veto:
             call_history=self._history_tracker.get_all(),
             session_id=session_id if session_id is not None else self._session_id,
             agent_id=agent_id if agent_id is not None else self._agent_id,
+            user_id=user_id if user_id is not None else self._user_id,
+            role=role if role is not None else self._role,
             source="guard",
         )
 

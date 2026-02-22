@@ -15,6 +15,8 @@ from veto.rules.condition_evaluator import (
     evaluate_legacy_condition,
     evaluate_condition,
     evaluate_condition_collections,
+    evaluate_agent_scope,
+    rule_applies_to_agent,
     has_matching_history_entry,
     evaluate_sequence_constraints,
 )
@@ -38,6 +40,8 @@ __all__ = [
     "evaluate_legacy_condition",
     "evaluate_condition",
     "evaluate_condition_collections",
+    "evaluate_agent_scope",
+    "rule_applies_to_agent",
     "has_matching_history_entry",
     "evaluate_sequence_constraints",
     "OUTPUT_PATTERNS",

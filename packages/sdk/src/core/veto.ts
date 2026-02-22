@@ -95,6 +95,8 @@ export interface WrappedTools {
 export interface GuardContext {
   sessionId?: string;
   agentId?: string;
+  userId?: string;
+  role?: string;
 }
 
 /**
@@ -240,6 +242,18 @@ export interface VetoOptions {
   agentId?: string;
 
   /**
+   * User ID for tracking.
+   * Can also be set via VETO_USER_ID environment variable.
+   */
+  userId?: string;
+
+  /**
+   * Role for tracking.
+   * Can also be set via VETO_ROLE environment variable.
+   */
+  role?: string;
+
+  /**
    * Additional validators to run alongside rule-based validation.
    */
   validators?: (Validator | NamedValidator)[];
@@ -319,6 +333,8 @@ export class Veto {
   private readonly apiRetryDelay: number;
   private readonly sessionId?: string;
   private readonly agentId?: string;
+  private readonly userId?: string;
+  private readonly role?: string;
 
   // Kernel client (lazy initialized or injected)
   private kernelClient: KernelClient | null = null;
@@ -484,6 +500,8 @@ export class Veto {
     // Resolve tracking options
     this.sessionId = options.sessionId ?? process.env.VETO_SESSION_ID ?? generateId('session');
     this.agentId = options.agentId ?? process.env.VETO_AGENT_ID;
+    this.userId = options.userId ?? process.env.VETO_USER_ID;
+    this.role = options.role ?? process.env.VETO_ROLE;
 
     this.logger.info('Veto configuration loaded', {
       configDir: this.configDir,
@@ -579,6 +597,10 @@ export class Veto {
       validationEngine: this.validationEngine,
       historyTracker: this.historyTracker,
       budgetTracker: this.budgetTracker ?? undefined,
+      sessionId: this.sessionId,
+      agentId: this.agentId,
+      userId: this.userId,
+      role: this.role,
       outputValidator: this.outputValidator,
     });
 
@@ -817,6 +839,14 @@ export class Veto {
     return context.agentId ?? this.agentId;
   }
 
+  private resolveUserId(context: ValidationContext): string | undefined {
+    return context.userId ?? this.userId;
+  }
+
+  private resolveRole(context: ValidationContext): string | undefined {
+    return context.role ?? this.role;
+  }
+
   private toLocalRuleMetadata(rule: Rule): Record<string, unknown> {
     return {
       source: 'local',
@@ -847,6 +877,8 @@ export class Veto {
       timestamp: context.timestamp.toISOString(),
       session_id: this.resolveSessionId(context),
       agent_id: this.resolveAgentId(context),
+      user_id: this.resolveUserId(context),
+      role: this.resolveRole(context),
       call_history: this.buildHistorySummary(context.callHistory),
       custom: context.custom,
     };
@@ -1108,6 +1140,8 @@ export class Veto {
       arguments: context.arguments,
       session_id: this.resolveSessionId(context),
       agent_id: this.resolveAgentId(context),
+      user_id: this.resolveUserId(context),
+      role: this.resolveRole(context),
       custom: context.custom,
     };
   }
@@ -1117,6 +1151,10 @@ export class Veto {
     validationContext: ValidationContext,
     localContext: Record<string, unknown>
   ): boolean {
+    if (!this.matchesLocalRuleAgents(rule, this.resolveAgentId(validationContext))) {
+      return false;
+    }
+
     const conditionsMatch = evaluateConditionCollections(
       rule.conditions,
       rule.condition_groups,
@@ -1136,6 +1174,24 @@ export class Veto {
       validationContext.callHistory,
       validationContext.timestamp
     );
+  }
+
+  private matchesLocalRuleAgents(rule: Rule, agentId?: string): boolean {
+    if (!rule.agents) {
+      return true;
+    }
+
+    if (Array.isArray(rule.agents)) {
+      const allowedAgents = this.normalizeAgentScope(rule.agents);
+      return agentId !== undefined && allowedAgents.includes(agentId);
+    }
+
+    const excludedAgents = this.normalizeAgentScope(rule.agents.not);
+    return agentId === undefined || !excludedAgents.includes(agentId);
+  }
+
+  private normalizeAgentScope(scope: readonly unknown[]): string[] {
+    return scope.filter((value): value is string => typeof value === 'string');
   }
 
   private matchesLocalSequenceConstraints(
@@ -1549,6 +1605,8 @@ export class Veto {
       context: {
         session_id: this.resolveSessionId(context),
         agent_id: this.resolveAgentId(context),
+        user_id: this.resolveUserId(context),
+        role: this.resolveRole(context),
       },
     });
 
@@ -1603,6 +1661,8 @@ export class Veto {
       timestamp: context.timestamp.toISOString(),
       session_id: this.resolveSessionId(context),
       agent_id: this.resolveAgentId(context),
+      user_id: this.resolveUserId(context),
+      role: this.resolveRole(context),
     };
     if (context.custom) {
       apiContext.custom = context.custom;
@@ -2466,6 +2526,8 @@ export class Veto {
       callHistory: this.historyTracker.getAll(),
       sessionId: context.sessionId ?? this.sessionId,
       agentId: context.agentId ?? this.agentId,
+      userId: context.userId ?? this.userId,
+      role: context.role ?? this.role,
       source: 'guard',
     };
 

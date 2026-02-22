@@ -31,6 +31,9 @@ rules:
     enabled: true
     severity: info
     action: allow
+    agents:
+      - analyst-agent
+      - support-agent
     tools:
       - get_balance
       - list_transactions
@@ -88,6 +91,9 @@ rules:
     name: Require verification before transfer
     severity: critical
     action: block
+    agents:
+      not:
+        - internal-auditor
     tools:
       - transfer_funds
     requires:
