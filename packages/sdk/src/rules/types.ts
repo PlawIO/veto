@@ -44,6 +44,20 @@ export interface RuleCondition {
 }
 
 /**
+ * Cross-tool sequence constraint for matching historical calls.
+ */
+export interface RuleSequenceConstraint {
+  /** Historical tool name to search for */
+  tool: string;
+  /** Conditions that must all match on the historical call context (AND logic) */
+  conditions?: RuleCondition[];
+  /** Alternative condition groups (OR logic between groups) */
+  condition_groups?: RuleCondition[][];
+  /** Optional time window in seconds (relative to the current call) */
+  within?: number;
+}
+
+/**
  * Action to take when a rule matches.
  */
 export type RuleAction = 'block' | 'warn' | 'log' | 'allow' | 'require_approval';
@@ -80,6 +94,10 @@ export interface Rule {
   conditions?: RuleCondition[];
   /** Alternative condition groups (OR logic between groups) */
   condition_groups?: RuleCondition[][];
+  /** Trigger this rule if any matching historical call exists */
+  blocked_by?: RuleSequenceConstraint[];
+  /** Trigger this rule when any required historical call is missing */
+  requires?: RuleSequenceConstraint[];
   /** Tags for categorization */
   tags?: string[];
   /** Additional metadata */

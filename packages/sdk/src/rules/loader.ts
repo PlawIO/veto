@@ -358,6 +358,8 @@ export class RuleLoader {
       tools: ruleData.tools as string[] | undefined,
       conditions: ruleData.conditions as Rule['conditions'],
       condition_groups: ruleData.condition_groups as Rule['condition_groups'],
+      blocked_by: ruleData.blocked_by as Rule['blocked_by'],
+      requires: ruleData.requires as Rule['requires'],
       tags: ruleData.tags as string[] | undefined,
       metadata: ruleData.metadata as Record<string, unknown> | undefined,
     };

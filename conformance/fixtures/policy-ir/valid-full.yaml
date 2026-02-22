@@ -70,6 +70,29 @@ rules:
         - field: arguments.confirmed
           operator: not_equals
           value: true
+
+  - id: block-after-secret-read
+    name: Block send after secret file read
+    severity: high
+    action: block
+    tools:
+      - send_email
+    blocked_by:
+      - tool: read_file
+        conditions:
+          - field: arguments.path
+            operator: starts_with
+            value: "/etc/secrets"
+
+  - id: require-auth-before-transfer
+    name: Require verification before transfer
+    severity: critical
+    action: block
+    tools:
+      - transfer_funds
+    requires:
+      - tool: verify_identity
+        within: 300
 output_rules:
   - id: redact-pii
     name: Redact PII fields

@@ -48,6 +48,20 @@ describe('HistoryTracker', () => {
       expect(entries[0].durationMs).toBe(100);
     });
 
+    it('should store an immutable snapshot of arguments', () => {
+      const args: Record<string, unknown> = {
+        nested: { state: 'before' },
+      };
+
+      tracker.record('write_file', args, { decision: 'allow' });
+      (args.nested as { state: string }).state = 'after';
+
+      const entries = tracker.getAll();
+      expect(entries[0].arguments).toEqual({
+        nested: { state: 'before' },
+      });
+    });
+
     it('should evict oldest entries when maxSize exceeded', () => {
       for (let i = 0; i < 7; i++) {
         tracker.record(`tool_${i}`, {}, { decision: 'allow' });

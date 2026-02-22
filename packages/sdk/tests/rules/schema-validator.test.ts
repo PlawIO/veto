@@ -56,6 +56,38 @@ describe('Policy IR v1 Schema Validator', () => {
         ],
       })).not.toThrow();
     });
+
+    it('should accept blocked_by and requires sequence constraints', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'sequence',
+            name: 'Sequence rule',
+            action: 'block',
+            tools: ['send_email'],
+            blocked_by: [
+              {
+                tool: 'read_file',
+                conditions: [
+                  {
+                    field: 'arguments.path',
+                    operator: 'starts_with',
+                    value: '/etc/secrets',
+                  },
+                ],
+              },
+            ],
+            requires: [
+              {
+                tool: 'verify_identity',
+                within: 300,
+              },
+            ],
+          },
+        ],
+      })).not.toThrow();
+    });
   });
 
   describe('invalid documents', () => {
@@ -118,6 +150,25 @@ describe('Policy IR v1 Schema Validator', () => {
     it('should reject rule missing id', () => {
       const data = loadFixture('invalid-rule-missing-id.yaml');
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);
+    });
+
+    it('should reject negative requires.within values', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'bad-within',
+            name: 'Bad within',
+            action: 'block',
+            requires: [
+              {
+                tool: 'verify_identity',
+                within: -5,
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
     });
   });
 
