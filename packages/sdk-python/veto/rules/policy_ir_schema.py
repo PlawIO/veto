@@ -12,7 +12,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
     "title": "Veto Policy IR v1",
     "description": "Canonical intermediate representation for Veto policies. Consumed by TypeScript and Python SDK loaders.",
     "type": "object",
-    "required": ["version", "rules"],
+    "required": ["version"],
+    "anyOf": [
+        {"required": ["rules"]},
+        {"required": ["output_rules"]},
+    ],
     "properties": {
         "version": {
             "const": "1.0",
@@ -31,6 +35,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
             "type": "array",
             "items": {"$ref": "#/$defs/Rule"},
             "description": "Ordered list of rules in this policy.",
+        },
+        "output_rules": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/OutputRule"},
+            "description": "Ordered list of output rules in this policy.",
         },
         "settings": {
             "$ref": "#/$defs/Settings",
@@ -98,6 +107,70 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
             },
             "additionalProperties": False,
         },
+        "OutputRule": {
+            "type": "object",
+            "required": ["id", "name", "action"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Unique identifier for this output rule.",
+                },
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable name for this output rule.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Detailed description of what this output rule does.",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether this output rule is active.",
+                },
+                "severity": {
+                    "$ref": "#/$defs/Severity",
+                },
+                "action": {
+                    "$ref": "#/$defs/OutputAction",
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "Tools this output rule applies to. Empty or absent means all tools.",
+                },
+                "output_conditions": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/Condition"},
+                    "description": "Conditions that must ALL be met for the output rule to trigger (AND logic).",
+                },
+                "output_condition_groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/Condition"},
+                    },
+                    "description": "Alternative output condition groups (OR between groups, AND within each group).",
+                },
+                "redact_with": {
+                    "type": "string",
+                    "description": "Replacement string used for redact action.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for categorization.",
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "description": "Arbitrary key-value metadata attached to this output rule.",
+                },
+            },
+            "additionalProperties": False,
+        },
         "Condition": {
             "type": "object",
             "required": ["field", "operator", "value"],
@@ -143,6 +216,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
             "type": "string",
             "enum": ["block", "warn", "log", "allow", "require_approval"],
             "description": "Action to take when the rule matches.",
+        },
+        "OutputAction": {
+            "type": "string",
+            "enum": ["block", "redact", "log"],
+            "description": "Action to take when the output rule matches.",
         },
         "Settings": {
             "type": "object",

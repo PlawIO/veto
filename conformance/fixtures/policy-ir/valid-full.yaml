@@ -70,6 +70,19 @@ rules:
         - field: arguments.confirmed
           operator: not_equals
           value: true
+output_rules:
+  - id: redact-pii
+    name: Redact PII fields
+    enabled: true
+    severity: high
+    action: redact
+    tools:
+      - get_customer_profile
+    output_conditions:
+      - field: output.email
+        operator: matches
+        value: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+    redact_with: "[REDACTED_EMAIL]"
 settings:
   default_action: allow
   fail_mode: closed

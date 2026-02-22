@@ -49,6 +49,28 @@ class TestValidDocuments:
             }
         )
 
+    def test_accepts_output_rules(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "output_rules": [
+                    {
+                        "id": "redact-output",
+                        "name": "Redact output",
+                        "action": "redact",
+                        "output_conditions": [
+                            {
+                                "field": "output.email",
+                                "operator": "matches",
+                                "value": "[^@]+@[^@]+",
+                            }
+                        ],
+                        "redact_with": "[REDACTED]",
+                    }
+                ],
+            }
+        )
+
 
 class TestInvalidDocuments:
     def test_missing_version(self) -> None:
@@ -72,6 +94,22 @@ class TestInvalidDocuments:
         data = _load_fixture("invalid-bad-action.yaml")
         with pytest.raises(PolicySchemaError):
             validate_policy_ir(data)
+
+    def test_bad_output_action(self) -> None:
+        with pytest.raises(PolicySchemaError):
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [],
+                    "output_rules": [
+                        {
+                            "id": "bad-output-action",
+                            "name": "Bad output action",
+                            "action": "allow",
+                        }
+                    ],
+                }
+            )
 
     def test_bad_operator(self) -> None:
         data = _load_fixture("invalid-bad-operator.yaml")

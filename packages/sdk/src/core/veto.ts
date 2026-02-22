@@ -32,9 +32,9 @@ import { fromMCP, isMCPTool } from '../providers/adapters.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
-  RuleCondition,
   RuleSeverity,
   RuleSet,
+  OutputRule,
   ToolCallContext,
   ToolCallHistorySummary,
   ValidationAPIResponse,
@@ -42,6 +42,7 @@ import type {
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { validatePolicyIR } from '../rules/schema-validator.js';
+import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import { KernelClient } from '../kernel/client.js';
 import type { CustomConfig, CustomToolCall, CustomResponse } from '../custom/types.js';
@@ -51,7 +52,7 @@ import { VetoCloudClient, ApprovalTimeoutError } from '../cloud/client.js';
 import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import type { LocalValidationResult } from '../deterministic/types.js';
-import { isSafePattern } from '../deterministic/regex-safety.js';
+import { OutputValidator, type OutputValidationResult } from './output-validator.js';
 
 /**
  * Veto operating mode.
@@ -177,8 +178,11 @@ interface VetoConfigFile {
  */
 interface LoadedRulesState {
   allRules: Rule[];
+  allOutputRules: OutputRule[];
   rulesByTool: Map<string, Rule[]>;
+  outputRulesByTool: Map<string, OutputRule[]>;
   globalRules: Rule[];
+  globalOutputRules: OutputRule[];
 }
 
 interface LocalApprovalConfig {
@@ -300,6 +304,7 @@ export class Veto {
   private readonly historyTracker: HistoryTracker;
   private readonly budgetTracker: BudgetTracker | null;
   private readonly interceptor: Interceptor;
+  private readonly outputValidator: OutputValidator;
 
   // Configuration
   private readonly configDir: string;
@@ -490,6 +495,7 @@ export class Veto {
       customModel: this.customConfig?.model,
       cloudBaseUrl: this.cloudConfig?.baseUrl,
       rulesLoaded: rules.allRules.length,
+      outputRulesLoaded: rules.allOutputRules.length,
     });
 
     this.logger.info(`Veto running in ${this.startupMode} mode`);
@@ -562,11 +568,17 @@ export class Veto {
     }
 
     // Initialize interceptor
+    this.outputValidator = new OutputValidator({
+      logger: this.logger,
+      getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
+    });
+
     this.interceptor = new Interceptor({
       logger: this.logger,
       validationEngine: this.validationEngine,
       historyTracker: this.historyTracker,
       budgetTracker: this.budgetTracker ?? undefined,
+      outputValidator: this.outputValidator,
     });
 
     this.logger.info('Veto initialized successfully');
@@ -641,8 +653,11 @@ export class Veto {
   ): LoadedRulesState {
     const state: LoadedRulesState = {
       allRules: [],
+      allOutputRules: [],
       rulesByTool: new Map(),
+      outputRulesByTool: new Map(),
       globalRules: [],
+      globalOutputRules: [],
     };
 
     if (!existsSync(rulesDir)) {
@@ -659,19 +674,33 @@ export class Veto {
         const parsed = parseYaml(content) as RuleSet | Rule[] | Record<string, unknown>;
 
         let rules: Rule[] = [];
+        let outputRules: OutputRule[] = [];
 
         if (Array.isArray(parsed)) {
           rules = parsed as Rule[];
-        } else if (parsed && typeof parsed === 'object' && 'rules' in parsed) {
-          validatePolicyIR(parsed);
-          rules = (parsed as RuleSet).rules ?? [];
-        } else if (parsed && typeof parsed === 'object' && 'id' in parsed) {
-          rules = [parsed as unknown as Rule];
+        } else if (parsed && typeof parsed === 'object') {
+          const parsedObject = parsed as Record<string, unknown>;
+
+          if ('rules' in parsedObject || 'output_rules' in parsedObject) {
+            const normalizedForSchema = 'rules' in parsedObject
+              ? parsedObject
+              : { ...parsedObject, rules: [] };
+            validatePolicyIR(normalizedForSchema);
+
+            rules = Array.isArray(normalizedForSchema.rules)
+              ? normalizedForSchema.rules as Rule[]
+              : [];
+            outputRules = Array.isArray(normalizedForSchema.output_rules)
+              ? normalizedForSchema.output_rules as OutputRule[]
+              : [];
+          } else if ('id' in parsedObject) {
+            rules = [parsed as unknown as Rule];
+          }
         }
 
         // Process and index rules
         for (const rule of rules) {
-          if (!rule.enabled) continue;
+          if (rule.enabled === false) continue;
 
           state.allRules.push(rule);
 
@@ -686,9 +715,27 @@ export class Veto {
           }
         }
 
+        // Process and index output rules
+        for (const outputRule of outputRules) {
+          if (outputRule.enabled === false) continue;
+
+          state.allOutputRules.push(outputRule);
+
+          if (!outputRule.tools || outputRule.tools.length === 0) {
+            state.globalOutputRules.push(outputRule);
+          } else {
+            for (const toolName of outputRule.tools) {
+              const existing = state.outputRulesByTool.get(toolName) ?? [];
+              existing.push(outputRule);
+              state.outputRulesByTool.set(toolName, existing);
+            }
+          }
+        }
+
         logger.debug('Loaded rules from file', {
           path: filePath,
           count: rules.length,
+          outputCount: outputRules.length,
         });
       } catch (error) {
         logger.error(
@@ -703,6 +750,9 @@ export class Veto {
       total: state.allRules.length,
       global: state.globalRules.length,
       toolSpecific: state.rulesByTool.size,
+      outputTotal: state.allOutputRules.length,
+      outputGlobal: state.globalOutputRules.length,
+      outputToolSpecific: state.outputRulesByTool.size,
     });
 
     return state;
@@ -743,6 +793,11 @@ export class Veto {
   private getRulesForTool(toolName: string): Rule[] {
     const toolSpecific = this.rules.rulesByTool.get(toolName) ?? [];
     return [...this.rules.globalRules, ...toolSpecific];
+  }
+
+  private getOutputRulesForTool(toolName: string): OutputRule[] {
+    const toolSpecific = this.rules.outputRulesByTool.get(toolName) ?? [];
+    return [...this.rules.globalOutputRules, ...toolSpecific];
   }
 
   private isGuardEvaluation(context: ValidationContext): boolean {
@@ -1057,32 +1112,15 @@ export class Veto {
   }
 
   private matchesLocalRule(rule: Rule, context: Record<string, unknown>): boolean {
-    if (rule.conditions && rule.conditions.length > 0) {
-      return rule.conditions.every((condition) => this.matchesLocalCondition(condition, context));
-    }
-
-    if (rule.condition_groups && rule.condition_groups.length > 0) {
-      return rule.condition_groups.some((group) =>
-        group.every((condition) => this.matchesLocalCondition(condition, context))
-      );
-    }
-
-    return true;
-  }
-
-  private matchesLocalCondition(
-    condition: RuleCondition,
-    context: Record<string, unknown>
-  ): boolean {
-    if (condition.expression) {
-      return this.evaluateLocalExpression(condition.expression, context);
-    }
-
-    if (condition.field && condition.operator) {
-      return this.evaluateLocalLegacyCondition(condition, context);
-    }
-
-    return true;
+    return evaluateConditionCollections(
+      rule.conditions,
+      rule.condition_groups,
+      context,
+      {
+        evaluateExpression: (expression, evalContext) =>
+          this.evaluateLocalExpression(expression, evalContext),
+      }
+    );
   }
 
   private evaluateLocalExpression(
@@ -1113,85 +1151,6 @@ export class Veto {
       });
       return false;
     }
-  }
-
-  private evaluateLocalLegacyCondition(
-    condition: RuleCondition,
-    context: Record<string, unknown>
-  ): boolean {
-    const fieldValue = this.resolveLocalField(condition.field!, context);
-    const expected = condition.value;
-
-    switch (condition.operator) {
-      case 'equals':
-        return fieldValue === expected;
-      case 'not_equals':
-        return fieldValue !== expected;
-      case 'contains':
-        if (typeof fieldValue === 'string' && typeof expected === 'string') {
-          return fieldValue.includes(expected);
-        }
-        if (Array.isArray(fieldValue)) {
-          return fieldValue.includes(expected);
-        }
-        return false;
-      case 'not_contains':
-        if (typeof fieldValue === 'string' && typeof expected === 'string') {
-          return !fieldValue.includes(expected);
-        }
-        if (Array.isArray(fieldValue)) {
-          return !fieldValue.includes(expected);
-        }
-        return true;
-      case 'starts_with':
-        return typeof fieldValue === 'string' && typeof expected === 'string'
-          && fieldValue.startsWith(expected);
-      case 'ends_with':
-        return typeof fieldValue === 'string' && typeof expected === 'string'
-          && fieldValue.endsWith(expected);
-      case 'matches':
-        if (typeof fieldValue !== 'string' || typeof expected !== 'string') {
-          return false;
-        }
-        if (expected.length > 256 || !isSafePattern(expected)) {
-          return false;
-        }
-        try {
-          return new RegExp(expected).test(fieldValue);
-        } catch {
-          return false;
-        }
-      case 'greater_than':
-        return Number(fieldValue) > Number(expected);
-      case 'less_than':
-        return Number(fieldValue) < Number(expected);
-      case 'in':
-        return Array.isArray(expected) && expected.includes(fieldValue);
-      case 'not_in':
-        return Array.isArray(expected) && !expected.includes(fieldValue);
-      default:
-        return false;
-    }
-  }
-
-  private resolveLocalField(
-    field: string,
-    context: Record<string, unknown>
-  ): unknown {
-    const parts = field.split('.');
-    let current: unknown = context;
-
-    for (const part of parts) {
-      if (current === null || current === undefined) {
-        return undefined;
-      }
-      if (typeof current !== 'object') {
-        return undefined;
-      }
-      current = (current as Record<string, unknown>)[part];
-    }
-
-    return current;
   }
 
   /**
@@ -2113,6 +2072,14 @@ export class Veto {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  private validateOutputOrThrow(toolName: string, output: unknown): unknown {
+    const outputResult = this.validateOutput(toolName, output);
+    if (outputResult.decision === 'block') {
+      throw new Error(outputResult.reason ?? `Tool output blocked for ${toolName}`);
+    }
+    return outputResult.output;
+  }
+
 
   /**
    * Wrap tools with Veto validation (provider-agnostic).
@@ -2189,7 +2156,8 @@ export class Veto {
 
         // Execute the original function with potentially modified arguments
         const finalArgs = result.finalArguments ?? input;
-        return originalFunc.call(tool, finalArgs);
+        const executionResult = await originalFunc.call(tool, finalArgs);
+        return veto.validateOutputOrThrow(toolName, executionResult);
       };
 
       // Replace func
@@ -2216,7 +2184,8 @@ export class Veto {
 
           // Call original invoke with potentially modified arguments
           const finalArgs = result.finalArguments ?? input;
-          return originalInvoke.call(tool, finalArgs, ...rest);
+          const executionResult = await originalInvoke.call(tool, finalArgs, ...rest);
+          return veto.validateOutputOrThrow(toolName, executionResult);
         };
       }
 
@@ -2258,9 +2227,11 @@ export class Veto {
 
           const finalArgs = result.finalArguments ?? callArgs;
           if (args.length === 1 && typeof args[0] === 'object') {
-            return originalFunc.call(tool, finalArgs);
+            const executionResult = await originalFunc.call(tool, finalArgs);
+            return veto.validateOutputOrThrow(toolName, executionResult);
           }
-          return originalFunc.apply(tool, args);
+          const executionResult = await originalFunc.apply(tool, args);
+          return veto.validateOutputOrThrow(toolName, executionResult);
         };
 
         wrapped[key] = wrappedFunc;
@@ -2356,7 +2327,8 @@ export class Veto {
       }
 
       const finalArgs = result.finalArguments ?? callArgs;
-      return serverClient.callTool({ name: args.name, arguments: finalArgs });
+      const executionResult = await serverClient.callTool({ name: args.name, arguments: finalArgs });
+      return veto.validateOutputOrThrow(args.name, executionResult) as MCPToolResult;
     };
 
     this.logger.debug('MCP tools wrapped', { count: tools.length });
@@ -2377,6 +2349,13 @@ export class Veto {
     };
 
     return this.interceptor.intercept(normalizedCall);
+  }
+
+  /**
+   * Validate and transform tool output against configured output rules.
+   */
+  validateOutput(toolName: string, output: unknown): OutputValidationResult {
+    return this.outputValidator.validate(toolName, output);
   }
 
   /**

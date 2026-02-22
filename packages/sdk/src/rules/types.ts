@@ -49,6 +49,11 @@ export interface RuleCondition {
 export type RuleAction = 'block' | 'warn' | 'log' | 'allow' | 'require_approval';
 
 /**
+ * Action to take when an output rule matches.
+ */
+export type OutputRuleAction = 'block' | 'redact' | 'log';
+
+/**
  * Severity level for a rule.
  */
 export type RuleSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
@@ -82,6 +87,36 @@ export interface Rule {
 }
 
 /**
+ * A single output rule definition.
+ */
+export interface OutputRule {
+  /** Unique identifier for this output rule */
+  id: string;
+  /** Human-readable name */
+  name: string;
+  /** Detailed description of what this output rule does */
+  description?: string;
+  /** Whether this output rule is enabled */
+  enabled: boolean;
+  /** Severity level */
+  severity: RuleSeverity;
+  /** Action to take when conditions match */
+  action: OutputRuleAction;
+  /** Tools this output rule applies to (empty = all tools) */
+  tools?: string[];
+  /** Conditions that must be met for the output rule to trigger (AND logic) */
+  output_conditions?: RuleCondition[];
+  /** Alternative condition groups (OR logic between groups) */
+  output_condition_groups?: RuleCondition[][];
+  /** Replacement text for redact action */
+  redact_with?: string;
+  /** Tags for categorization */
+  tags?: string[];
+  /** Additional metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
  * A rule set containing multiple rules with shared configuration.
  */
 export interface RuleSet {
@@ -93,6 +128,8 @@ export interface RuleSet {
   description?: string;
   /** Rules in this set */
   rules: Rule[];
+  /** Output rules in this set */
+  output_rules?: OutputRule[];
   /** Global settings for this rule set */
   settings?: RuleSetSettings;
 }
@@ -179,10 +216,16 @@ export interface LoadedRules {
   ruleSets: RuleSet[];
   /** All rules flattened from rule sets */
   allRules: Rule[];
+  /** All output rules flattened from rule sets */
+  allOutputRules: OutputRule[];
   /** Rules indexed by tool name for quick lookup */
   rulesByTool: Map<string, Rule[]>;
+  /** Output rules indexed by tool name for quick lookup */
+  outputRulesByTool: Map<string, OutputRule[]>;
   /** Global rules that apply to all tools */
   globalRules: Rule[];
+  /** Global output rules that apply to all tools */
+  globalOutputRules: OutputRule[];
   /** Source files that were loaded */
   sourceFiles: string[];
 }
@@ -196,6 +239,19 @@ export function getRulesForTool(
 ): Rule[] {
   const toolSpecific = loadedRules.rulesByTool.get(toolName) ?? [];
   return [...loadedRules.globalRules, ...toolSpecific].filter(
+    (rule) => rule.enabled
+  );
+}
+
+/**
+ * Get output rules applicable to a specific tool.
+ */
+export function getOutputRulesForTool(
+  loadedRules: LoadedRules,
+  toolName: string
+): OutputRule[] {
+  const toolSpecific = loadedRules.outputRulesByTool.get(toolName) ?? [];
+  return [...loadedRules.globalOutputRules, ...toolSpecific].filter(
     (rule) => rule.enabled
   );
 }

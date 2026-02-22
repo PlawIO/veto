@@ -75,6 +75,8 @@ export type {
   RuleSet,
   RuleCondition,
   RuleAction,
+  OutputRule,
+  OutputRuleAction,
   RuleSeverity,
   ValidationAPIResponse,
 } from './rules/types.js';
@@ -101,6 +103,7 @@ export { VetoCloudClient, ApprovalTimeoutError } from './cloud/client.js';
 // Interception result
 export type { InterceptionResult } from './core/interceptor.js';
 export type { HistoryStats } from './core/history.js';
+export type { OutputValidationResult } from './core/output-validator.js';
 
 // Budget
 export {
@@ -146,6 +149,18 @@ export type {
 // Compiler (AST-based policy expressions)
 export { compile, evaluate, typeCheck } from './compiler/index.js';
 export type { ASTNode, EvalContext, TypeCheckResult } from './compiler/index.js';
+
+// Common output redaction patterns (reference only, not auto-applied)
+export {
+  OUTPUT_PATTERNS,
+  OUTPUT_PATTERN_SSN,
+  OUTPUT_PATTERN_CREDIT_CARD,
+  OUTPUT_PATTERN_OPENAI_API_KEY,
+  OUTPUT_PATTERN_GITHUB_API_KEY,
+  OUTPUT_PATTERN_AWS_API_KEY,
+  OUTPUT_PATTERN_EMAIL,
+  OUTPUT_PATTERN_US_PHONE,
+} from './rules/patterns.js';
 
 // CLI init function (for programmatic use)
 export { init, isInitialized } from './cli/init.js';
