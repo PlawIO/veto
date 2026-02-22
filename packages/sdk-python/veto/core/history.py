@@ -80,12 +80,12 @@ class HistoryTracker:
 
         self._logger.debug(
             "History entry added",
-                {
-                    "tool_name": snapshot.tool_name,
-                    "decision": snapshot.validation_result.decision,
-                    "history_size": len(self._entries),
-                },
-            )
+            {
+                "tool_name": snapshot.tool_name,
+                "decision": snapshot.validation_result.decision,
+                "history_size": len(self._entries),
+            },
+        )
 
     def record(
         self,
