@@ -14,11 +14,11 @@ import type {
   ValidationResult,
   NamedValidator,
 } from '../types/config.js';
-import type { Rule, RuleCondition } from './types.js';
+import type { Rule } from './types.js';
 import { RuleLoader, type YamlParser } from './loader.js';
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
-import { isSafePattern } from '../deterministic/regex-safety.js';
+import { evaluateConditionCollections } from './condition-evaluator.js';
 
 export interface ExpressionValidatorConfig {
   rulesDir?: string;
@@ -88,11 +88,21 @@ export class ExpressionValidator {
 
     const evalContext = {
       tool_name: context.toolName,
+      arguments: context.arguments,
       ...context.arguments,
     };
 
     for (const rule of rules) {
-      const matched = this.evaluateRule(rule, evalContext);
+      const matched = evaluateConditionCollections(
+        rule.conditions,
+        rule.condition_groups,
+        evalContext,
+        {
+          now: context.timestamp,
+          evaluateExpression: (expression, expressionContext) =>
+            this.evaluateExpression(expression, expressionContext),
+        }
+      );
 
       if (matched) {
         if (rule.action === 'block') {
@@ -129,32 +139,6 @@ export class ExpressionValidator {
     };
   }
 
-  private evaluateRule(rule: Rule, ctx: Record<string, unknown>): boolean {
-    if (rule.conditions && rule.conditions.length > 0) {
-      return rule.conditions.every((c) => this.evaluateCondition(c, ctx));
-    }
-
-    if (rule.condition_groups && rule.condition_groups.length > 0) {
-      return rule.condition_groups.some((group) =>
-        group.every((c) => this.evaluateCondition(c, ctx)),
-      );
-    }
-
-    return true;
-  }
-
-  private evaluateCondition(condition: RuleCondition, ctx: Record<string, unknown>): boolean {
-    if (condition.expression) {
-      return this.evaluateExpression(condition.expression, ctx);
-    }
-
-    if (condition.field && condition.operator) {
-      return this.evaluateLegacyCondition(condition, ctx);
-    }
-
-    return true;
-  }
-
   private evaluateExpression(expression: string, ctx: Record<string, unknown>): boolean {
     let ast = this.compiledCache.get(expression);
     if (!ast) {
@@ -164,74 +148,6 @@ export class ExpressionValidator {
 
     const result = evaluate(ast, ctx);
     return Boolean(result);
-  }
-
-  private evaluateLegacyCondition(
-    condition: RuleCondition,
-    ctx: Record<string, unknown>,
-  ): boolean {
-    const fieldValue = this.resolveField(condition.field!, ctx);
-    const expected = condition.value;
-
-    switch (condition.operator) {
-      case 'equals':
-        return fieldValue === expected;
-      case 'not_equals':
-        return fieldValue !== expected;
-      case 'contains':
-        if (typeof fieldValue === 'string' && typeof expected === 'string') {
-          return fieldValue.includes(expected);
-        }
-        if (Array.isArray(fieldValue)) {
-          return fieldValue.includes(expected);
-        }
-        return false;
-      case 'not_contains':
-        if (typeof fieldValue === 'string' && typeof expected === 'string') {
-          return !fieldValue.includes(expected);
-        }
-        if (Array.isArray(fieldValue)) {
-          return !fieldValue.includes(expected);
-        }
-        return true;
-      case 'starts_with':
-        return typeof fieldValue === 'string' && typeof expected === 'string'
-          && fieldValue.startsWith(expected);
-      case 'ends_with':
-        return typeof fieldValue === 'string' && typeof expected === 'string'
-          && fieldValue.endsWith(expected);
-      case 'matches':
-        if (typeof fieldValue !== 'string' || typeof expected !== 'string') return false;
-        if (expected.length > 256 || !isSafePattern(expected)) return false;
-        try {
-          return new RegExp(expected).test(fieldValue);
-        } catch {
-          return false;
-        }
-      case 'greater_than':
-        return Number(fieldValue) > Number(expected);
-      case 'less_than':
-        return Number(fieldValue) < Number(expected);
-      case 'in':
-        return Array.isArray(expected) && expected.includes(fieldValue);
-      case 'not_in':
-        return Array.isArray(expected) && !expected.includes(fieldValue);
-      default:
-        return false;
-    }
-  }
-
-  private resolveField(field: string, ctx: Record<string, unknown>): unknown {
-    const parts = field.split('.');
-    let current: unknown = ctx;
-
-    for (const part of parts) {
-      if (current === null || current === undefined) return undefined;
-      if (typeof current !== 'object') return undefined;
-      current = (current as Record<string, unknown>)[part];
-    }
-
-    return current;
   }
 }
 
