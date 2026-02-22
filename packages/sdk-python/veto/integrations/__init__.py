@@ -8,4 +8,5 @@ guardrail-protected tools.
 Available integrations:
     - browser_use: AI browser automation with Veto guardrails.
     - langchain: LangChain middleware, callback handler, and LangGraph ToolNode wrapper.
+    - openai_agents: OpenAI Agents SDK input/output/tool guardrails.
 """
