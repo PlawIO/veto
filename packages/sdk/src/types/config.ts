@@ -49,6 +49,10 @@ export interface ValidationContext {
   sessionId?: string;
   /** Agent identifier for this call (falls back to instance-level agent when omitted) */
   agentId?: string;
+  /** User identifier for this call (falls back to instance-level user when omitted) */
+  userId?: string;
+  /** Role for this call (falls back to instance-level role when omitted) */
+  role?: string;
   /** Indicates whether validation is being run for interception or standalone guard checks */
   source?: 'interceptor' | 'guard';
   /** Custom context data passed by the user */

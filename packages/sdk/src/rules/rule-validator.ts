@@ -36,6 +36,10 @@ export interface RuleValidatorConfig {
   sessionId?: string;
   /** Agent ID for tracking */
   agentId?: string;
+  /** User ID for tracking */
+  userId?: string;
+  /** Role for tracking */
+  role?: string;
 }
 
 /**
@@ -64,6 +68,8 @@ export class RuleValidator {
   private readonly apiClient: ValidationAPIClient;
   private readonly sessionId?: string;
   private readonly agentId?: string;
+  private readonly userId?: string;
+  private readonly role?: string;
   private isInitialized = false;
 
   constructor(options: RuleValidatorOptions) {
@@ -71,6 +77,8 @@ export class RuleValidator {
     this.config = options.config;
     this.sessionId = options.config.sessionId;
     this.agentId = options.config.agentId;
+    this.userId = options.config.userId;
+    this.role = options.config.role;
 
     // Initialize rule loader
     this.ruleLoader = new RuleLoader({ logger: this.logger });
@@ -257,8 +265,10 @@ export class RuleValidator {
       tool_name: context.toolName,
       arguments: context.arguments,
       timestamp: context.timestamp.toISOString(),
-      session_id: this.sessionId,
-      agent_id: this.agentId,
+      session_id: context.sessionId ?? this.sessionId,
+      agent_id: context.agentId ?? this.agentId,
+      user_id: context.userId ?? this.userId,
+      role: context.role ?? this.role,
       call_history: this.buildHistorySummary(context.callHistory),
       custom: context.custom,
     };

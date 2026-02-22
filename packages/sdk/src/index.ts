@@ -74,6 +74,7 @@ export type {
   Rule,
   RuleSet,
   RuleCondition,
+  RuleAgentsScope,
   RuleAction,
   OutputRule,
   OutputRuleAction,

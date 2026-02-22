@@ -104,6 +104,27 @@ class TestValidDocuments:
             }
         )
 
+    def test_accepts_agents_scope(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "rules": [
+                    {
+                        "id": "include-agents",
+                        "name": "Include agents",
+                        "action": "block",
+                        "agents": ["agent-a", "agent-b"],
+                    },
+                    {
+                        "id": "exclude-agents",
+                        "name": "Exclude agents",
+                        "action": "block",
+                        "agents": {"not": ["agent-c"]},
+                    },
+                ],
+            }
+        )
+
 
 class TestInvalidDocuments:
     def test_missing_version(self) -> None:
@@ -175,6 +196,22 @@ class TestInvalidDocuments:
                                     "within": -5,
                                 }
                             ],
+                        }
+                    ],
+                }
+            )
+
+    def test_invalid_agents_scope_rejected(self) -> None:
+        with pytest.raises(PolicySchemaError):
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [
+                        {
+                            "id": "bad-agents",
+                            "name": "Bad agents scope",
+                            "action": "block",
+                            "agents": {"not": "agent-a"},
                         }
                     ],
                 }

@@ -81,6 +81,9 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "items": {"type": "string", "minLength": 1},
                     "description": "Tools this rule applies to. Empty or absent means all tools.",
                 },
+                "agents": {
+                    "$ref": "#/$defs/AgentScope",
+                },
                 "conditions": {
                     "type": "array",
                     "items": {"$ref": "#/$defs/Condition"},
@@ -198,6 +201,28 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 },
             },
             "additionalProperties": False,
+        },
+        "AgentScope": {
+            "oneOf": [
+                {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "Rule applies only to these agents.",
+                },
+                {
+                    "type": "object",
+                    "required": ["not"],
+                    "properties": {
+                        "not": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                            "description": "Rule applies to all agents except those listed here.",
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            ],
+            "description": "Optional agent scope filter for this rule.",
         },
         "SequenceConstraint": {
             "type": "object",

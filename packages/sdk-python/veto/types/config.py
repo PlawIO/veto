@@ -73,6 +73,8 @@ class ValidationContext:
     call_history: list[ToolCallHistoryEntry] = field(default_factory=list)
     session_id: Optional[str] = None
     agent_id: Optional[str] = None
+    user_id: Optional[str] = None
+    role: Optional[str] = None
     source: Optional[Literal["interceptor", "guard"]] = None
     custom: Optional[dict[str, Any]] = None
 

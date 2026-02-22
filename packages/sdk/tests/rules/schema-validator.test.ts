@@ -88,6 +88,28 @@ describe('Policy IR v1 Schema Validator', () => {
         ],
       })).not.toThrow();
     });
+
+    it('should accept rule agents include and exclude scopes', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'agent-allow',
+            name: 'Allow only specific agents',
+            action: 'block',
+            agents: ['agent-a', 'agent-b'],
+          },
+          {
+            id: 'agent-exclude',
+            name: 'Exclude specific agents',
+            action: 'block',
+            agents: {
+              not: ['agent-c'],
+            },
+          },
+        ],
+      })).not.toThrow();
+    });
   });
 
   describe('invalid documents', () => {
@@ -166,6 +188,22 @@ describe('Policy IR v1 Schema Validator', () => {
                 within: -5,
               },
             ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
+    it('should reject invalid agents scope', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'bad-agents',
+            name: 'Bad agents scope',
+            action: 'block',
+            agents: {
+              not: 'agent-a',
+            },
           },
         ],
       })).toThrow(PolicySchemaError);

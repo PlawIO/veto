@@ -1,7 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from veto.rules import evaluate_condition_collections, evaluate_sequence_constraints
+from veto.rules import (
+    evaluate_agent_scope,
+    evaluate_condition_collections,
+    evaluate_sequence_constraints,
+    rule_applies_to_agent,
+)
 from veto.types.config import ToolCallHistoryEntry, ValidationResult
 
 
@@ -17,6 +22,69 @@ def _entry(
         validation_result=ValidationResult(decision=decision),
         timestamp=timestamp,
     )
+
+
+def test_agents_include_scope_matches_current_agent() -> None:
+    rule = {"agents": ["agent-a", "agent-b"]}
+
+    assert rule_applies_to_agent(rule, "agent-a")
+    assert not rule_applies_to_agent(rule, "agent-c")
+    assert not rule_applies_to_agent(rule, None)
+
+
+def test_agents_exclusion_scope_skips_excluded_agent() -> None:
+    rule = {"agents": {"not": ["agent-internal"]}}
+
+    assert not evaluate_agent_scope(rule["agents"], "agent-internal")
+    assert evaluate_agent_scope(rule["agents"], "agent-external")
+    assert evaluate_agent_scope(rule["agents"], None)
+
+
+def test_rule_without_agents_scope_applies_to_everyone() -> None:
+    rule = {"action": "block"}
+
+    assert rule_applies_to_agent(rule, "agent-a")
+    assert rule_applies_to_agent(rule, "agent-b")
+    assert rule_applies_to_agent(rule, None)
+
+
+def test_agents_scope_combines_with_existing_conditions() -> None:
+    rule = {
+        "agents": ["ops-agent"],
+        "conditions": [
+            {
+                "field": "arguments.amount",
+                "operator": "greater_than",
+                "value": 1000,
+            }
+        ],
+    }
+
+    scoped_high_value = rule_applies_to_agent(
+        rule, "ops-agent"
+    ) and evaluate_condition_collections(
+        rule.get("conditions"),
+        rule.get("condition_groups"),
+        {"arguments": {"amount": 5000}},
+    )
+    scoped_low_value = rule_applies_to_agent(
+        rule, "ops-agent"
+    ) and evaluate_condition_collections(
+        rule.get("conditions"),
+        rule.get("condition_groups"),
+        {"arguments": {"amount": 100}},
+    )
+    other_agent_high_value = rule_applies_to_agent(
+        rule, "support-agent"
+    ) and evaluate_condition_collections(
+        rule.get("conditions"),
+        rule.get("condition_groups"),
+        {"arguments": {"amount": 5000}},
+    )
+
+    assert scoped_high_value
+    assert not scoped_low_value
+    assert not other_agent_high_value
 
 
 def test_blocked_by_without_conditions() -> None:

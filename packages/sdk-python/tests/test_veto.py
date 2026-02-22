@@ -10,7 +10,7 @@ import pytest
 from veto import Veto, VetoOptions, ApprovalTimeoutError
 from veto.cloud.client import VetoCloudClient
 from veto.cloud.types import ValidationResponse, ToolRegistrationResponse, ApprovalData
-from veto.types.config import ValidationContext
+from veto.types.config import ValidationContext, ValidationResult
 
 
 @pytest.fixture
@@ -457,8 +457,8 @@ class TestGuard:
         assert result.decision == "deny"
         assert result.reason == "Would be blocked"
 
-    async def test_guard_context_overrides_session_and_agent(self, mock_cloud_client):
-        """Per-call session_id and agent_id should override instance defaults."""
+    async def test_guard_context_overrides_identity_fields(self, mock_cloud_client):
+        """Per-call identity fields should override instance defaults."""
         mock_cloud_client.validate = AsyncMock(
             return_value=ValidationResponse(
                 decision="allow",
@@ -472,6 +472,8 @@ class TestGuard:
                 log_level="silent",
                 session_id="default-session",
                 agent_id="default-agent",
+                user_id="default-user",
+                role="analyst",
             )
         )
         veto._cloud_client = mock_cloud_client
@@ -480,16 +482,56 @@ class TestGuard:
         first_call = mock_cloud_client.validate.call_args_list[0]
         assert first_call.kwargs["context"]["session_id"] == "default-session"
         assert first_call.kwargs["context"]["agent_id"] == "default-agent"
+        assert first_call.kwargs["context"]["user_id"] == "default-user"
+        assert first_call.kwargs["context"]["role"] == "analyst"
 
         await veto.guard(
             "context_tool",
             {"x": 2},
             session_id="override-session",
             agent_id="override-agent",
+            user_id="override-user",
+            role="admin",
         )
         second_call = mock_cloud_client.validate.call_args_list[1]
         assert second_call.kwargs["context"]["session_id"] == "override-session"
         assert second_call.kwargs["context"]["agent_id"] == "override-agent"
+        assert second_call.kwargs["context"]["user_id"] == "override-user"
+        assert second_call.kwargs["context"]["role"] == "admin"
+
+    async def test_custom_validator_receives_user_id_and_role(
+        self, mock_cloud_client
+    ):
+        """ValidationContext should include user_id and role for custom validators."""
+        seen_contexts: list[ValidationContext] = []
+
+        def capture_context(context: ValidationContext) -> ValidationResult:
+            seen_contexts.append(context)
+            return ValidationResult(decision="allow")
+
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                log_level="silent",
+                user_id="default-user",
+                role="analyst",
+                validators=[capture_context],
+            )
+        )
+        veto._cloud_client = mock_cloud_client
+
+        await veto.guard("validator_context_tool", {"x": 1})
+        await veto.guard(
+            "validator_context_tool",
+            {"x": 2},
+            user_id="override-user",
+            role="admin",
+        )
+
+        assert seen_contexts[0].user_id == "default-user"
+        assert seen_contexts[0].role == "analyst"
+        assert seen_contexts[1].user_id == "override-user"
+        assert seen_contexts[1].role == "admin"
 
 
 class TestCloudValidation:

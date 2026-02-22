@@ -34,6 +34,10 @@ class InterceptorOptions:
     logger: Logger
     validation_engine: ValidationEngine
     history_tracker: Optional[HistoryTracker] = None
+    session_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    user_id: Optional[str] = None
+    role: Optional[str] = None
     custom_context: Optional[dict[str, Any]] = None
     on_before_validation: Optional[
         Callable[[ValidationContext], Union[None, Awaitable[None]]]
@@ -86,6 +90,10 @@ class Interceptor:
         self._logger = options.logger
         self._validation_engine = options.validation_engine
         self._history_tracker = options.history_tracker
+        self._session_id = options.session_id
+        self._agent_id = options.agent_id
+        self._user_id = options.user_id
+        self._role = options.role
         self._custom_context = options.custom_context
         self._on_before_validation = options.on_before_validation
         self._on_after_validation = options.on_after_validation
@@ -120,6 +128,10 @@ class Interceptor:
                 if self._history_tracker
                 else []
             ),
+            session_id=self._session_id,
+            agent_id=self._agent_id,
+            user_id=self._user_id,
+            role=self._role,
             source="interceptor",
             custom=self._custom_context,
         )

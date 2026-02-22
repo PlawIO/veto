@@ -356,6 +356,7 @@ export class RuleLoader {
       severity: (ruleData.severity as Rule['severity']) ?? 'medium',
       action: (ruleData.action as Rule['action']) ?? 'block',
       tools: ruleData.tools as string[] | undefined,
+      agents: ruleData.agents as Rule['agents'],
       conditions: ruleData.conditions as Rule['conditions'],
       condition_groups: ruleData.condition_groups as Rule['condition_groups'],
       blocked_by: ruleData.blocked_by as Rule['blocked_by'],

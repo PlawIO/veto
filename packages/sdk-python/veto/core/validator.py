@@ -240,6 +240,8 @@ class ValidationEngine:
                         call_history=current_context.call_history,
                         session_id=current_context.session_id,
                         agent_id=current_context.agent_id,
+                        user_id=current_context.user_id,
+                        role=current_context.role,
                         source=current_context.source,
                         custom=current_context.custom,
                     )

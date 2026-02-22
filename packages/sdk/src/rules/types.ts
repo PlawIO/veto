@@ -73,6 +73,13 @@ export type OutputRuleAction = 'block' | 'redact' | 'log';
 export type RuleSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 /**
+ * Agent scoping for rule applicability.
+ * - string[]: include-only list
+ * - { not: string[] }: exclude list
+ */
+export type RuleAgentsScope = string[] | { not: string[] };
+
+/**
  * A single rule definition.
  */
 export interface Rule {
@@ -90,6 +97,8 @@ export interface Rule {
   action: RuleAction;
   /** Tools this rule applies to (empty = all tools) */
   tools?: string[];
+  /** Optional agent scope for this rule */
+  agents?: RuleAgentsScope;
   /** Conditions that must be met for the rule to trigger (AND logic) */
   conditions?: RuleCondition[];
   /** Alternative condition groups (OR logic between groups) */
@@ -180,6 +189,10 @@ export interface ToolCallContext {
   session_id?: string;
   /** User or agent ID (if available) */
   agent_id?: string;
+  /** User ID (if available) */
+  user_id?: string;
+  /** Role (if available) */
+  role?: string;
   /** Previous tool calls in this session */
   call_history?: ToolCallHistorySummary[];
   /** Custom context data */
