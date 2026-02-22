@@ -1,5 +1,17 @@
 # veto (Python SDK)
 
+## 0.8.0
+
+### Minor Changes
+
+- [#117](https://github.com/VulnZap/veto/pull/117) [`220e7f1`](https://github.com/VulnZap/veto/commit/220e7f102bee5e57f073584dba38076849277877) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a standalone `guard()` API for the Python SDK so tool calls can be validated without wrapping/executing tools.
+
+  Highlights:
+  - returns typed `GuardResult` with `allow`, `deny`, or `require_approval`
+  - preserves real deny/require-approval outcomes for `guard()` callers in log mode
+  - includes `rule_id`, `severity`, and `approval_id` when metadata is available
+  - supports per-call `session_id` and `agent_id` overrides for standalone checks
+
 ## 0.6.0
 
 ### Minor Changes

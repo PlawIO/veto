@@ -1,5 +1,19 @@
 # veto-sdk
 
+## 1.8.0
+
+### Minor Changes
+
+- [#117](https://github.com/VulnZap/veto/pull/117) [`220e7f1`](https://github.com/VulnZap/veto/commit/220e7f102bee5e57f073584dba38076849277877) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a new standalone `guard()` API to TypeScript and Python SDKs that runs the existing validation pipeline without wrapping or executing tools.
+
+  Highlights:
+
+  - return typed `GuardResult` with `allow`, `deny`, or `require_approval`
+  - preserve real deny/require_approval outcomes in log mode for `guard()` callers
+  - include `ruleId`, `severity`, and `approvalId` when metadata is available
+  - support per-call `sessionId`/`agentId` overrides for standalone checks
+  - export `GuardResult` from both SDK package roots
+
 ## 1.7.0
 
 ### Minor Changes
