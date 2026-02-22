@@ -16,6 +16,7 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
     "anyOf": [
         {"required": ["rules"]},
         {"required": ["output_rules"]},
+        {"required": ["extends"]},
     ],
     "properties": {
         "version": {
@@ -30,6 +31,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
         "description": {
             "type": "string",
             "description": "Detailed description of this policy set.",
+        },
+        "extends": {
+            "type": "string",
+            "minLength": 1,
+            "description": 'Optional built-in policy pack name to inherit from (e.g., "@veto/coding-agent").',
         },
         "rules": {
             "type": "array",

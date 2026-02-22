@@ -146,6 +146,31 @@ rules:
 `;
 
 /**
+ * Rules template that extends a built-in policy pack.
+ */
+export function createPackRulesTemplate(packName: string): string {
+  return `# Veto Rules
+# This file extends a built-in policy pack and lets you override specific rules.
+
+version: "1.0"
+name: custom-rules
+description: Custom rules extending ${packName}
+extends: "${packName}"
+
+rules:
+  # Override a pack rule by reusing the same id:
+  # - id: <pack-rule-id>
+  #   name: My override
+  #   action: block
+
+  # Add project-specific rules:
+  # - id: project-specific-rule
+  #   name: Project specific rule
+  #   action: block
+`;
+}
+
+/**
  * .gitignore additions for veto.
  */
 export const GITIGNORE_ADDITIONS = `

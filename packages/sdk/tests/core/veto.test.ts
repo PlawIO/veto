@@ -7,6 +7,23 @@ const TEST_DIR = '/tmp/veto-test-' + Date.now();
 const VETO_DIR = join(TEST_DIR, 'veto');
 const RULES_DIR = join(VETO_DIR, 'rules');
 
+function writeLocalConfig(): void {
+  writeFileSync(
+    join(VETO_DIR, 'veto.config.yaml'),
+    `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+    'utf-8'
+  );
+}
+
 // Mock fetch for API tests
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -240,6 +257,101 @@ rules:
 
       await Veto.init({ configDir: VETO_DIR });
       // Logic for verifying rules loaded is indirect via usage below
+    });
+
+    it('should inherit rules from a built-in pack with extends', async () => {
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'extends-pack.yaml'),
+        `
+version: "1.0"
+extends: "@veto/coding-agent"
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('run_shell', { command: 'rm -rf /tmp' });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('coding-agent-block-dangerous-shell-commands');
+    });
+
+    it('should allow overriding a pack rule by id', async () => {
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'override-pack.yaml'),
+        `
+version: "1.0"
+extends: "@veto/coding-agent"
+rules:
+  - id: coding-agent-block-dangerous-shell-commands
+    name: Override dangerous shell detection
+    action: block
+    tools: [run_shell]
+    conditions:
+      - field: arguments.command
+        operator: contains
+        value: shutdown
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('run_shell', { command: 'rm -rf /tmp' });
+
+      expect(result.decision).toBe('allow');
+    });
+
+    it('should append custom rules alongside inherited pack rules', async () => {
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'append-pack.yaml'),
+        `
+version: "1.0"
+extends: "@veto/coding-agent"
+rules:
+  - id: custom-block-prod-path
+    name: Custom block for prod paths
+    action: block
+    tools: [write_file]
+    conditions:
+      - field: arguments.path
+        operator: starts_with
+        value: /prod
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const inherited = await veto.guard('run_shell', { command: 'rm -rf /tmp' });
+      const custom = await veto.guard('write_file', { path: '/prod/app.env' });
+
+      expect(inherited.decision).toBe('deny');
+      expect(inherited.ruleId).toBe('coding-agent-block-dangerous-shell-commands');
+      expect(custom.decision).toBe('deny');
+      expect(custom.ruleId).toBe('custom-block-prod-path');
+    });
+
+    it('should skip invalid extends packs without crashing initialization', async () => {
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'bad-pack.yaml'),
+        `
+version: "1.0"
+extends: "@veto/does-not-exist"
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('run_shell', { command: 'rm -rf /tmp' });
+
+      expect(result.decision).toBe('allow');
     });
   });
 

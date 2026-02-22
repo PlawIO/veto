@@ -1,0 +1,64 @@
+version: "1.0"
+name: coding-agent-pack
+description: Baseline guardrails for coding agents.
+rules:
+  - id: coding-agent-block-dangerous-shell-commands
+    name: Block dangerous shell commands
+    description: Prevent destructive shell operations.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - execute_command
+      - run_shell
+      - bash
+      - shell
+    condition_groups:
+      - - field: arguments.command
+          operator: contains
+          value: "rm -rf"
+      - - field: arguments.command
+          operator: contains
+          value: "mkfs"
+      - - field: arguments.command
+          operator: contains
+          value: "shutdown"
+      - - field: arguments.command
+          operator: contains
+          value: "reboot"
+
+  - id: coding-agent-restrict-sensitive-file-writes
+    name: Restrict sensitive file writes
+    description: Block writes to sensitive system locations.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - write_file
+      - edit_file
+      - append_file
+    condition_groups:
+      - - field: arguments.path
+          operator: starts_with
+          value: /etc
+      - - field: arguments.path
+          operator: starts_with
+          value: /root
+      - - field: arguments.path
+          operator: contains
+          value: .ssh
+
+  - id: coding-agent-block-path-traversal-writes
+    name: Block path traversal file writes
+    description: Prevent writing files via traversal paths.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - write_file
+      - edit_file
+      - append_file
+    conditions:
+      - field: arguments.path
+        operator: contains
+        value: "../"

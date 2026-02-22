@@ -5,7 +5,11 @@
   "description": "Canonical intermediate representation for Veto policies. Consumed by TypeScript and Python SDK loaders.",
   "type": "object",
   "required": ["version"],
-  "anyOf": [{ "required": ["rules"] }, { "required": ["output_rules"] }],
+  "anyOf": [
+    { "required": ["rules"] },
+    { "required": ["output_rules"] },
+    { "required": ["extends"] }
+  ],
   "properties": {
     "version": {
       "const": "1.0",
@@ -19,6 +23,11 @@
     "description": {
       "type": "string",
       "description": "Detailed description of this policy set."
+    },
+    "extends": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional built-in policy pack name to inherit from (e.g., \"@veto/coding-agent\")."
     },
     "rules": {
       "type": "array",
