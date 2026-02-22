@@ -22,6 +22,7 @@ Example:
 from veto.core.veto import (
     Veto,
     ToolCallDeniedError,
+    GuardResult,
     VetoOptions,
     VetoMode,
     WrappedTools,
@@ -114,6 +115,7 @@ __all__ = [
     # Main
     "Veto",
     "ToolCallDeniedError",
+    "GuardResult",
     "VetoOptions",
     "VetoMode",
     "WrappedTools",

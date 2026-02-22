@@ -143,6 +143,7 @@ export class Interceptor {
       callId,
       timestamp: new Date(),
       callHistory: this.historyTracker?.getAll() ?? [],
+      source: 'interceptor',
       custom: this.customContext,
     };
 

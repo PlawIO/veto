@@ -370,6 +370,128 @@ class TestVetoModes:
         assert result == "executed"
 
 
+class TestGuard:
+    """Tests for Veto.guard() standalone checks."""
+
+    async def test_guard_returns_allow(self, mock_cloud_client):
+        """Should return allow decision without throwing."""
+        veto = await Veto.init(VetoOptions(api_key="test", log_level="silent"))
+        veto._cloud_client = mock_cloud_client
+
+        result = await veto.guard("allow_tool", {"safe": True})
+
+        assert result.decision == "allow"
+        assert result.reason == "Allowed by mock"
+        assert veto.get_history_stats().total_calls == 1
+
+    async def test_guard_returns_deny(self, mock_cloud_client):
+        """Should return deny decision without throwing."""
+        mock_cloud_client.validate = AsyncMock(
+            return_value=ValidationResponse(
+                decision="deny",
+                reason="Blocked by policy",
+                metadata={"ruleId": "deny-rule", "severity": "high"},
+            )
+        )
+
+        veto = await Veto.init(VetoOptions(api_key="test", log_level="silent"))
+        veto._cloud_client = mock_cloud_client
+
+        result = await veto.guard("deny_tool", {"dangerous": True})
+
+        assert result.decision == "deny"
+        assert result.reason == "Blocked by policy"
+        assert result.rule_id == "deny-rule"
+        assert result.severity == "high"
+
+    async def test_guard_returns_require_approval_with_approval_id(
+        self, mock_cloud_client
+    ):
+        """Should return require_approval and preserve approval_id."""
+        mock_cloud_client.validate = AsyncMock(
+            return_value=ValidationResponse(
+                decision="require_approval",
+                reason="Needs review",
+                approval_id="appr-guard-001",
+            )
+        )
+        mock_cloud_client.poll_approval = AsyncMock()
+
+        veto = await Veto.init(VetoOptions(api_key="test", log_level="silent"))
+        veto._cloud_client = mock_cloud_client
+
+        result = await veto.guard("approval_tool", {"amount": 5000})
+
+        assert result.decision == "require_approval"
+        assert result.reason == "Needs review"
+        assert result.approval_id == "appr-guard-001"
+        mock_cloud_client.poll_approval.assert_not_called()
+
+    async def test_guard_defaults_to_allow_when_no_validators(self, mock_cloud_client):
+        """Should allow by default when no validators are configured."""
+        veto = await Veto.init(VetoOptions(api_key="test", log_level="silent"))
+        veto._cloud_client = mock_cloud_client
+        veto._validation_engine.clear_validators()
+
+        result = await veto.guard("unconfigured_tool", {"x": 1})
+
+        assert result.decision == "allow"
+        mock_cloud_client.validate.assert_not_called()
+
+    async def test_guard_returns_deny_in_log_mode(self, mock_cloud_client):
+        """Guard should keep deny verdicts in log mode."""
+        mock_cloud_client.validate = AsyncMock(
+            return_value=ValidationResponse(
+                decision="deny",
+                reason="Would be blocked",
+            )
+        )
+
+        veto = await Veto.init(
+            VetoOptions(api_key="test", mode="log", log_level="silent")
+        )
+        veto._cloud_client = mock_cloud_client
+
+        result = await veto.guard("log_mode_tool", {"request": "dangerous"})
+
+        assert result.decision == "deny"
+        assert result.reason == "Would be blocked"
+
+    async def test_guard_context_overrides_session_and_agent(self, mock_cloud_client):
+        """Per-call session_id and agent_id should override instance defaults."""
+        mock_cloud_client.validate = AsyncMock(
+            return_value=ValidationResponse(
+                decision="allow",
+                reason="ok",
+            )
+        )
+
+        veto = await Veto.init(
+            VetoOptions(
+                api_key="test",
+                log_level="silent",
+                session_id="default-session",
+                agent_id="default-agent",
+            )
+        )
+        veto._cloud_client = mock_cloud_client
+
+        await veto.guard("context_tool", {"x": 1})
+        first_call = mock_cloud_client.validate.call_args_list[0]
+        assert first_call.kwargs["context"]["session_id"] == "default-session"
+        assert first_call.kwargs["context"]["agent_id"] == "default-agent"
+
+        await veto.guard(
+            "context_tool",
+            {"x": 2},
+            session_id="override-session",
+            agent_id="override-agent",
+        )
+        second_call = mock_cloud_client.validate.call_args_list[1]
+        assert second_call.kwargs["context"]["session_id"] == "override-session"
+        assert second_call.kwargs["context"]["agent_id"] == "override-agent"
+
+
 class TestCloudValidation:
     """Tests for cloud validation integration."""
 

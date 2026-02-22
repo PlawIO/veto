@@ -110,6 +110,7 @@ class Interceptor:
                 if self._history_tracker
                 else []
             ),
+            source="interceptor",
             custom=self._custom_context,
         )
 

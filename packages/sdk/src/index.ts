@@ -41,6 +41,8 @@ export {
   type ValidationMode,
   type WrappedTools,
   type WrappedHandler,
+  type GuardContext,
+  type GuardResult,
 } from './core/veto.js';
 
 // Core types
