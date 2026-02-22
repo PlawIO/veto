@@ -1,0 +1,75 @@
+version: "1.0"
+name: data-access-pack
+description: Guardrails for database and data retrieval tools.
+rules:
+  - id: data-access-block-sql-injection-patterns
+    name: Block SQL injection patterns
+    description: Block known SQL injection payload patterns.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - query_database
+      - execute_sql
+      - run_query
+    condition_groups:
+      - - field: arguments.query
+          operator: contains
+          value: " OR 1=1"
+      - - field: arguments.query
+          operator: contains
+          value: " UNION SELECT"
+      - - field: arguments.query
+          operator: contains
+          value: ";--"
+      - - field: arguments.query
+          operator: contains
+          value: " DROP TABLE"
+
+  - id: data-access-limit-row-count
+    name: Limit query row count
+    description: Block queries requesting too many rows.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - query_database
+      - execute_sql
+      - run_query
+    conditions:
+      - field: arguments.limit
+        operator: greater_than
+        value: 1000
+
+output_rules:
+  - id: data-access-redact-email
+    name: Redact email addresses
+    description: Redact email values from tool outputs.
+    enabled: true
+    severity: medium
+    action: redact
+    tools:
+      - query_database
+      - fetch_customer
+      - read_record
+    output_conditions:
+      - field: output.email
+        operator: matches
+        value: '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'
+    redact_with: "[REDACTED_EMAIL]"
+
+  - id: data-access-redact-ssn
+    name: Redact SSN values
+    description: Redact social security numbers from tool outputs.
+    enabled: true
+    severity: high
+    action: redact
+    tools:
+      - query_database
+      - fetch_customer
+      - read_record
+    output_conditions:
+      - field: output.ssn
+        operator: matches
+        value: '^\\d{3}-\\d{2}-\\d{4}$'
+    redact_with: "[REDACTED_SSN]"

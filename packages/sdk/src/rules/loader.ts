@@ -12,6 +12,7 @@ import { join, extname } from 'node:path';
 import type { Logger } from '../utils/logger.js';
 import type { Rule, RuleSet, LoadedRules, OutputRule } from './types.js';
 import { validatePolicyIR, PolicySchemaError } from './schema-validator.js';
+import { resolvePolicyPackExtends } from './policy-packs.js';
 
 /**
  * Options for the rule loader.
@@ -126,9 +127,15 @@ export class RuleLoader {
       return;
     }
 
-    this.validateAgainstSchema(parsed, filePath);
+    const parsedObject = resolvePolicyPackExtends(
+      parsed as Record<string, unknown>,
+      filePath,
+      this.yamlParser
+    );
 
-    const ruleSet = this.parseRuleSet(parsed as Record<string, unknown>, filePath);
+    this.validateAgainstSchema(parsedObject, filePath);
+
+    const ruleSet = this.parseRuleSet(parsedObject, filePath);
     if (ruleSet) {
       this.loadedRules.ruleSets.push(ruleSet);
       this.loadedRules.sourceFiles.push(filePath);
@@ -156,9 +163,15 @@ export class RuleLoader {
       return;
     }
 
-    this.validateAgainstSchema(parsed, sourceName);
+    const parsedObject = resolvePolicyPackExtends(
+      parsed as Record<string, unknown>,
+      sourceName,
+      this.yamlParser
+    );
 
-    const ruleSet = this.parseRuleSet(parsed as Record<string, unknown>, sourceName);
+    this.validateAgainstSchema(parsedObject, sourceName);
+
+    const ruleSet = this.parseRuleSet(parsedObject, sourceName);
     if (ruleSet) {
       this.loadedRules.ruleSets.push(ruleSet);
       this.loadedRules.sourceFiles.push(sourceName);
@@ -330,6 +343,7 @@ export class RuleLoader {
       version: (data.version as string) ?? '1.0',
       name: (data.name as string) ?? source,
       description: data.description as string | undefined,
+      extends: data.extends as string | undefined,
       rules: rules.map((r, i) => this.parseRule(r, `${source}:rule-${i}`)),
       output_rules: Array.isArray(data.output_rules)
         ? data.output_rules.map((r, i) => this.parseOutputRule(r, `${source}:output-rule-${i}`))

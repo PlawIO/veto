@@ -81,6 +81,7 @@
   },
   "files": [
     "dist",
+    "packs",
     "README.md"
   ],
   "exports": {

@@ -1,0 +1,66 @@
+version: "1.0"
+name: financial-pack
+description: Guardrails for payment and transfer operations.
+rules:
+  - id: financial-transfer-limit-per-transaction
+    name: Enforce per-transaction transfer limit
+    description: Require approval for transactions above the configured threshold.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - transfer_funds
+      - wire_transfer
+      - send_money
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 10000
+
+  - id: financial-currency-allowlist
+    name: Restrict transfer currencies
+    description: Block unsupported transfer currencies.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - transfer_funds
+      - wire_transfer
+      - send_money
+    conditions:
+      - field: arguments.currency
+        operator: not_in
+        value:
+          - USD
+          - EUR
+          - GBP
+
+  - id: financial-cumulative-transfer-cap
+    name: Enforce cumulative transfer cap
+    description: Require approval after a high-value transfer in the same session window.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - transfer_funds
+      - wire_transfer
+      - send_money
+    blocked_by:
+      - tool: transfer_funds
+        within: 86400
+        conditions:
+          - field: arguments.amount
+            operator: greater_than
+            value: 5000
+      - tool: wire_transfer
+        within: 86400
+        conditions:
+          - field: arguments.amount
+            operator: greater_than
+            value: 5000
+      - tool: send_money
+        within: 86400
+        conditions:
+          - field: arguments.amount
+            operator: greater_than
+            value: 5000

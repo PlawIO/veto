@@ -172,6 +172,13 @@ class Veto:
         >>> # Pass to AI provider, validation is automatic
     """
 
+    _BUILT_IN_POLICY_PACK_FILE_NAMES: dict[str, str] = {
+        "@veto/coding-agent": "coding-agent.yaml",
+        "@veto/financial": "financial.yaml",
+        "@veto/browser-automation": "browser-automation.yaml",
+        "@veto/data-access": "data-access.yaml",
+    }
+
     def __init__(
         self,
         options: VetoOptions,
@@ -410,6 +417,187 @@ class Veto:
         ]
 
     @classmethod
+    def _get_built_in_policy_pack_names(cls) -> list[str]:
+        return list(cls._BUILT_IN_POLICY_PACK_FILE_NAMES.keys())
+
+    @staticmethod
+    def _normalize_policy_pack_name(pack_name: str) -> str:
+        trimmed = pack_name.strip()
+        if trimmed.startswith("@veto/"):
+            return trimmed
+        return f"@veto/{trimmed}"
+
+    @classmethod
+    def _resolve_policy_pack_path(cls, pack_name: str) -> Path:
+        normalized_name = cls._normalize_policy_pack_name(pack_name)
+        file_name = cls._BUILT_IN_POLICY_PACK_FILE_NAMES.get(normalized_name)
+        if file_name is None:
+            available = ", ".join(cls._get_built_in_policy_pack_names())
+            raise ValueError(
+                f'Unknown policy pack "{pack_name}". Available packs: {available}'
+            )
+
+        pack_dir = Path(__file__).resolve().parent.parent / "packs"
+        pack_path = pack_dir / file_name
+        if not pack_path.exists():
+            raise ValueError(
+                f'Policy pack "{normalized_name}" is bundled but missing at {pack_path}'
+            )
+
+        return pack_path
+
+    @staticmethod
+    def _as_list(value: Any) -> list[Any]:
+        if not isinstance(value, list):
+            return []
+        return list(value)
+
+    @staticmethod
+    def _get_rule_id(rule: Any) -> Optional[str]:
+        if not isinstance(rule, dict):
+            return None
+        rule_id = rule.get("id")
+        return rule_id if isinstance(rule_id, str) else None
+
+    @classmethod
+    def _merge_rules_by_id(
+        cls,
+        base_rules: list[Any],
+        user_rules: list[Any],
+    ) -> list[Any]:
+        merged_rules = list(base_rules)
+        id_to_index: dict[str, int] = {}
+
+        for index, rule in enumerate(merged_rules):
+            rule_id = cls._get_rule_id(rule)
+            if rule_id is not None and rule_id not in id_to_index:
+                id_to_index[rule_id] = index
+
+        for user_rule in user_rules:
+            rule_id = cls._get_rule_id(user_rule)
+            if rule_id is not None and rule_id in id_to_index:
+                merged_rules[id_to_index[rule_id]] = user_rule
+                continue
+
+            merged_rules.append(user_rule)
+            if rule_id is not None:
+                id_to_index[rule_id] = len(merged_rules) - 1
+
+        return merged_rules
+
+    @classmethod
+    def _merge_policy_with_pack(
+        cls,
+        pack_policy: dict[str, Any],
+        user_policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged_policy: dict[str, Any] = {**pack_policy, **user_policy}
+
+        if "rules" in pack_policy or "rules" in user_policy:
+            merged_policy["rules"] = cls._merge_rules_by_id(
+                cls._as_list(pack_policy.get("rules")),
+                cls._as_list(user_policy.get("rules")),
+            )
+
+        if "output_rules" in pack_policy or "output_rules" in user_policy:
+            merged_policy["output_rules"] = cls._merge_rules_by_id(
+                cls._as_list(pack_policy.get("output_rules")),
+                cls._as_list(user_policy.get("output_rules")),
+            )
+
+        return merged_policy
+
+    @classmethod
+    def _resolve_policy_pack_extends(
+        cls,
+        policy_data: dict[str, Any],
+        source: str,
+    ) -> dict[str, Any]:
+        raw_extends = policy_data.get("extends")
+        if raw_extends is None:
+            return policy_data
+
+        if not isinstance(raw_extends, str) or raw_extends.strip() == "":
+            raise ValueError(
+                f'Invalid "extends" value in {source}. '
+                'Expected a non-empty string like "@veto/coding-agent".'
+            )
+
+        normalized_pack_name = cls._normalize_policy_pack_name(raw_extends)
+        pack_path = cls._resolve_policy_pack_path(normalized_pack_name)
+        with open(pack_path, "r", encoding="utf-8") as f:
+            parsed_pack = yaml.safe_load(f)
+
+        if not isinstance(parsed_pack, dict):
+            raise ValueError(
+                f'Policy pack "{normalized_pack_name}" at {pack_path} is not a valid YAML object'
+            )
+
+        merged_policy = cls._merge_policy_with_pack(
+            dict(parsed_pack),
+            {**policy_data, "extends": normalized_pack_name},
+        )
+        return merged_policy
+
+    @classmethod
+    def _load_policy_document(
+        cls,
+        file_path: Path,
+        logger: Logger,
+    ) -> Optional[dict[str, Any]]:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                parsed = yaml.safe_load(f)
+        except Exception as exc:
+            logger.error(
+                "Failed to read policy file",
+                {"path": str(file_path)},
+                exc,
+            )
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+
+        try:
+            parsed_with_extends = cls._resolve_policy_pack_extends(
+                dict(parsed),
+                str(file_path),
+            )
+        except Exception as exc:
+            logger.error(
+                "Skipping invalid policy file during pack resolution",
+                {"path": str(file_path)},
+                exc,
+            )
+            return None
+
+        parsed_for_validation: dict[str, Any] = dict(parsed_with_extends)
+        if (
+            "rules" not in parsed_for_validation
+            and "output_rules" in parsed_for_validation
+        ):
+            parsed_for_validation["rules"] = []
+
+        if (
+            "rules" not in parsed_for_validation
+            and "output_rules" not in parsed_for_validation
+        ):
+            return None
+
+        try:
+            validate_policy_ir(parsed_for_validation)
+        except PolicySchemaError as exc:
+            logger.error(
+                "Skipping invalid policy file during rule load",
+                {"path": str(file_path), "error_count": len(exc.errors)},
+                exc,
+            )
+            return None
+
+        return parsed_for_validation
+
+    @classmethod
     def _load_rules(
         cls,
         rules_dir: Path,
@@ -424,41 +612,8 @@ class Veto:
 
         yaml_files = cls._find_yaml_files(rules_dir, recursive)
         for file_path in yaml_files:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    parsed = yaml.safe_load(f)
-            except Exception as exc:
-                logger.error(
-                    "Failed to read rule file",
-                    {"path": str(file_path)},
-                    exc,
-                )
-                continue
-
-            if not isinstance(parsed, dict):
-                continue
-
-            parsed_for_validation: dict[str, Any] = dict(parsed)
-            if (
-                "rules" not in parsed_for_validation
-                and "output_rules" in parsed_for_validation
-            ):
-                parsed_for_validation["rules"] = []
-
-            if (
-                "rules" not in parsed_for_validation
-                and "output_rules" not in parsed_for_validation
-            ):
-                continue
-
-            try:
-                validate_policy_ir(parsed_for_validation)
-            except PolicySchemaError as exc:
-                logger.error(
-                    "Skipping invalid policy file during rule load",
-                    {"path": str(file_path), "error_count": len(exc.errors)},
-                    exc,
-                )
+            parsed_for_validation = cls._load_policy_document(file_path, logger)
+            if parsed_for_validation is None:
                 continue
 
             rules_raw = parsed_for_validation.get("rules")
@@ -506,35 +661,8 @@ class Veto:
 
         yaml_files = cls._find_yaml_files(rules_dir, recursive)
         for file_path in yaml_files:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    parsed = yaml.safe_load(f)
-            except Exception as exc:
-                logger.error(
-                    "Failed to read output rule file",
-                    {"path": str(file_path)},
-                    exc,
-                )
-                continue
-
-            if not isinstance(parsed, dict):
-                continue
-
-            parsed_for_validation: dict[str, Any] = dict(parsed)
-            if "rules" not in parsed_for_validation and "output_rules" in parsed_for_validation:
-                parsed_for_validation["rules"] = []
-
-            if "rules" not in parsed_for_validation and "output_rules" not in parsed_for_validation:
-                continue
-
-            try:
-                validate_policy_ir(parsed_for_validation)
-            except PolicySchemaError as exc:
-                logger.error(
-                    "Skipping invalid policy file during output rule load",
-                    {"path": str(file_path), "error_count": len(exc.errors)},
-                    exc,
-                )
+            parsed_for_validation = cls._load_policy_document(file_path, logger)
+            if parsed_for_validation is None:
                 continue
 
             output_rules_raw = parsed_for_validation.get("output_rules")
@@ -1553,10 +1681,10 @@ class Veto:
         tool_name: str,
         args: dict[str, Any],
         *,
-        session_id: str | None = None,
-        agent_id: str | None = None,
-        user_id: str | None = None,
-        role: str | None = None,
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> GuardResult:
         """Run a standalone guard check without wrapping or executing a tool."""
         context = ValidationContext(

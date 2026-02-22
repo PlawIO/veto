@@ -9,9 +9,14 @@ import { join, resolve } from 'node:path';
 import {
   DEFAULT_CONFIG,
   DEFAULT_RULES,
+  createPackRulesTemplate,
   GITIGNORE_ADDITIONS,
   ENV_EXAMPLE,
 } from './templates.js';
+import {
+  normalizePolicyPackName,
+  resolveBuiltInPolicyPackPath,
+} from '../rules/policy-packs.js';
 
 /**
  * Options for the init command.
@@ -21,6 +26,8 @@ export interface InitOptions {
   directory?: string;
   /** Force overwrite existing files */
   force?: boolean;
+  /** Optional built-in policy pack to extend */
+  pack?: string;
   /** Skip confirmation prompts */
   yes?: boolean;
   /** Suppress output */
@@ -71,6 +78,7 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
   const {
     directory = process.cwd(),
     force = false,
+    pack,
     quiet = false,
   } = options;
 
@@ -85,6 +93,25 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
   const baseDir = resolve(directory);
   const vetoDir = join(baseDir, 'veto');
   const rulesDir = join(vetoDir, 'rules');
+  let selectedPack: string | undefined;
+
+  if (pack !== undefined) {
+    if (pack.trim() === '') {
+      result.messages.push('Invalid --pack value: expected a non-empty pack name.');
+      log('  Invalid --pack value: expected a non-empty pack name.', quiet);
+      return result;
+    }
+
+    try {
+      selectedPack = normalizePolicyPackName(pack);
+      resolveBuiltInPolicyPackPath(selectedPack);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      result.messages.push(message);
+      log(`  ${message}`, quiet);
+      return result;
+    }
+  }
 
   result.vetoDir = vetoDir;
 
@@ -132,8 +159,11 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
 
     // Create rules/defaults.yaml
     const rulesPath = join(rulesDir, 'defaults.yaml');
+    const rulesTemplate = selectedPack
+      ? createPackRulesTemplate(selectedPack)
+      : DEFAULT_RULES;
     if (!existsSync(rulesPath) || force) {
-      writeFileSync(rulesPath, DEFAULT_RULES, 'utf-8');
+      writeFileSync(rulesPath, rulesTemplate, 'utf-8');
       result.createdFiles.push('veto/rules/defaults.yaml');
       log('  Created veto/rules/defaults.yaml', quiet);
     } else {
@@ -173,7 +203,11 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     log('Veto initialized successfully!', quiet);
     log('', quiet);
     log('Next steps:', quiet);
-    log('  1. Add your validation rules in veto/rules/', quiet);
+    if (selectedPack) {
+      log(`  1. Customize inherited rules from ${selectedPack} in veto/rules/defaults.yaml`, quiet);
+    } else {
+      log('  1. Add your validation rules in veto/rules/', quiet);
+    }
     log('  2. Use Veto in your application (local mode is default):', quiet);
     log('  3. Optional: set VETO_API_KEY to switch to cloud mode', quiet);
     log('', quiet);

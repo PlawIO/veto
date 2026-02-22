@@ -54,6 +54,43 @@ describe('CLI init', () => {
       expect(content).toContain('block-system-paths');
     });
 
+    it('should scaffold extends when pack is provided', async () => {
+      await init({
+        directory: TEST_DIR,
+        pack: '@veto/financial',
+        quiet: true,
+      });
+
+      const rulesPath = join(TEST_DIR, 'veto', 'rules', 'defaults.yaml');
+      const content = readFileSync(rulesPath, 'utf-8');
+      expect(content).toContain('extends: "@veto/financial"');
+      expect(content).not.toContain('block-system-paths');
+    });
+
+    it('should normalize bare pack names in init', async () => {
+      await init({
+        directory: TEST_DIR,
+        pack: 'coding-agent',
+        quiet: true,
+      });
+
+      const rulesPath = join(TEST_DIR, 'veto', 'rules', 'defaults.yaml');
+      const content = readFileSync(rulesPath, 'utf-8');
+      expect(content).toContain('extends: "@veto/coding-agent"');
+    });
+
+    it('should fail when an unknown pack is provided', async () => {
+      const result = await init({
+        directory: TEST_DIR,
+        pack: '@veto/does-not-exist',
+        quiet: true,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.messages[0]).toContain('Unknown policy pack');
+      expect(existsSync(join(TEST_DIR, 'veto'))).toBe(false);
+    });
+
     it('should create .env.example file', async () => {
       await init({ directory: TEST_DIR, quiet: true });
 

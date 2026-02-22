@@ -104,6 +104,14 @@ class TestValidDocuments:
             }
         )
 
+    def test_accepts_extends_field(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "extends": "@veto/coding-agent",
+            }
+        )
+
     def test_accepts_agents_scope(self) -> None:
         validate_policy_ir(
             {

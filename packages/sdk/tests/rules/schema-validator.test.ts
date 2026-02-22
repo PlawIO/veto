@@ -57,6 +57,13 @@ describe('Policy IR v1 Schema Validator', () => {
       })).not.toThrow();
     });
 
+    it('should accept extends field', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        extends: '@veto/coding-agent',
+      })).not.toThrow();
+    });
+
     it('should accept blocked_by and requires sequence constraints', () => {
       expect(() => validatePolicyIR({
         version: '1.0',

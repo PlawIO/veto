@@ -174,6 +174,8 @@ export interface RuleSet {
   name: string;
   /** Description of the rule set */
   description?: string;
+  /** Optional built-in policy pack this rule set extends */
+  extends?: string;
   /** Rules in this set */
   rules: Rule[];
   /** Output rules in this set */

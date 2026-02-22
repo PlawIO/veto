@@ -44,6 +44,7 @@ import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { validatePolicyIR } from '../rules/schema-validator.js';
 import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
+import { resolvePolicyPackExtends } from '../rules/policy-packs.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import { KernelClient } from '../kernel/client.js';
 import type { CustomConfig, CustomToolCall, CustomResponse } from '../custom/types.js';
@@ -702,7 +703,11 @@ export class Veto {
         if (Array.isArray(parsed)) {
           rules = parsed as Rule[];
         } else if (parsed && typeof parsed === 'object') {
-          const parsedObject = parsed as Record<string, unknown>;
+          const parsedObject = resolvePolicyPackExtends(
+            parsed as Record<string, unknown>,
+            filePath,
+            parseYaml
+          );
 
           if ('rules' in parsedObject || 'output_rules' in parsedObject) {
             const normalizedForSchema = 'rules' in parsedObject
