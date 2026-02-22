@@ -200,6 +200,52 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "description": "The value to compare the field against.",
                 },
             },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "operator": {
+                                "enum": ["within_hours", "outside_hours"],
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "value": {"$ref": "#/$defs/TimeWindowValue"},
+                        }
+                    },
+                }
+            ],
+            "additionalProperties": False,
+        },
+        "TimeWindowValue": {
+            "type": "object",
+            "required": ["start", "end", "timezone"],
+            "properties": {
+                "start": {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                    "description": "Start time in HH:MM 24-hour format.",
+                },
+                "end": {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                    "description": "End time in HH:MM 24-hour format.",
+                },
+                "timezone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": 'IANA timezone identifier (e.g., "America/New_York").',
+                },
+                "days": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                    },
+                    "description": "Optional day filter. If omitted, applies every day.",
+                },
+            },
             "additionalProperties": False,
         },
         "AgentScope": {
@@ -268,6 +314,8 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 "less_than",
                 "in",
                 "not_in",
+                "outside_hours",
+                "within_hours",
             ],
             "description": "Comparison operator.",
         },

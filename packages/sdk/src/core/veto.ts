@@ -1160,6 +1160,7 @@ export class Veto {
       rule.condition_groups,
       localContext,
       {
+        now: validationContext.timestamp,
         evaluateExpression: (expression, evalContext) =>
           this.evaluateLocalExpression(expression, evalContext),
       }
@@ -1250,6 +1251,7 @@ export class Veto {
         constraint.condition_groups,
         historicalContext,
         {
+          now: entry.timestamp,
           evaluateExpression: (expression, evalContext) =>
             this.evaluateLocalExpression(expression, evalContext),
         }

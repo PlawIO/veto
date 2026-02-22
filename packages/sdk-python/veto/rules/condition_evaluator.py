@@ -2,14 +2,30 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from veto.deterministic.regex_safety import is_safe_pattern
 
+DAY_ORDER: tuple[str, ...] = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
+DAY_SET = set(DAY_ORDER)
+TIME_24H_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
-def resolve_field_path(field: str, context: Mapping[str, Any]) -> Any:
+def _build_builtin_context(now: Optional[datetime] = None) -> dict[str, Any]:
+    current = now or datetime.now()
+    day_of_week = DAY_ORDER[(current.weekday() + 1) % len(DAY_ORDER)]
+    return {
+        "time": current.isoformat(),
+        "day_of_week": day_of_week,
+    }
+
+
+def _resolve_dot_path(field: str, context: Mapping[str, Any]) -> Any:
     """Resolve a dot-notation field path from an evaluation context."""
+    if not field:
+        return context
+
     current: Any = context
     for segment in field.split("."):
         if current is None:
@@ -18,6 +34,24 @@ def resolve_field_path(field: str, context: Mapping[str, Any]) -> Any:
             return None
         current = current.get(segment)
     return current
+
+
+def resolve_field_path(
+    field: str,
+    context: Mapping[str, Any],
+    built_in_context: Optional[Mapping[str, Any]] = None,
+) -> Any:
+    active_context = (
+        built_in_context if built_in_context is not None else _build_builtin_context()
+    )
+
+    if field == "context":
+        return active_context
+
+    if field.startswith("context."):
+        return _resolve_dot_path(field[len("context.") :], active_context)
+
+    return _resolve_dot_path(field, context)
 
 
 def create_safe_regex(pattern: str, flags: int = 0) -> Optional[re.Pattern[str]]:
@@ -30,6 +64,143 @@ def create_safe_regex(pattern: str, flags: int = 0) -> Optional[re.Pattern[str]]
         return re.compile(pattern, flags)
     except re.error:
         return None
+
+
+def _normalize_day(raw: str) -> Optional[str]:
+    day = raw.strip().lower()[:3]
+    return day if day in DAY_SET else None
+
+
+def _parse_clock_to_minutes(raw: str) -> Optional[int]:
+    if TIME_24H_PATTERN.fullmatch(raw) is None:
+        return None
+    hour_raw, minute_raw = raw.split(":")
+    return int(hour_raw) * 60 + int(minute_raw)
+
+
+def _normalize_time_window(
+    expected: Any,
+) -> Optional[tuple[int, int, str, Optional[set[str]]]]:
+    if not isinstance(expected, Mapping):
+        return None
+
+    start_raw = expected.get("start")
+    end_raw = expected.get("end")
+    timezone_raw = expected.get("timezone")
+
+    if not isinstance(start_raw, str):
+        return None
+    if not isinstance(end_raw, str):
+        return None
+    if not isinstance(timezone_raw, str):
+        return None
+
+    start_minutes = _parse_clock_to_minutes(start_raw)
+    end_minutes = _parse_clock_to_minutes(end_raw)
+    if start_minutes is None or end_minutes is None:
+        return None
+
+    days_raw = expected.get("days")
+    days: Optional[set[str]] = None
+    if days_raw is not None:
+        if not isinstance(days_raw, list):
+            return None
+        days = set()
+        for day in days_raw:
+            if not isinstance(day, str):
+                return None
+            normalized_day = _normalize_day(day)
+            if normalized_day is None:
+                return None
+            days.add(normalized_day)
+
+    return start_minutes, end_minutes, timezone_raw, days
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate.endswith("Z"):
+            candidate = f"{candidate[:-1]}+00:00"
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+
+    return None
+
+
+def _get_zoned_day_and_minute(
+    timestamp: datetime, timezone_name: str
+) -> Optional[tuple[str, int]]:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+    try:
+        localized = timestamp.astimezone(zone)
+    except ValueError:
+        try:
+            localized = timestamp.replace(tzinfo=timezone.utc).astimezone(zone)
+        except ValueError:
+            return None
+
+    day = DAY_ORDER[(localized.weekday() + 1) % len(DAY_ORDER)]
+    minute_of_day = localized.hour * 60 + localized.minute
+    return day, minute_of_day
+
+
+def _previous_day(day: str) -> str:
+    index = DAY_ORDER.index(day)
+    return DAY_ORDER[(index + len(DAY_ORDER) - 1) % len(DAY_ORDER)]
+
+
+def _evaluate_time_window(
+    field_value: Any, expected: Any
+) -> Optional[tuple[bool, bool]]:
+    normalized = _normalize_time_window(expected)
+    if normalized is None:
+        return None
+
+    start_minutes, end_minutes, timezone_name, days = normalized
+
+    timestamp = _parse_timestamp(field_value)
+    if timestamp is None:
+        return None
+
+    zoned = _get_zoned_day_and_minute(timestamp, timezone_name)
+    if zoned is None:
+        return None
+
+    day, minute_of_day = zoned
+
+    relevant_day = (
+        _previous_day(day)
+        if start_minutes > end_minutes and minute_of_day < end_minutes
+        else day
+    )
+
+    in_scope = days is None or relevant_day in days
+    if not in_scope:
+        return False, False
+
+    if start_minutes == end_minutes:
+        return True, True
+
+    if start_minutes < end_minutes:
+        return True, start_minutes <= minute_of_day < end_minutes
+
+    return True, minute_of_day >= start_minutes or minute_of_day < end_minutes
 
 
 def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) -> bool:
@@ -83,6 +254,12 @@ def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) ->
         return isinstance(expected, list) and field_value in expected
     if operator == "not_in":
         return isinstance(expected, list) and field_value not in expected
+    if operator == "within_hours":
+        result = _evaluate_time_window(field_value, expected)
+        return bool(result and result[0] and result[1])
+    if operator == "outside_hours":
+        result = _evaluate_time_window(field_value, expected)
+        return bool(result and result[0] and not result[1])
     return False
 
 
@@ -90,6 +267,7 @@ def evaluate_condition(
     condition: Mapping[str, Any],
     context: Mapping[str, Any],
     evaluate_expression: Optional[Callable[[str, Mapping[str, Any]], bool]] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """Evaluate a condition supporting expression-based and legacy forms."""
     expression = condition.get("expression")
@@ -102,7 +280,8 @@ def evaluate_condition(
     operator = condition.get("operator")
 
     if isinstance(field, str) and isinstance(operator, str):
-        field_value = resolve_field_path(field, context)
+        built_in_context = _build_builtin_context(now)
+        field_value = resolve_field_path(field, context, built_in_context)
         expected = condition.get("value")
         return evaluate_legacy_condition(field_value, operator, expected)
 
@@ -114,6 +293,7 @@ def evaluate_condition_collections(
     condition_groups: Optional[list[list[Mapping[str, Any]]]],
     context: Mapping[str, Any],
     evaluate_expression: Optional[Callable[[str, Mapping[str, Any]], bool]] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """
     Evaluate a rule-like condition collection.
@@ -121,12 +301,15 @@ def evaluate_condition_collections(
     - conditions: AND semantics
     - condition_groups: OR semantics, each group is AND
     """
+    evaluation_time = now or datetime.now()
+
     if conditions:
         return all(
             evaluate_condition(
                 condition=condition,
                 context=context,
                 evaluate_expression=evaluate_expression,
+                now=evaluation_time,
             )
             for condition in conditions
         )
@@ -138,6 +321,7 @@ def evaluate_condition_collections(
                     condition=condition,
                     context=context,
                     evaluate_expression=evaluate_expression,
+                    now=evaluation_time,
                 )
                 for condition in group
             )
@@ -261,6 +445,7 @@ def has_matching_history_entry(
             else None,
             context=_build_history_context(entry),
             evaluate_expression=evaluate_expression,
+            now=timestamp,
         ):
             continue
 

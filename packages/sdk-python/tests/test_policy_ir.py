@@ -125,6 +125,48 @@ class TestValidDocuments:
             }
         )
 
+    def test_accepts_time_operators(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "rules": [
+                    {
+                        "id": "block-off-hours",
+                        "name": "Block outside business hours",
+                        "action": "block",
+                        "conditions": [
+                            {
+                                "field": "context.time",
+                                "operator": "outside_hours",
+                                "value": {
+                                    "start": "09:00",
+                                    "end": "17:00",
+                                    "timezone": "America/New_York",
+                                    "days": ["mon", "tue", "wed", "thu", "fri"],
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "id": "allow-work-hours",
+                        "name": "Allow in work hours",
+                        "action": "allow",
+                        "conditions": [
+                            {
+                                "field": "context.time",
+                                "operator": "within_hours",
+                                "value": {
+                                    "start": "09:00",
+                                    "end": "17:00",
+                                    "timezone": "America/New_York",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+
 
 class TestInvalidDocuments:
     def test_missing_version(self) -> None:
@@ -212,6 +254,55 @@ class TestInvalidDocuments:
                             "name": "Bad agents scope",
                             "action": "block",
                             "agents": {"not": "agent-a"},
+                        }
+                    ],
+                }
+            )
+
+    def test_non_object_time_value_rejected(self) -> None:
+        with pytest.raises(PolicySchemaError):
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [
+                        {
+                            "id": "bad-time",
+                            "name": "Bad time operator value",
+                            "action": "block",
+                            "conditions": [
+                                {
+                                    "field": "context.time",
+                                    "operator": "within_hours",
+                                    "value": "09:00-17:00",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+
+    def test_invalid_time_day_rejected(self) -> None:
+        with pytest.raises(PolicySchemaError):
+            validate_policy_ir(
+                {
+                    "version": "1.0",
+                    "rules": [
+                        {
+                            "id": "bad-time-day",
+                            "name": "Bad time day",
+                            "action": "block",
+                            "conditions": [
+                                {
+                                    "field": "context.time",
+                                    "operator": "outside_hours",
+                                    "value": {
+                                        "start": "09:00",
+                                        "end": "17:00",
+                                        "timezone": "UTC",
+                                        "days": ["monday"],
+                                    },
+                                }
+                            ],
                         }
                     ],
                 }

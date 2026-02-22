@@ -49,7 +49,7 @@ Each rule object MUST have these fields:
 - "tools": array of tool name strings this applies to (use general names like "send_email", "transfer_funds", "read_file", "write_file", "execute_command", etc.)
 - "conditions": array of condition objects, each with:
   - "field": dot-notation path (e.g. "arguments.to", "arguments.amount")
-  - "operator": one of "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "matches", "greater_than", "less_than", "in", "not_in"
+  - "operator": one of "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "matches", "greater_than", "less_than", "in", "not_in", "outside_hours", "within_hours"
   - "value": the value to compare against
 
 Common patterns:
@@ -58,6 +58,8 @@ Common patterns:
 - Field requirements: use "equals" with expected values
 - Enum allowlists: use "in" with an array of allowed values
 - Path restrictions: use "starts_with" or "matches" with path patterns
+- Time windows: use "outside_hours" or "within_hours" on "context.time" with value:
+  {"start":"HH:MM","end":"HH:MM","timezone":"IANA/Zone","days":["mon","tue","wed","thu","fri"]}
 
 If the policy CANNOT be fully expressed as deterministic rules, include an explanation in the "notes" field describing what aspects require LLM-based evaluation.
 
@@ -243,6 +245,7 @@ function parseAndValidateLLMOutput(raw: string): LLMOutput {
     'equals', 'not_equals', 'contains', 'not_contains',
     'starts_with', 'ends_with', 'matches',
     'greater_than', 'less_than', 'in', 'not_in',
+    'outside_hours', 'within_hours',
   ]);
   const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow', 'require_approval']);
   const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low', 'info']);

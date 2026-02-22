@@ -48,6 +48,21 @@ rules:
         operator: starts_with
         value: "https://external."
 
+  - id: block-off-hours-wire-transfers
+    name: Block wire transfers outside weekday business hours
+    severity: high
+    action: block
+    tools:
+      - wire_transfer
+    conditions:
+      - field: context.time
+        operator: outside_hours
+        value:
+          start: "09:00"
+          end: "17:00"
+          timezone: "America/New_York"
+          days: ["mon", "tue", "wed", "thu", "fri"]
+
   - id: block-regex-match
     name: Block SQL injection patterns
     severity: high

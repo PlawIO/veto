@@ -807,6 +807,7 @@ class Veto:
             conditions=conditions,
             condition_groups=condition_groups,
             context=local_context,
+            now=context.timestamp,
         )
         if not conditions_match:
             return False

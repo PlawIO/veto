@@ -21,7 +21,28 @@ export type ConditionOperator =
   | 'greater_than'
   | 'less_than'
   | 'in'
-  | 'not_in';
+  | 'not_in'
+  | 'outside_hours'
+  | 'within_hours';
+
+/**
+ * Supported day abbreviations for time-based conditions.
+ */
+export type TimeConditionDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+/**
+ * Value shape used by `within_hours` and `outside_hours`.
+ */
+export interface TimeWindowConditionValue {
+  /** Start time in 24h HH:MM format. */
+  start: string;
+  /** End time in 24h HH:MM format. */
+  end: string;
+  /** IANA timezone identifier. */
+  timezone: string;
+  /** Optional allowed day filters. If omitted, applies every day. */
+  days?: TimeConditionDay[];
+}
 
 /**
  * A single condition within a rule.
