@@ -342,6 +342,58 @@ describe('Interceptor', () => {
 
       expect(capturingTool.handler).toHaveBeenCalledWith({ modified: true });
     });
+
+    it('should return transformed output from output validator', async () => {
+      engine.addValidator({
+        name: 'allow',
+        validate: () => ({ decision: 'allow' }),
+      });
+
+      interceptor = new Interceptor({
+        logger: mockLogger,
+        validationEngine: engine,
+        outputValidator: {
+          validate: () => ({
+            decision: 'allow',
+            output: { time: '[REDACTED]' },
+            matchedRuleIds: ['redact-time'],
+            redactions: 1,
+          }),
+        },
+      });
+
+      const result = await interceptor.interceptAndExecute(testCall, tools);
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toEqual({ time: '[REDACTED]' });
+    });
+
+    it('should block output when output validator returns block', async () => {
+      engine.addValidator({
+        name: 'allow',
+        validate: () => ({ decision: 'allow' }),
+      });
+
+      interceptor = new Interceptor({
+        logger: mockLogger,
+        validationEngine: engine,
+        outputValidator: {
+          validate: () => ({
+            decision: 'block',
+            output: null,
+            reason: 'Output contains sensitive data',
+            matchedRuleIds: ['block-sensitive-output'],
+            redactions: 0,
+          }),
+        },
+      });
+
+      const result = await interceptor.interceptAndExecute(testCall, tools);
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveProperty('error', 'Tool output blocked');
+      expect(result.content).toHaveProperty('reason', 'Output contains sensitive data');
+    });
   });
 });
 

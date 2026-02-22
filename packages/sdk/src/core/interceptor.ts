@@ -21,6 +21,14 @@ import type { ValidationEngine, AggregatedValidationResult } from './validator.j
 import type { HistoryTracker } from './history.js';
 import type { BudgetTracker } from './budget.js';
 import { generateToolCallId } from '../utils/id.js';
+import type { OutputValidationResult } from './output-validator.js';
+
+interface OutputValidationEngine {
+  validate: (
+    toolName: string,
+    output: unknown
+  ) => OutputValidationResult | Promise<OutputValidationResult>;
+}
 
 /**
  * Options for the interceptor.
@@ -48,6 +56,8 @@ export interface InterceptorOptions {
     context: ValidationContext,
     result: ValidationResult
   ) => void | Promise<void>;
+  /** Optional output validator for post-execution output checks */
+  outputValidator?: OutputValidationEngine;
 }
 
 /**
@@ -110,6 +120,7 @@ export class Interceptor {
     context: ValidationContext,
     result: ValidationResult
   ) => void | Promise<void>;
+  private readonly outputValidator?: OutputValidationEngine;
 
   constructor(options: InterceptorOptions) {
     this.logger = options.logger;
@@ -120,6 +131,7 @@ export class Interceptor {
     this.onBeforeValidation = options.onBeforeValidation;
     this.onAfterValidation = options.onAfterValidation;
     this.onDenied = options.onDenied;
+    this.outputValidator = options.outputValidator;
   }
 
   /**
@@ -320,6 +332,31 @@ export class Interceptor {
       const content = await tool.handler(result.finalArguments);
       const durationMs = performance.now() - startTime;
 
+      let finalContent = content;
+      if (this.outputValidator) {
+        const outputResult = await this.outputValidator.validate(call.name, content);
+
+        if (outputResult.decision === 'block') {
+          this.logger.warn('Tool output blocked', {
+            toolName: call.name,
+            reason: outputResult.reason,
+            matchedRuleIds: outputResult.matchedRuleIds,
+          });
+
+          return {
+            toolCallId: call.id || generateToolCallId(),
+            toolName: call.name,
+            content: {
+              error: 'Tool output blocked',
+              reason: outputResult.reason,
+            },
+            isError: true,
+          };
+        }
+
+        finalContent = outputResult.output;
+      }
+
       this.logger.debug('Tool executed successfully', {
         toolName: call.name,
         durationMs: Math.round(durationMs * 100) / 100,
@@ -328,7 +365,7 @@ export class Interceptor {
       return {
         toolCallId: call.id || generateToolCallId(),
         toolName: call.name,
-        content,
+        content: finalContent,
         isError: false,
       };
     } catch (error) {

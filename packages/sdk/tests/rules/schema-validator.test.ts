@@ -35,6 +35,27 @@ describe('Policy IR v1 Schema Validator', () => {
         ],
       })).not.toThrow();
     });
+
+    it('should accept output rules with redact action', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        output_rules: [
+          {
+            id: 'redact-output',
+            name: 'Redact output',
+            action: 'redact',
+            output_conditions: [
+              {
+                field: 'output.email',
+                operator: 'matches',
+                value: '[^@]+@[^@]+',
+              },
+            ],
+            redact_with: '[REDACTED]',
+          },
+        ],
+      })).not.toThrow();
+    });
   });
 
   describe('invalid documents', () => {
@@ -68,6 +89,20 @@ describe('Policy IR v1 Schema Validator', () => {
     it('should reject bad action', () => {
       const data = loadFixture('invalid-bad-action.yaml');
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);
+    });
+
+    it('should reject bad output action', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [],
+        output_rules: [
+          {
+            id: 'bad-output-action',
+            name: 'Bad output action',
+            action: 'allow',
+          },
+        ],
+      })).toThrow(PolicySchemaError);
     });
 
     it('should reject bad operator', () => {

@@ -20,6 +20,8 @@ from dataclasses import dataclass
 import os
 import inspect
 from datetime import datetime
+from pathlib import Path
+import yaml
 
 from veto.types.tool import ToolDefinition, ToolCall
 from veto.types.config import (
@@ -40,11 +42,17 @@ from veto.core.interceptor import (
     InterceptionResult,
     ToolCallDeniedError,
 )
+from veto.core.output_validator import (
+    OutputValidationResult,
+    OutputValidator,
+    OutputValidatorOptions,
+)
 from veto.cloud.client import VetoCloudClient, VetoCloudConfig, ApprovalTimeoutError
 from veto.cloud.types import ToolRegistration, ToolParameter, ApprovalPollOptions
 from veto.cloud.policy_cache import PolicyCache
 from veto.deterministic.validator import validate_deterministic
 from veto.deterministic.types import LocalValidationResult
+from veto.rules import validate_policy_ir, PolicySchemaError
 
 
 # Veto operating mode
@@ -76,6 +84,13 @@ class GuardResult:
 
 
 @dataclass
+class LoadedOutputRulesState:
+    all_output_rules: list[dict[str, Any]]
+    output_rules_by_tool: dict[str, list[dict[str, Any]]]
+    global_output_rules: list[dict[str, Any]]
+
+
+@dataclass
 class VetoOptions:
     """Options for creating a Veto instance."""
 
@@ -91,6 +106,8 @@ class VetoOptions:
     session_id: Optional[str] = None
     # Optional agent ID for tracking
     agent_id: Optional[str] = None
+    # Path to veto directory (contains veto.config.yaml and rules/)
+    config_dir: Optional[str] = None
     # Additional validators to run (in addition to cloud validation)
     validators: Optional[list[Union[Validator, NamedValidator]]] = None
     # API timeout in milliseconds
@@ -140,10 +157,12 @@ class Veto:
         options: VetoOptions,
         logger: Logger,
         cloud_client: VetoCloudClient,
+        output_rules: LoadedOutputRulesState,
     ):
         self._logger = logger
         self._mode: VetoMode = options.mode or "strict"
         self._cloud_client = cloud_client
+        self._output_rules = output_rules
 
         # Approval options
         self._on_approval_required = options.on_approval_required
@@ -164,6 +183,7 @@ class Veto:
             {
                 "mode": self._mode,
                 "base_url": cloud_client._base_url,
+                "output_rules_loaded": len(output_rules.all_output_rules),
             },
         )
 
@@ -198,11 +218,19 @@ class Veto:
         )
 
         # Initialize interceptor
+        self._output_validator = OutputValidator(
+            OutputValidatorOptions(
+                logger=self._logger,
+                get_rules_for_tool=self._get_output_rules_for_tool,
+            )
+        )
+
         self._interceptor = Interceptor(
             InterceptorOptions(
                 logger=self._logger,
                 validation_engine=self._validation_engine,
                 history_tracker=self._history_tracker,
+                output_validator=self._output_validator,
             )
         )
 
@@ -261,7 +289,131 @@ class Veto:
                 "No API key provided. Set VETO_API_KEY environment variable or pass api_key in options."
             )
 
-        return cls(options, logger, cloud_client)
+        resolved_config_dir = Path(options.config_dir or "./veto").resolve()
+        rules_dir = resolved_config_dir / "rules"
+        recursive_rules = True
+
+        config_path = resolved_config_dir / "veto.config.yaml"
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config_data = yaml.safe_load(f)
+                if isinstance(config_data, dict):
+                    rules_config = config_data.get("rules")
+                    if isinstance(rules_config, dict):
+                        rules_directory = rules_config.get("directory")
+                        if isinstance(rules_directory, str) and rules_directory.strip():
+                            rules_dir = (resolved_config_dir / rules_directory).resolve()
+                        recursive_value = rules_config.get("recursive")
+                        if isinstance(recursive_value, bool):
+                            recursive_rules = recursive_value
+            except Exception as exc:
+                logger.warn(
+                    "Failed to parse veto.config.yaml for output rules configuration",
+                    {"error": str(exc), "path": str(config_path)},
+                )
+
+        output_rules = cls._load_output_rules(
+            rules_dir=rules_dir,
+            recursive=recursive_rules,
+            logger=logger,
+        )
+
+        return cls(options, logger, cloud_client, output_rules)
+
+    @staticmethod
+    def _find_yaml_files(rules_dir: Path, recursive: bool) -> list[Path]:
+        if not rules_dir.exists() or not rules_dir.is_dir():
+            return []
+
+        if recursive:
+            return [
+                p
+                for p in rules_dir.rglob("*")
+                if p.is_file() and p.suffix.lower() in {".yaml", ".yml"}
+            ]
+
+        return [
+            p
+            for p in rules_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".yaml", ".yml"}
+        ]
+
+    @classmethod
+    def _load_output_rules(
+        cls,
+        rules_dir: Path,
+        recursive: bool,
+        logger: Logger,
+    ) -> LoadedOutputRulesState:
+        state = LoadedOutputRulesState(
+            all_output_rules=[],
+            output_rules_by_tool={},
+            global_output_rules=[],
+        )
+
+        yaml_files = cls._find_yaml_files(rules_dir, recursive)
+        for file_path in yaml_files:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    parsed = yaml.safe_load(f)
+            except Exception as exc:
+                logger.error(
+                    "Failed to read output rule file",
+                    {"path": str(file_path)},
+                    exc,
+                )
+                continue
+
+            if not isinstance(parsed, dict):
+                continue
+
+            parsed_for_validation: dict[str, Any] = dict(parsed)
+            if "rules" not in parsed_for_validation and "output_rules" in parsed_for_validation:
+                parsed_for_validation["rules"] = []
+
+            if "rules" not in parsed_for_validation and "output_rules" not in parsed_for_validation:
+                continue
+
+            try:
+                validate_policy_ir(parsed_for_validation)
+            except PolicySchemaError as exc:
+                logger.error(
+                    "Skipping invalid policy file during output rule load",
+                    {"path": str(file_path), "error_count": len(exc.errors)},
+                    exc,
+                )
+                continue
+
+            output_rules_raw = parsed_for_validation.get("output_rules")
+            if not isinstance(output_rules_raw, list):
+                continue
+
+            for output_rule in output_rules_raw:
+                if not isinstance(output_rule, dict):
+                    continue
+
+                if output_rule.get("enabled") is False:
+                    continue
+
+                normalized_rule = dict(output_rule)
+                normalized_rule.setdefault("enabled", True)
+                normalized_rule.setdefault("severity", "medium")
+                normalized_rule.setdefault("action", "log")
+
+                state.all_output_rules.append(normalized_rule)
+
+                tools = normalized_rule.get("tools")
+                if isinstance(tools, list) and tools:
+                    for tool_name in tools:
+                        if not isinstance(tool_name, str):
+                            continue
+                        tool_rules = state.output_rules_by_tool.setdefault(tool_name, [])
+                        tool_rules.append(normalized_rule)
+                else:
+                    state.global_output_rules.append(normalized_rule)
+
+        return state
 
     def _extract_tool_signature(self, tool: Any) -> Optional[ToolRegistration]:
         """
@@ -422,6 +574,20 @@ class Veto:
 
     def _resolve_agent_id(self, context: ValidationContext) -> Optional[str]:
         return context.agent_id if context.agent_id is not None else self._agent_id
+
+    def _get_output_rules_for_tool(self, tool_name: str) -> list[dict[str, Any]]:
+        tool_specific = self._output_rules.output_rules_by_tool.get(tool_name, [])
+        return [*self._output_rules.global_output_rules, *tool_specific]
+
+    def validate_output(self, tool_name: str, output: Any) -> OutputValidationResult:
+        """Validate and transform tool output against configured output rules."""
+        return self._output_validator.validate(tool_name, output)
+
+    def _validate_output_or_throw(self, tool_name: str, output: Any) -> Any:
+        result = self.validate_output(tool_name, output)
+        if result.decision == "block":
+            raise RuntimeError(result.reason or f"Tool output blocked for {tool_name}")
+        return result.output
 
     def _try_local_deterministic(
         self, context: ValidationContext
@@ -763,8 +929,10 @@ class Veto:
                 # Execute the original function with potentially modified arguments
                 final_args = result.final_arguments or input_data
                 if inspect.iscoroutinefunction(original_func):
-                    return await original_func(final_args)
-                return original_func(final_args)
+                    execution_result = await original_func(final_args)
+                else:
+                    execution_result = original_func(final_args)
+                return veto._validate_output_or_throw(tool_name, execution_result)
 
             # Create a copy of the tool with the wrapped function
             try:
@@ -807,7 +975,12 @@ class Veto:
                             )
 
                         # Call original ainvoke with the original input format
-                        return await original_ainvoke(input_data, *args, **kwargs)
+                        execution_result = await original_ainvoke(
+                            input_data, *args, **kwargs
+                        )
+                        return veto._validate_output_or_throw(
+                            tool_name, execution_result
+                        )
 
                     object.__setattr__(wrapped, "ainvoke", wrapped_ainvoke)
 
@@ -855,11 +1028,21 @@ class Veto:
                                 final_args = pool.submit(
                                     asyncio.run, validate_and_invoke()
                                 ).result()
-                            return original_invoke(final_args, *args, **kwargs)
+                            execution_result = original_invoke(
+                                final_args, *args, **kwargs
+                            )
+                            return veto._validate_output_or_throw(
+                                tool_name, execution_result
+                            )
 
                         # No running loop — use asyncio.run directly
                         final_args = asyncio.run(validate_and_invoke())
-                        return original_invoke(final_args, *args, **kwargs)
+                        execution_result = original_invoke(
+                            final_args, *args, **kwargs
+                        )
+                        return veto._validate_output_or_throw(
+                            tool_name, execution_result
+                        )
 
                     object.__setattr__(wrapped, "invoke", wrapped_invoke)
 
@@ -902,11 +1085,19 @@ class Veto:
                         final_args = result.final_arguments or call_args
                         if len(args) == 1 and isinstance(args[0], dict):
                             if inspect.iscoroutinefunction(orig):
-                                return await orig(final_args)
-                            return orig(final_args)
+                                execution_result = await orig(final_args)
+                            else:
+                                execution_result = orig(final_args)
+                            return veto._validate_output_or_throw(
+                                tool_name, execution_result
+                            )
                         if inspect.iscoroutinefunction(orig):
-                            return await orig(*args, **kwargs)
-                        return orig(*args, **kwargs)
+                            execution_result = await orig(*args, **kwargs)
+                        else:
+                            execution_result = orig(*args, **kwargs)
+                        return veto._validate_output_or_throw(
+                            tool_name, execution_result
+                        )
 
                     return wrapper
 

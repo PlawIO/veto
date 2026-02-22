@@ -80,12 +80,23 @@ from veto.deterministic.regex_safety import is_safe_pattern
 # Interception result
 from veto.core.interceptor import InterceptionResult
 from veto.core.history import HistoryStats
+from veto.core.output_validator import OutputValidationResult
 
 # Policy IR validation
 from veto.rules.schema_validator import (
     validate_policy_ir,
     PolicySchemaError,
     PolicyValidationError,
+)
+from veto.rules.patterns import (
+    OUTPUT_PATTERNS,
+    OUTPUT_PATTERN_SSN,
+    OUTPUT_PATTERN_CREDIT_CARD,
+    OUTPUT_PATTERN_OPENAI_API_KEY,
+    OUTPUT_PATTERN_GITHUB_API_KEY,
+    OUTPUT_PATTERN_AWS_API_KEY,
+    OUTPUT_PATTERN_EMAIL,
+    OUTPUT_PATTERN_US_PHONE,
 )
 
 # Provider adapters
@@ -162,6 +173,7 @@ __all__ = [
     # Interception
     "InterceptionResult",
     "HistoryStats",
+    "OutputValidationResult",
     # Provider adapters
     "to_openai",
     "from_openai",
@@ -184,6 +196,15 @@ __all__ = [
     "validate_policy_ir",
     "PolicySchemaError",
     "PolicyValidationError",
+    # Output patterns
+    "OUTPUT_PATTERNS",
+    "OUTPUT_PATTERN_SSN",
+    "OUTPUT_PATTERN_CREDIT_CARD",
+    "OUTPUT_PATTERN_OPENAI_API_KEY",
+    "OUTPUT_PATTERN_GITHUB_API_KEY",
+    "OUTPUT_PATTERN_AWS_API_KEY",
+    "OUTPUT_PATTERN_EMAIL",
+    "OUTPUT_PATTERN_US_PHONE",
 ]
 
 # Framework integrations (imported on demand to avoid hard dependencies):
