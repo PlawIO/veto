@@ -214,6 +214,19 @@ class ValidationEngine:
                         },
                     )
                     break
+                elif result.decision == "require_approval":
+                    # Stop on approval requirement so callers can route to HITL.
+                    final_result = result
+                    self._logger.info(
+                        "Tool call requires approval by validator",
+                        {
+                            "tool_name": context.tool_name,
+                            "call_id": context.call_id,
+                            "validator": validator.name,
+                            "reason": result.reason,
+                        },
+                    )
+                    break
                 elif (
                     result.decision == "modify"
                     and result.modified_arguments
@@ -225,6 +238,9 @@ class ValidationEngine:
                         call_id=current_context.call_id,
                         timestamp=current_context.timestamp,
                         call_history=current_context.call_history,
+                        session_id=current_context.session_id,
+                        agent_id=current_context.agent_id,
+                        source=current_context.source,
                         custom=current_context.custom,
                     )
                     final_result = result

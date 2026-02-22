@@ -4,7 +4,13 @@
  * @module core
  */
 
-export { Veto, ToolCallDeniedError, type VetoOptions } from './veto.js';
+export {
+  Veto,
+  ToolCallDeniedError,
+  type VetoOptions,
+  type GuardContext,
+  type GuardResult,
+} from './veto.js';
 export {
   ValidationEngine,
   createPassthroughValidator,

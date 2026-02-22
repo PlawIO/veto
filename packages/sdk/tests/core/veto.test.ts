@@ -414,6 +414,303 @@ rules:
     });
   });
 
+  describe('guard', () => {
+    it('should return allow decision and record history', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'allow.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: allow-safe
+    name: Allow safe calls
+    description: Safe call allowed
+    enabled: true
+    severity: low
+    action: allow
+    tools: [safe_tool]
+    conditions:
+      - field: arguments.level
+        operator: equals
+        value: safe
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('safe_tool', { level: 'safe' });
+
+      expect(result).toMatchObject({
+        decision: 'allow',
+        reason: 'Safe call allowed',
+        ruleId: 'allow-safe',
+        severity: 'low',
+      });
+      expect(veto.getHistoryStats().totalCalls).toBe(1);
+    });
+
+    it('should return deny decision for block rules', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'deny.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: block-sensitive
+    name: Block sensitive calls
+    description: Blocked by local policy
+    enabled: true
+    severity: high
+    action: block
+    tools: [sensitive_tool]
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('sensitive_tool', { target: 'prod' });
+
+      expect(result).toMatchObject({
+        decision: 'deny',
+        reason: 'Blocked by local policy',
+        ruleId: 'block-sensitive',
+        severity: 'high',
+      });
+    });
+
+    it('should return require_approval for local approval rules', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+approval:
+  callbackUrl: "http://localhost:9999/approvals"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'local-approval.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: local-approval
+    name: Local approval required
+    description: Needs human review
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools: [wire_transfer]
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('wire_transfer', { amount: 25000 });
+
+      expect(result).toMatchObject({
+        decision: 'require_approval',
+        reason: 'Needs human review',
+        ruleId: 'local-approval',
+        severity: 'critical',
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should return require_approval with approvalId in cloud mode', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "cloud"
+cloud:
+  baseUrl: "http://localhost:3001"
+  apiKey: "test-key"
+  retries: 0
+logging:
+  level: "silent"
+`,
+        'utf-8'
+      );
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: 'require_approval',
+          reason: 'Cloud approval required',
+          approval_id: 'appr-guard-001',
+        }),
+        text: async () => '',
+      });
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('cloud_sensitive_tool', { amount: 5000 });
+
+      expect(result).toMatchObject({
+        decision: 'require_approval',
+        reason: 'Cloud approval required',
+        approvalId: 'appr-guard-001',
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should default to allow when no rules apply', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('unconfigured_tool', { any: 'value' });
+
+      expect(result.decision).toBe('allow');
+    });
+
+    it('should return deny in log mode when the policy would block', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "log"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'log-block.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: log-mode-block
+    name: Log mode block
+    description: Should still deny for guard
+    enabled: true
+    severity: medium
+    action: block
+    tools: [dangerous_tool]
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('dangerous_tool', { action: 'drop' });
+
+      expect(result).toMatchObject({
+        decision: 'deny',
+        reason: 'Should still deny for guard',
+        ruleId: 'log-mode-block',
+      });
+    });
+
+    it('should allow per-call session and agent context overrides', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'context.yaml'),
+        `
+version: "1.0"
+rules:
+  - id: context-block
+    name: Context-aware block
+    enabled: true
+    severity: high
+    action: block
+    tools: [contextual_tool]
+    conditions:
+      - field: session_id
+        operator: equals
+        value: override-session
+      - field: agent_id
+        operator: equals
+        value: override-agent
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({
+        configDir: VETO_DIR,
+        sessionId: 'default-session',
+        agentId: 'default-agent',
+      });
+
+      const defaultResult = await veto.guard('contextual_tool', {});
+      expect(defaultResult.decision).toBe('allow');
+
+      const overriddenResult = await veto.guard('contextual_tool', {}, {
+        sessionId: 'override-session',
+        agentId: 'override-agent',
+      });
+      expect(overriddenResult.decision).toBe('deny');
+      expect(overriddenResult.ruleId).toBe('context-block');
+    });
+  });
+
   describe('Local require_approval action', () => {
     it('should allow execution when callback approves', async () => {
       writeFileSync(

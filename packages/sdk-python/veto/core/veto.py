@@ -19,6 +19,7 @@ from typing import (
 from dataclasses import dataclass
 import os
 import inspect
+from datetime import datetime
 
 from veto.types.tool import ToolDefinition, ToolCall
 from veto.types.config import (
@@ -52,6 +53,8 @@ VetoMode = Literal["strict", "log"]
 # Wrapped handler function type
 WrappedHandler = Callable[[dict[str, Any]], Awaitable[Any]]
 
+GuardSeverity = Literal["critical", "high", "medium", "low", "info"]
+
 
 @dataclass
 class WrappedTools:
@@ -59,6 +62,17 @@ class WrappedTools:
 
     definitions: list[ToolDefinition]
     implementations: dict[str, WrappedHandler]
+
+
+@dataclass
+class GuardResult:
+    """Standalone validation result returned by ``guard()``."""
+
+    decision: Literal["allow", "deny", "require_approval"]
+    reason: Optional[str] = None
+    rule_id: Optional[str] = None
+    severity: Optional[GuardSeverity] = None
+    approval_id: Optional[str] = None
 
 
 @dataclass
@@ -393,10 +407,26 @@ class Veto:
                     {"message": result.message},
                 )
 
+    def _is_guard_evaluation(self, context: ValidationContext) -> bool:
+        return context.source == "guard"
+
+    def _should_apply_log_mode_override(self, context: ValidationContext) -> bool:
+        return self._mode == "log" and not self._is_guard_evaluation(context)
+
+    def _resolve_session_id(self, context: ValidationContext) -> Optional[str]:
+        return (
+            context.session_id
+            if context.session_id is not None
+            else self._session_id
+        )
+
+    def _resolve_agent_id(self, context: ValidationContext) -> Optional[str]:
+        return context.agent_id if context.agent_id is not None else self._agent_id
+
     def _try_local_deterministic(
-        self, tool_name: str, args: dict[str, Any]
+        self, context: ValidationContext
     ) -> Optional[LocalValidationResult]:
-        policy = self._policy_cache.get(tool_name)
+        policy = self._policy_cache.get(context.tool_name)
         if policy is None:
             return None
 
@@ -405,20 +435,22 @@ class Veto:
         if policy.has_session_constraints or policy.has_rate_limits:
             return None
 
-        result = validate_deterministic(tool_name, args, policy.constraints)
+        result = validate_deterministic(
+            context.tool_name, context.arguments, policy.constraints
+        )
 
         self._cloud_client.log_decision(
             {
-                "tool_name": tool_name,
-                "arguments": args,
+                "tool_name": context.tool_name,
+                "arguments": context.arguments,
                 "decision": result.decision,
                 "reason": result.reason,
                 "mode": "deterministic",
                 "latency_ms": result.latency_ms,
                 "source": "client",
                 "context": {
-                    "session_id": self._session_id,
-                    "agent_id": self._agent_id,
+                    "session_id": self._resolve_session_id(context),
+                    "agent_id": self._resolve_agent_id(context),
                 },
             }
         )
@@ -430,9 +462,7 @@ class Veto:
     ) -> ValidationResult:
         """Validate a tool call with the Veto Cloud API."""
         # Fast path: try client-side deterministic validation
-        local_result = self._try_local_deterministic(
-            context.tool_name, context.arguments
-        )
+        local_result = self._try_local_deterministic(context)
         if local_result is not None:
             if local_result.decision == "allow":
                 self._logger.debug(
@@ -441,7 +471,7 @@ class Veto:
                 )
                 return ValidationResult(decision="allow", reason=local_result.reason)
 
-            if self._mode == "log":
+            if self._should_apply_log_mode_override(context):
                 self._logger.warn(
                     "Tool call would be blocked locally (log mode)",
                     {"tool": context.tool_name, "reason": local_result.reason},
@@ -466,8 +496,8 @@ class Veto:
         api_context: dict[str, Any] = {
             "call_id": context.call_id,
             "timestamp": context.timestamp.isoformat(),
-            "session_id": self._session_id,
-            "agent_id": self._agent_id,
+            "session_id": self._resolve_session_id(context),
+            "agent_id": self._resolve_agent_id(context),
         }
 
         if context.custom:
@@ -481,7 +511,7 @@ class Veto:
             )
         except Exception as exc:
             reason = str(exc)
-            if self._mode == "log":
+            if self._should_apply_log_mode_override(context):
                 self._logger.warn(
                     "Cloud unavailable (log mode, allowing)",
                     {"reason": reason},
@@ -517,88 +547,100 @@ class Veto:
         if response.metadata:
             metadata.update(response.metadata)
 
-        if response.decision == "require_approval" and response.approval_id:
-            # Check approval preference cache first
-            cached_pref = self._approval_preferences.get(context.tool_name)
-            if cached_pref == "approve_all":
-                self._logger.info(
-                    "Auto-approved via cached preference",
-                    {"tool": context.tool_name},
-                )
+        if response.decision == "require_approval":
+            metadata_with_approval = dict(metadata)
+            if response.approval_id:
+                metadata_with_approval["approval_id"] = response.approval_id
+
+            if self._is_guard_evaluation(context):
                 return ValidationResult(
-                    decision="allow",
-                    reason="Auto-approved (approve all preference)",
-                    metadata=metadata if metadata else None,
-                )
-            elif cached_pref == "deny_all":
-                self._logger.info(
-                    "Auto-denied via cached preference",
-                    {"tool": context.tool_name},
-                )
-                return ValidationResult(
-                    decision="deny",
-                    reason="Auto-denied (deny all preference)",
-                    metadata=metadata if metadata else None,
+                    decision="require_approval",
+                    reason=response.reason,
+                    metadata=metadata_with_approval if metadata_with_approval else None,
                 )
 
-            self._logger.info(
-                "Awaiting human approval",
-                {"tool": context.tool_name, "approval_id": response.approval_id},
-            )
-
-            # Fire on_approval_required hook with full context
-            if self._on_approval_required:
-                try:
-                    hook_result = self._on_approval_required(
-                        context,
-                        response.approval_id,
-                    )
-                    if inspect.isawaitable(hook_result):
-                        await hook_result
-                except Exception as hook_err:
-                    self._logger.warn(
-                        "on_approval_required hook error",
-                        {"error": str(hook_err)},
-                    )
-
-            try:
-                approval_data = await self._cloud_client.poll_approval(
-                    response.approval_id,
-                    options=self._approval_poll_options,
-                )
-                if approval_data.status == "approved":
+            if response.approval_id:
+                # Check approval preference cache first
+                cached_pref = self._approval_preferences.get(context.tool_name)
+                if cached_pref == "approve_all":
                     self._logger.info(
-                        "Approval granted",
-                        {
-                            "tool": context.tool_name,
-                            "approval_id": response.approval_id,
-                        },
+                        "Auto-approved via cached preference",
+                        {"tool": context.tool_name},
                     )
                     return ValidationResult(
                         decision="allow",
-                        reason=f"Approved by human: {approval_data.resolved_by or 'unknown'}",
+                        reason="Auto-approved (approve all preference)",
                         metadata=metadata if metadata else None,
                     )
-                else:
+                elif cached_pref == "deny_all":
                     self._logger.warn(
-                        "Approval denied or expired",
-                        {"tool": context.tool_name, "status": approval_data.status},
+                        "Auto-denied via cached preference",
+                        {"tool": context.tool_name},
                     )
                     return ValidationResult(
                         decision="deny",
-                        reason=f"Approval {approval_data.status}: {response.reason}",
+                        reason="Auto-denied (deny all preference)",
                         metadata=metadata if metadata else None,
                     )
-            except ApprovalTimeoutError:
-                self._logger.warn(
-                    "Approval timed out",
+
+                self._logger.info(
+                    "Awaiting human approval",
                     {"tool": context.tool_name, "approval_id": response.approval_id},
                 )
-                return ValidationResult(
-                    decision="deny",
-                    reason="Approval timed out waiting for human review",
-                    metadata=metadata if metadata else None,
-                )
+
+                # Fire on_approval_required hook with full context
+                if self._on_approval_required:
+                    try:
+                        hook_result = self._on_approval_required(
+                            context,
+                            response.approval_id,
+                        )
+                        if inspect.isawaitable(hook_result):
+                            await hook_result
+                    except Exception as hook_err:
+                        self._logger.warn(
+                            "on_approval_required hook error",
+                            {"error": str(hook_err)},
+                        )
+
+                try:
+                    approval_data = await self._cloud_client.poll_approval(
+                        response.approval_id,
+                        options=self._approval_poll_options,
+                    )
+                    if approval_data.status == "approved":
+                        self._logger.info(
+                            "Approval granted",
+                            {
+                                "tool": context.tool_name,
+                                "approval_id": response.approval_id,
+                            },
+                        )
+                        return ValidationResult(
+                            decision="allow",
+                            reason=f"Approved by human: {approval_data.resolved_by or 'unknown'}",
+                            metadata=metadata if metadata else None,
+                        )
+                    else:
+                        self._logger.warn(
+                            "Approval denied or expired",
+                            {"tool": context.tool_name, "status": approval_data.status},
+                        )
+                        return ValidationResult(
+                            decision="deny",
+                            reason=f"Approval {approval_data.status}: {response.reason}",
+                            metadata=metadata if metadata else None,
+                        )
+                except ApprovalTimeoutError:
+                    self._logger.warn(
+                        "Approval timed out",
+                        {"tool": context.tool_name, "approval_id": response.approval_id},
+                    )
+                    return ValidationResult(
+                        decision="deny",
+                        reason="Approval timed out waiting for human review",
+                        metadata=metadata if metadata else None,
+                    )
 
         if response.decision == "allow":
             self._logger.debug(
@@ -612,7 +654,7 @@ class Veto:
             )
         else:
             # Cloud returned deny decision
-            if self._mode == "log":
+            if self._should_apply_log_mode_override(context):
                 # Log mode: log the block but allow the call
                 self._logger.warn(
                     "Tool call would be blocked (log mode)",
@@ -898,6 +940,99 @@ class Veto:
 
         return await self._interceptor.intercept(normalized_call)
 
+    def _extract_metadata_string(
+        self, metadata: Optional[dict[str, Any]], keys: list[str]
+    ) -> Optional[str]:
+        if not metadata:
+            return None
+
+        for key in keys:
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+            if isinstance(value, (int, float, bool)):
+                return str(value)
+
+        return None
+
+    def _extract_metadata_severity(
+        self, metadata: Optional[dict[str, Any]]
+    ) -> Optional[GuardSeverity]:
+        if not metadata:
+            return None
+
+        raw = (
+            metadata.get("severity")
+            or metadata.get("ruleSeverity")
+            or metadata.get("rule_severity")
+        )
+        if not isinstance(raw, str):
+            return None
+
+        normalized = raw.strip().lower()
+        if normalized == "critical":
+            return "critical"
+        if normalized == "high":
+            return "high"
+        if normalized == "medium":
+            return "medium"
+        if normalized == "low":
+            return "low"
+        if normalized == "info":
+            return "info"
+
+        return None
+
+    def _to_guard_result(self, result: ValidationResult) -> GuardResult:
+        decision: Literal["allow", "deny", "require_approval"] = "allow"
+        if result.decision == "deny":
+            decision = "deny"
+        elif result.decision == "require_approval":
+            decision = "require_approval"
+
+        metadata = result.metadata
+        return GuardResult(
+            decision=decision,
+            reason=result.reason,
+            rule_id=self._extract_metadata_string(metadata, ["ruleId", "rule_id"]),
+            severity=self._extract_metadata_severity(metadata),
+            approval_id=self._extract_metadata_string(
+                metadata, ["approvalId", "approval_id"]
+            ),
+        )
+
+    async def guard(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> GuardResult:
+        """Run a standalone guard check without wrapping or executing a tool."""
+        context = ValidationContext(
+            tool_name=tool_name,
+            arguments=args,
+            call_id=generate_tool_call_id(),
+            timestamp=datetime.now(),
+            call_history=self._history_tracker.get_all(),
+            session_id=session_id if session_id is not None else self._session_id,
+            agent_id=agent_id if agent_id is not None else self._agent_id,
+            source="guard",
+        )
+
+        aggregated_result = await self._validation_engine.validate(context)
+        validation_result = aggregated_result.final_result
+
+        self._history_tracker.record(
+            tool_name,
+            args,
+            validation_result,
+            aggregated_result.total_duration_ms,
+        )
+
+        return self._to_guard_result(validation_result)
+
     def set_approval_preference(self, tool_name: str, preference: str) -> None:
         """
         Cache an approval preference for a tool.
@@ -952,6 +1087,7 @@ class Veto:
 __all__ = [
     "Veto",
     "ToolCallDeniedError",
+    "GuardResult",
     "VetoOptions",
     "VetoMode",
     "WrappedTools",

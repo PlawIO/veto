@@ -5,6 +5,7 @@ Core module exports for Veto.
 from veto.core.veto import (
     Veto,
     ToolCallDeniedError,
+    GuardResult,
     VetoOptions,
     VetoMode,
     WrappedTools,
@@ -36,6 +37,7 @@ __all__ = [
     # Veto
     "Veto",
     "ToolCallDeniedError",
+    "GuardResult",
     "VetoOptions",
     "VetoMode",
     "WrappedTools",
