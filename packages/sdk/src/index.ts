@@ -44,6 +44,11 @@ export {
   type GuardContext,
   type GuardResult,
 } from './core/veto.js';
+export {
+  protect,
+  type ProtectOptions,
+  type ProtectMode,
+} from './core/protect.js';
 
 // Core types
 export type {
