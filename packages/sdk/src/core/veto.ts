@@ -7,9 +7,6 @@
  * @module core/veto
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, extname } from 'node:path';
-import { parse as parseYaml } from 'yaml';
 import type {
   ToolDefinition,
   ToolCall,
@@ -29,7 +26,6 @@ import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
 import { BudgetTracker, BudgetExceededError, type BudgetStatus } from './budget.js';
 import { Interceptor, ToolCallDeniedError, type InterceptionResult } from './interceptor.js';
-import { fromMCP, isMCPTool } from '../providers/adapters.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
@@ -42,13 +38,11 @@ import type {
 } from '../rules/types.js';
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
-import { validatePolicyIR } from '../rules/schema-validator.js';
 import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
-import { resolvePolicyPackExtends } from '../rules/policy-packs.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
-import { KernelClient } from '../kernel/client.js';
+import type { KernelClient as KernelClientType } from '../kernel/client.js';
 import type { CustomConfig, CustomToolCall, CustomResponse } from '../custom/types.js';
-import { CustomClient } from '../custom/client.js';
+import type { CustomClient as CustomClientType } from '../custom/client.js';
 import type { VetoCloudConfig, ApprovalPollOptions, CloudToolRegistration } from '../cloud/types.js';
 import { VetoCloudClient, ApprovalTimeoutError } from '../cloud/client.js';
 import { PolicyCache } from '../cloud/policy-cache.js';
@@ -214,6 +208,18 @@ interface LocalApprovalConfig {
   };
 }
 
+type NodeFsModule = Pick<typeof import('node:fs'),
+  'existsSync' | 'readFileSync' | 'readdirSync' | 'statSync'>;
+type NodePathModule = Pick<typeof import('node:path'),
+  'join' | 'resolve' | 'extname'>;
+type ParseYaml = (content: string) => unknown;
+type ResolvePolicyPackExtends = (
+  policyData: Record<string, unknown>,
+  source: string,
+  yamlParser?: (content: string) => unknown
+) => Record<string, unknown>;
+type ValidatePolicyIR = (data: unknown) => void;
+
 class LocalApprovalTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Approval callback timed out after ${timeoutMs}ms`);
@@ -288,7 +294,7 @@ export interface VetoOptions {
   /**
    * Injected kernel client for testing or custom configurations.
    */
-  kernelClient?: KernelClient;
+  kernelClient?: KernelClientType;
 
   /**
    * Injected cloud client for testing or custom configurations.
@@ -304,6 +310,35 @@ export interface VetoOptions {
     context: ValidationContext,
     approvalId: string
   ) => void | Promise<void>;
+}
+
+export interface VetoBrowserOptions {
+  rules: Rule[];
+  outputRules?: OutputRule[];
+  mode?: VetoMode;
+  logLevel?: LogLevel;
+  sessionId?: string;
+  agentId?: string;
+  userId?: string;
+  role?: string;
+  validators?: (Validator | NamedValidator)[];
+  apiKey?: string;
+  endpoint?: string;
+  cloudClient?: VetoCloudClient;
+  onApprovalRequired?: (
+    context: ValidationContext,
+    approvalId: string
+  ) => void | Promise<void>;
+  budget?: VetoConfigFile['budget'];
+  costs?: VetoConfigFile['costs'];
+  approval?: VetoConfigFile['approval'];
+  events?: VetoConfigFile['events'];
+}
+
+export interface VetoCloudInitOptions {
+  apiKey: string;
+  endpoint?: string;
+  refreshIntervalMs?: number;
 }
 
 /**
@@ -353,11 +388,11 @@ export class Veto {
   private readonly role?: string;
 
   // Kernel client (lazy initialized or injected)
-  private kernelClient: KernelClient | null = null;
+  private kernelClient: KernelClientType | null = null;
   private readonly kernelConfig: KernelConfig | null;
 
   // Custom provider client (lazy initialized)
-  private customClient: CustomClient | null = null;
+  private customClient: CustomClientType | null = null;
   private readonly customConfig: CustomConfig | null;
 
   // Cloud client (lazy initialized or injected)
@@ -377,57 +412,74 @@ export class Veto {
   private readonly policyCache: PolicyCache | null = null;
 
   // Loaded rules
-  private readonly rules: LoadedRulesState;
+  private rulesState: LoadedRulesState;
+  private readonly browserMode: boolean;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
 
   private constructor(
     options: VetoOptions,
     config: VetoConfigFile,
     rules: LoadedRulesState,
-    logger: Logger
+    logger: Logger,
+    browserMode = false
   ) {
     this.logger = logger;
     this.configDir = options.configDir ?? './veto';
-    this.rules = rules;
+    this.rulesState = rules;
+    this.browserMode = browserMode;
 
     // Resolve mode (strict blocks, log only logs)
     this.mode = options.mode ?? config.mode ?? 'strict';
 
     const explicitValidationMode = config.validation?.mode;
-    const cloudApiKey = options.apiKey ?? config.cloud?.apiKey ?? process.env.VETO_API_KEY;
+    const cloudApiKey = options.apiKey
+      ?? config.cloud?.apiKey
+      ?? (this.browserMode ? undefined : process.env.VETO_API_KEY);
     const cloudBaseUrl = options.endpoint ?? config.cloud?.baseUrl;
 
-    if (options.endpoint && options.apiKey) {
+    if (!this.browserMode && options.endpoint && options.apiKey) {
       this.logger.warn(
         'Both endpoint and apiKey provided. Using self-hosted mode with endpoint and apiKey authentication.',
         { endpoint: options.endpoint }
       );
     }
 
-    if (options.endpoint) {
-      this.validationMode = 'cloud';
-      this.startupMode = 'self-hosted';
-    } else if (options.apiKey) {
-      this.validationMode = 'cloud';
-      this.startupMode = 'cloud';
-    } else if (explicitValidationMode) {
-      this.validationMode = explicitValidationMode;
-      if (explicitValidationMode === 'cloud') {
+    if (this.browserMode) {
+      const browserValidationMode = explicitValidationMode ?? 'local';
+      this.validationMode = browserValidationMode;
+      if (browserValidationMode === 'cloud') {
         this.startupMode = Veto.isSelfHostedBaseUrl(cloudBaseUrl)
           ? 'self-hosted'
           : 'cloud';
       } else {
-        this.startupMode = explicitValidationMode;
+        this.startupMode = browserValidationMode;
       }
-    } else if (cloudApiKey) {
-      this.validationMode = 'cloud';
-      this.startupMode = 'cloud';
-    } else if (cloudBaseUrl) {
-      this.validationMode = 'cloud';
-      this.startupMode = 'self-hosted';
     } else {
-      this.validationMode = 'local';
-      this.startupMode = 'local';
+      if (options.endpoint) {
+        this.validationMode = 'cloud';
+        this.startupMode = 'self-hosted';
+      } else if (options.apiKey) {
+        this.validationMode = 'cloud';
+        this.startupMode = 'cloud';
+      } else if (explicitValidationMode) {
+        this.validationMode = explicitValidationMode;
+        if (explicitValidationMode === 'cloud') {
+          this.startupMode = Veto.isSelfHostedBaseUrl(cloudBaseUrl)
+            ? 'self-hosted'
+            : 'cloud';
+        } else {
+          this.startupMode = explicitValidationMode;
+        }
+      } else if (cloudApiKey) {
+        this.validationMode = 'cloud';
+        this.startupMode = 'cloud';
+      } else if (cloudBaseUrl) {
+        this.validationMode = 'cloud';
+        this.startupMode = 'self-hosted';
+      } else {
+        this.validationMode = 'local';
+        this.startupMode = 'local';
+      }
     }
 
     // Resolve API configuration from config file
@@ -489,7 +541,7 @@ export class Veto {
     }
 
     // Initialize policy cache for client-side deterministic validation
-    if (this.validationMode === 'cloud') {
+    if (this.validationMode === 'cloud' && this.browserMode) {
       this.policyCache = new PolicyCache(this.getCloudClient());
     }
 
@@ -519,10 +571,15 @@ export class Veto {
     );
 
     // Resolve tracking options
-    this.sessionId = options.sessionId ?? process.env.VETO_SESSION_ID ?? generateId('session');
-    this.agentId = options.agentId ?? process.env.VETO_AGENT_ID;
-    this.userId = options.userId ?? process.env.VETO_USER_ID;
-    this.role = options.role ?? process.env.VETO_ROLE;
+    const envSessionId = this.browserMode ? undefined : process.env.VETO_SESSION_ID;
+    const envAgentId = this.browserMode ? undefined : process.env.VETO_AGENT_ID;
+    const envUserId = this.browserMode ? undefined : process.env.VETO_USER_ID;
+    const envRole = this.browserMode ? undefined : process.env.VETO_ROLE;
+
+    this.sessionId = options.sessionId ?? envSessionId ?? generateId('session');
+    this.agentId = options.agentId ?? envAgentId;
+    this.userId = options.userId ?? envUserId;
+    this.role = options.role ?? envRole;
 
     this.logger.info('Veto configuration loaded', {
       configDir: this.configDir,
@@ -653,36 +710,131 @@ export class Veto {
    * ```
    */
   static async init(options: VetoOptions = {}): Promise<Veto> {
-    const configDir = resolve(options.configDir ?? './veto');
+    const pathModule = await Veto.loadNodePathModule();
+    const fsModule = await Veto.loadNodeFsModule();
+    const parseYaml = await Veto.loadYamlParser();
+    const configDir = pathModule.resolve(options.configDir ?? './veto');
 
     // Determine log level
     const envLogLevel = process.env.VETO_LOG_LEVEL as LogLevel | undefined;
     let logLevel: LogLevel = options.logLevel ?? envLogLevel ?? 'info';
 
     // Load config file
-    const configPath = join(configDir, 'veto.config.yaml');
+    const configPath = pathModule.join(configDir, 'veto.config.yaml');
     let config: VetoConfigFile = {};
 
-    if (existsSync(configPath)) {
-      const configContent = readFileSync(configPath, 'utf-8');
+    if (fsModule.existsSync(configPath)) {
+      const configContent = fsModule.readFileSync(configPath, 'utf-8');
       config = parseYaml(configContent) as VetoConfigFile;
       logLevel = options.logLevel ?? envLogLevel ?? config.logging?.level ?? 'info';
     }
 
     const logger = createLogger(logLevel);
 
-    if (!existsSync(configPath)) {
+    if (!fsModule.existsSync(configPath)) {
       logger.warn('Veto config not found. Run "npx veto init" to initialize.', {
         expected: configPath,
       });
     }
 
     // Load rules
-    const rulesDir = resolve(configDir, config.rules?.directory ?? './rules');
+    const rulesDir = pathModule.resolve(configDir, config.rules?.directory ?? './rules');
     const recursive = config.rules?.recursive ?? true;
-    const rules = Veto.loadRules(rulesDir, recursive, logger);
+    const rules = await Veto.loadRules(
+      rulesDir,
+      recursive,
+      logger,
+      fsModule,
+      pathModule,
+      parseYaml
+    );
 
     return new Veto(options, config, rules, logger);
+  }
+
+  static fromRules(options: VetoBrowserOptions): Veto {
+    const logLevel = options.logLevel ?? 'warn';
+    const logger = createLogger(logLevel);
+
+    const cloudClient = options.cloudClient ?? (
+      options.apiKey
+        ? new VetoCloudClient({
+            config: {
+              apiKey: options.apiKey,
+              baseUrl: options.endpoint,
+            },
+            logger,
+          })
+        : undefined
+    );
+
+    const config: VetoConfigFile = {
+      mode: options.mode ?? 'strict',
+      validation: { mode: 'local' },
+      cloud: options.apiKey || options.endpoint
+        ? {
+            apiKey: options.apiKey,
+            baseUrl: options.endpoint,
+          }
+        : undefined,
+      logging: { level: logLevel },
+      budget: options.budget,
+      costs: options.costs,
+      approval: options.approval,
+      events: options.events,
+    };
+
+    const rules = Veto.indexRules(
+      options.rules,
+      options.outputRules ?? []
+    );
+
+    const vetoOptions: VetoOptions = {
+      mode: options.mode,
+      logLevel,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      userId: options.userId,
+      role: options.role,
+      validators: options.validators,
+      apiKey: undefined,
+      endpoint: undefined,
+      cloudClient,
+      onApprovalRequired: options.onApprovalRequired,
+    };
+
+    return new Veto(vetoOptions, config, rules, logger, true);
+  }
+
+  static async fromCloud(options: VetoCloudInitOptions): Promise<Veto> {
+    const logger = createLogger('warn');
+    const cloudClient = new VetoCloudClient({
+      config: {
+        apiKey: options.apiKey,
+        baseUrl: options.endpoint,
+      },
+      logger,
+    });
+    const remotePolicies = await cloudClient.fetchPolicies();
+    const veto = Veto.fromRules({
+      rules: remotePolicies.policies,
+      outputRules: remotePolicies.outputRules,
+      apiKey: options.apiKey,
+      endpoint: options.endpoint,
+      cloudClient,
+    });
+
+    if (options.refreshIntervalMs && options.refreshIntervalMs > 0) {
+      setInterval(() => {
+        void veto.refreshRules().catch((error) => {
+          veto.logger.warn('Failed to refresh cloud policies', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }, options.refreshIntervalMs);
+    }
+
+    return veto;
   }
 
   private static isSelfHostedBaseUrl(baseUrl?: string): boolean {
@@ -690,15 +842,8 @@ export class Veto {
     return baseUrl.replace(/\/$/, '') !== Veto.DEFAULT_CLOUD_BASE_URL;
   }
 
-  /**
-   * Load rules from YAML files.
-   */
-  private static loadRules(
-    rulesDir: string,
-    recursive: boolean,
-    logger: Logger
-  ): LoadedRulesState {
-    const state: LoadedRulesState = {
+  private static createEmptyRulesState(): LoadedRulesState {
+    return {
       allRules: [],
       allOutputRules: [],
       rulesByTool: new Map(),
@@ -706,18 +851,110 @@ export class Veto {
       globalRules: [],
       globalOutputRules: [],
     };
+  }
 
-    if (!existsSync(rulesDir)) {
+  private static indexRules(
+    rules: Rule[],
+    outputRules: OutputRule[]
+  ): LoadedRulesState {
+    const state = Veto.createEmptyRulesState();
+
+    for (const rule of rules) {
+      if (rule.enabled === false) continue;
+      state.allRules.push(rule);
+
+      if (!rule.tools || rule.tools.length === 0) {
+        state.globalRules.push(rule);
+      } else {
+        for (const toolName of rule.tools) {
+          const existing = state.rulesByTool.get(toolName) ?? [];
+          existing.push(rule);
+          state.rulesByTool.set(toolName, existing);
+        }
+      }
+    }
+
+    for (const outputRule of outputRules) {
+      if (outputRule.enabled === false) continue;
+      state.allOutputRules.push(outputRule);
+
+      if (!outputRule.tools || outputRule.tools.length === 0) {
+        state.globalOutputRules.push(outputRule);
+      } else {
+        for (const toolName of outputRule.tools) {
+          const existing = state.outputRulesByTool.get(toolName) ?? [];
+          existing.push(outputRule);
+          state.outputRulesByTool.set(toolName, existing);
+        }
+      }
+    }
+
+    return state;
+  }
+
+  private static async loadNodeFsModule(): Promise<NodeFsModule> {
+    const moduleName = ['node', 'fs'].join(':');
+    return await import(moduleName) as NodeFsModule;
+  }
+
+  private static async loadNodePathModule(): Promise<NodePathModule> {
+    const moduleName = ['node', 'path'].join(':');
+    return await import(moduleName) as NodePathModule;
+  }
+
+  private static async loadYamlParser(): Promise<ParseYaml> {
+    const moduleName = ['ya', 'ml'].join('');
+    const yamlModule = await import(moduleName) as { parse: ParseYaml };
+    return yamlModule.parse;
+  }
+
+  private static async loadRuleHelpers(): Promise<{
+    resolvePolicyPackExtends: ResolvePolicyPackExtends;
+    validatePolicyIR: ValidatePolicyIR;
+  }> {
+    const policyPacksSpecifier = ['..', 'rules', 'policy-packs.js'].join('/');
+    const schemaValidatorSpecifier = ['..', 'rules', 'schema-validator.js'].join('/');
+
+    const [policyPacksModule, schemaValidatorModule] = await Promise.all([
+      import(policyPacksSpecifier) as Promise<{
+        resolvePolicyPackExtends: ResolvePolicyPackExtends;
+      }>,
+      import(schemaValidatorSpecifier) as Promise<{
+        validatePolicyIR: ValidatePolicyIR;
+      }>,
+    ]);
+
+    return {
+      resolvePolicyPackExtends: policyPacksModule.resolvePolicyPackExtends,
+      validatePolicyIR: schemaValidatorModule.validatePolicyIR,
+    };
+  }
+
+  /**
+   * Load rules from YAML files.
+   */
+  private static async loadRules(
+    rulesDir: string,
+    recursive: boolean,
+    logger: Logger,
+    fsModule: NodeFsModule,
+    pathModule: NodePathModule,
+    parseYaml: ParseYaml
+  ): Promise<LoadedRulesState> {
+    const state = Veto.createEmptyRulesState();
+
+    if (!fsModule.existsSync(rulesDir)) {
       logger.debug('Rules directory not found', { path: rulesDir });
       return state;
     }
 
-    const yamlFiles = Veto.findYamlFiles(rulesDir, recursive);
+    const yamlFiles = Veto.findYamlFiles(rulesDir, recursive, fsModule, pathModule);
     logger.debug('Found rule files', { count: yamlFiles.length });
+    const { resolvePolicyPackExtends, validatePolicyIR } = await Veto.loadRuleHelpers();
 
     for (const filePath of yamlFiles) {
       try {
-        const content = readFileSync(filePath, 'utf-8');
+        const content = fsModule.readFileSync(filePath, 'utf-8');
         const parsed = parseYaml(content) as RuleSet | Rule[] | Record<string, unknown>;
 
         let rules: Rule[] = [];
@@ -749,38 +986,19 @@ export class Veto {
           }
         }
 
-        // Process and index rules
-        for (const rule of rules) {
-          if (rule.enabled === false) continue;
+        const indexedState = Veto.indexRules(rules, outputRules);
+        state.allRules.push(...indexedState.allRules);
+        state.allOutputRules.push(...indexedState.allOutputRules);
+        state.globalRules.push(...indexedState.globalRules);
+        state.globalOutputRules.push(...indexedState.globalOutputRules);
 
-          state.allRules.push(rule);
-
-          if (!rule.tools || rule.tools.length === 0) {
-            state.globalRules.push(rule);
-          } else {
-            for (const toolName of rule.tools) {
-              const existing = state.rulesByTool.get(toolName) ?? [];
-              existing.push(rule);
-              state.rulesByTool.set(toolName, existing);
-            }
-          }
+        for (const [toolName, toolRules] of indexedState.rulesByTool.entries()) {
+          const existing = state.rulesByTool.get(toolName) ?? [];
+          state.rulesByTool.set(toolName, [...existing, ...toolRules]);
         }
-
-        // Process and index output rules
-        for (const outputRule of outputRules) {
-          if (outputRule.enabled === false) continue;
-
-          state.allOutputRules.push(outputRule);
-
-          if (!outputRule.tools || outputRule.tools.length === 0) {
-            state.globalOutputRules.push(outputRule);
-          } else {
-            for (const toolName of outputRule.tools) {
-              const existing = state.outputRulesByTool.get(toolName) ?? [];
-              existing.push(outputRule);
-              state.outputRulesByTool.set(toolName, existing);
-            }
-          }
+        for (const [toolName, toolOutputRules] of indexedState.outputRulesByTool.entries()) {
+          const existing = state.outputRulesByTool.get(toolName) ?? [];
+          state.outputRulesByTool.set(toolName, [...existing, ...toolOutputRules]);
         }
 
         logger.debug('Loaded rules from file', {
@@ -812,20 +1030,25 @@ export class Veto {
   /**
    * Find YAML files in a directory.
    */
-  private static findYamlFiles(dir: string, recursive: boolean): string[] {
+  private static findYamlFiles(
+    dir: string,
+    recursive: boolean,
+    fsModule: NodeFsModule,
+    pathModule: NodePathModule
+  ): string[] {
     const files: string[] = [];
 
     try {
-      const entries = readdirSync(dir);
+      const entries = fsModule.readdirSync(dir);
 
       for (const entry of entries) {
-        const fullPath = join(dir, entry);
-        const stat = statSync(fullPath);
+        const fullPath = pathModule.join(dir, entry);
+        const stat = fsModule.statSync(fullPath);
 
         if (stat.isDirectory() && recursive) {
-          files.push(...Veto.findYamlFiles(fullPath, recursive));
+          files.push(...Veto.findYamlFiles(fullPath, recursive, fsModule, pathModule));
         } else if (stat.isFile()) {
-          const ext = extname(entry).toLowerCase();
+          const ext = pathModule.extname(entry).toLowerCase();
           if (ext === '.yaml' || ext === '.yml') {
             files.push(fullPath);
           }
@@ -842,13 +1065,13 @@ export class Veto {
    * Get rules applicable to a tool.
    */
   private getRulesForTool(toolName: string): Rule[] {
-    const toolSpecific = this.rules.rulesByTool.get(toolName) ?? [];
-    return [...this.rules.globalRules, ...toolSpecific];
+    const toolSpecific = this.rulesState.rulesByTool.get(toolName) ?? [];
+    return [...this.rulesState.globalRules, ...toolSpecific];
   }
 
   private getOutputRulesForTool(toolName: string): OutputRule[] {
-    const toolSpecific = this.rules.outputRulesByTool.get(toolName) ?? [];
-    return [...this.rules.globalOutputRules, ...toolSpecific];
+    const toolSpecific = this.rulesState.outputRulesByTool.get(toolName) ?? [];
+    return [...this.rulesState.globalOutputRules, ...toolSpecific];
   }
 
   private isGuardEvaluation(context: ValidationContext): boolean {
@@ -882,6 +1105,29 @@ export class Veto {
       ruleName: rule.name,
       severity: rule.severity,
       policyVersion: '1.0',
+    };
+  }
+
+  private isLikelyMCPTool(tool: Record<string, unknown>): boolean {
+    if (typeof tool.name !== 'string') return false;
+    if (typeof tool.inputSchema !== 'object' || tool.inputSchema === null) return false;
+    const schema = tool.inputSchema as Record<string, unknown>;
+    if (schema.type !== 'object') return false;
+    if ('input_schema' in tool) return false;
+    if ('function' in tool) return false;
+    if ('type' in tool && tool.type === 'function') return false;
+    return true;
+  }
+
+  private fromMcpTool(tool: MCPTool): ToolDefinition {
+    return {
+      name: tool.name,
+      description: tool.description,
+      inputSchema: {
+        type: 'object',
+        properties: tool.inputSchema.properties as ToolDefinition['inputSchema']['properties'],
+        required: tool.inputSchema.required,
+      },
     };
   }
 
@@ -1332,7 +1578,7 @@ export class Veto {
   /**
    * Get or create the kernel client.
    */
-  private getKernelClient(): KernelClient {
+  private async getKernelClient(): Promise<KernelClientType> {
     if (this.kernelClient) {
       return this.kernelClient;
     }
@@ -1341,7 +1587,15 @@ export class Veto {
       throw new Error('Kernel configuration not available');
     }
 
-    this.kernelClient = new KernelClient({
+    const kernelClientSpecifier = ['..', 'kernel', 'client.js'].join('/');
+    const kernelModule = await import(kernelClientSpecifier) as {
+      KernelClient: new (options: {
+        config: KernelConfig;
+        logger: Logger;
+      }) => KernelClientType;
+    };
+
+    this.kernelClient = new kernelModule.KernelClient({
       config: this.kernelConfig,
       logger: this.logger,
     });
@@ -1367,7 +1621,7 @@ export class Veto {
     };
 
     try {
-      const kernelClient = this.getKernelClient();
+      const kernelClient = await this.getKernelClient();
       const response = await kernelClient.evaluate(toolCall, rules);
 
       return this.handleKernelResponse(response, context);
@@ -1460,7 +1714,7 @@ export class Veto {
   /**
    * Get or create the custom provider client.
    */
-  private getCustomClient(): CustomClient {
+  private async getCustomClient(): Promise<CustomClientType> {
     if (this.customClient) {
       return this.customClient;
     }
@@ -1471,7 +1725,15 @@ export class Veto {
       );
     }
 
-    this.customClient = new CustomClient({
+    const customClientSpecifier = ['..', 'custom', 'client.js'].join('/');
+    const customModule = await import(customClientSpecifier) as {
+      CustomClient: new (options: {
+        config: CustomConfig;
+        logger: Logger;
+      }) => CustomClientType;
+    };
+
+    this.customClient = new customModule.CustomClient({
       config: this.customConfig,
       logger: this.logger,
     });
@@ -1497,7 +1759,7 @@ export class Veto {
     };
 
     try {
-      const customClient = this.getCustomClient();
+      const customClient = await this.getCustomClient();
       const response = await customClient.evaluate(toolCall, rules);
 
       return this.handleCustomResponse(response, context);
@@ -1610,6 +1872,7 @@ export class Veto {
   private tryLocalDeterministic(
     context: ValidationContext
   ): LocalValidationResult | null {
+    if (!this.browserMode) return null;
     if (!this.policyCache) return null;
 
     const policy = this.policyCache.get(context.toolName);
@@ -2165,6 +2428,34 @@ export class Veto {
     return null;
   }
 
+  private logClientDecision(
+    context: ValidationContext,
+    result: ValidationResult,
+    latencyMs: number
+  ): void {
+    if (!this.browserMode || !this.cloudClient) return;
+
+    const decision = result.decision === 'deny' ? 'deny' : 'allow';
+
+    this.cloudClient.logDecision({
+      tool_name: context.toolName,
+      arguments: context.arguments,
+      decision,
+      reason: result.reason,
+      mode: 'deterministic',
+      latency_ms: latencyMs,
+      source: 'client',
+      context: {
+        call_id: context.callId,
+        timestamp: context.timestamp.toISOString(),
+        session_id: this.resolveSessionId(context),
+        agent_id: this.resolveAgentId(context),
+        user_id: this.resolveUserId(context),
+        role: this.resolveRole(context),
+      },
+    });
+  }
+
   private isBudgetExceededResult(result: ValidationResult): boolean {
     const metadata = result.metadata;
     if (!metadata) return false;
@@ -2488,7 +2779,7 @@ export class Veto {
     }
 
     // Check if this is an MCP tool (has inputSchema but no execution function)
-    if (isMCPTool(tool)) {
+    if (this.isLikelyMCPTool(toolAny)) {
       veto.logger.debug('MCP tool detected, no execution function to wrap', { name: toolName });
       return tool;
     }
@@ -2530,7 +2821,7 @@ export class Veto {
     tools: MCPTool[];
     callTool: (args: { name: string; arguments?: Record<string, unknown> }) => Promise<MCPToolResult>;
   } {
-    const toolDefs = tools.map(fromMCP);
+    const toolDefs = tools.map((tool) => this.fromMcpTool(tool));
 
     // Register tool definitions for cloud mode
     if (this.validationMode === 'cloud') {
@@ -2654,6 +2945,11 @@ export class Veto {
     );
 
     this.emitDecisionEvent(validationContext, validationResult);
+    this.logClientDecision(
+      validationContext,
+      validationResult,
+      aggregatedResult.totalDurationMs
+    );
 
     return this.toGuardResult(validationResult);
   }
@@ -2713,6 +3009,24 @@ export class Veto {
     } catch {
       this.logger.debug('Cloud tool registration failed (best-effort)');
     }
+  }
+
+  async refreshRules(): Promise<void> {
+    if (!this.cloudClient) {
+      throw new Error('No cloud client configured');
+    }
+
+    const remotePolicies = await this.cloudClient.fetchPolicies();
+    this.rulesState = Veto.indexRules(
+      remotePolicies.policies,
+      remotePolicies.outputRules ?? []
+    );
+    this.compiledExpressionCache.clear();
+
+    this.logger.info('Cloud rules refreshed', {
+      rulesLoaded: this.rulesState.allRules.length,
+      outputRulesLoaded: this.rulesState.allOutputRules.length,
+    });
   }
 
   /**
