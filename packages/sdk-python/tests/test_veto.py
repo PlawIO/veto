@@ -17,7 +17,7 @@ from veto.types.config import ValidationContext, ValidationResult
 def mock_cloud_client():
     """Create a mock cloud client for testing."""
     client = MagicMock(spec=VetoCloudClient)
-    client._base_url = "https://api.veto.dev"
+    client._base_url = "https://api.runveto.com"
     client._api_key = "test-key"
 
     # Mock register_tools to return success

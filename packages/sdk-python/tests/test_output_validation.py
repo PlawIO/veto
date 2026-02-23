@@ -35,7 +35,7 @@ rules:
 
 def _mock_cloud_client() -> MagicMock:
     client = MagicMock(spec=VetoCloudClient)
-    client._base_url = "https://api.veto.dev"
+    client._base_url = "https://api.runveto.com"
     client._api_key = "test-key"
     client.register_tools = AsyncMock(return_value=MagicMock(success=True, registered_tools=[]))
     client.validate = AsyncMock(

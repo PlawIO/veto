@@ -327,7 +327,7 @@ export interface VetoOptions {
  * ```
  */
 export class Veto {
-  private static readonly DEFAULT_CLOUD_BASE_URL = 'https://api.veto.dev';
+  private static readonly DEFAULT_CLOUD_BASE_URL = 'https://api.runveto.com';
 
   private readonly logger: Logger;
   private readonly validationEngine: ValidationEngine;
