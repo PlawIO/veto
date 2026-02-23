@@ -1,5 +1,18 @@
 # veto (Python SDK)
 
+## 0.9.0
+
+### Minor Changes
+
+- [#121](https://github.com/VulnZap/veto/pull/121) [`574e741`](https://github.com/VulnZap/veto/commit/574e74141d4fe48de50c09e900c29784adb3e158) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add native Python SDK integrations for CrewAI and PydanticAI.
+
+  Highlights:
+  - add `wrap_crewai_tools(veto, tools)` for CrewAI `BaseTool` wrappers
+  - add `wrap_pydanticai_tool(veto, tool_name, handler)` for async function tools
+  - add `create_veto_tool_decorator(veto, tool_name)` for decorator-style wrapping
+  - add CrewAI auto-detection path in `veto.wrap()` for `BaseTool` instances
+  - add integration tests using mocked framework modules (no framework deps required)
+
 ## 0.8.0
 
 ### Minor Changes

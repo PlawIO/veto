@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.9.0
+
+### Minor Changes
+
+- [#121](https://github.com/VulnZap/veto/pull/121) [`574e741`](https://github.com/VulnZap/veto/commit/574e74141d4fe48de50c09e900c29784adb3e158) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Coordinated cross-SDK release train alignment while publishing Python SDK v0.9.0 integrations for CrewAI and PydanticAI. JavaScript APIs remain backward-compatible.
+
 ## 1.8.1
 
 ### Patch Changes
@@ -13,7 +19,6 @@
 - [#117](https://github.com/VulnZap/veto/pull/117) [`220e7f1`](https://github.com/VulnZap/veto/commit/220e7f102bee5e57f073584dba38076849277877) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a new standalone `guard()` API to TypeScript and Python SDKs that runs the existing validation pipeline without wrapping or executing tools.
 
   Highlights:
-
   - return typed `GuardResult` with `allow`, `deny`, or `require_approval`
   - preserve real deny/require_approval outcomes in log mode for `guard()` callers
   - include `ruleId`, `severity`, and `approvalId` when metadata is available
