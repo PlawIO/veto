@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- [#121](https://github.com/VulnZap/veto/pull/121) [`574e741`](https://github.com/VulnZap/veto/commit/574e74141d4fe48de50c09e900c29784adb3e158) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Coordinated release to publish Python SDK v0.9.0 integrations for CrewAI and PydanticAI. No JavaScript runtime behavior changes in this release.
+- [#121](https://github.com/VulnZap/veto/pull/121) [`574e741`](https://github.com/VulnZap/veto/commit/574e74141d4fe48de50c09e900c29784adb3e158) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Coordinated cross-SDK release train alignment while publishing Python SDK v0.9.0 integrations for CrewAI and PydanticAI. JavaScript APIs remain backward-compatible.
 
 ## 1.8.1
 
