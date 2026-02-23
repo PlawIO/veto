@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.8.1
+
+### Patch Changes
+
+- [#119](https://github.com/VulnZap/veto/pull/119) [`1639043`](https://github.com/VulnZap/veto/commit/163904315749abf9e1c6788b05af27711138add1) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Replace hardcoded api.veto.dev with api.runveto.com in SDK defaults and test fixtures
+
 ## 1.8.0
 
 ### Minor Changes
