@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.9.0
+
+### Minor Changes
+
+- [#121](https://github.com/VulnZap/veto/pull/121) [`574e741`](https://github.com/VulnZap/veto/commit/574e74141d4fe48de50c09e900c29784adb3e158) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add Python SDK native integrations for CrewAI and PydanticAI, including CrewAI auto-detection in `veto.wrap()`, plus integration test coverage.
+
 ## 1.8.1
 
 ### Patch Changes
