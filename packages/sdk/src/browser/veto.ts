@@ -173,24 +173,30 @@ function createInlineCloudClient(
     isFlushing = true;
 
     try {
-      while (queue.length > 0) {
+      const passLimit = queue.length;
+      let processed = 0;
+
+      while (queue.length > 0 && processed < passLimit) {
         const item = queue[0];
         if (!item) break;
+        processed += 1;
 
         try {
           await sendDecision(item.request);
           queue.shift();
         } catch (error) {
           item.attempts += 1;
+          queue.shift();
 
           if (item.attempts > maxRetries) {
-            queue.shift();
             logger.warn('Dropping cloud decision log after retries', {
               attempts: item.attempts - 1,
               error: error instanceof Error ? error.message : String(error),
             });
             continue;
           }
+
+          queue.push(item);
 
           const retryDelayMs = Math.min(
             30_000,
@@ -202,7 +208,6 @@ function createInlineCloudClient(
             retryDelayMs,
           });
           scheduleFlush(retryDelayMs);
-          return;
         }
       }
     } finally {

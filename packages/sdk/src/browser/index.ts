@@ -24,8 +24,12 @@ export { evaluateConditionCollections } from '../rules/condition-evaluator.js';
 function toDeniedValidationResult(
   result: Awaited<ReturnType<Veto['guard']>>
 ): ValidationResult {
+  const decision: ValidationResult['decision'] = result.decision === 'require_approval'
+    ? 'require_approval'
+    : 'deny';
+
   return {
-    decision: 'deny',
+    decision,
     reason: result.reason,
     metadata: {
       ruleId: result.ruleId,

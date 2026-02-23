@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   Veto,
   ToolCallDeniedError,
+  wrapAction,
 } from '../index.js';
 import type { OutputRule, Rule } from '../../rules/types.js';
 
@@ -307,6 +308,43 @@ describe('browser entry', () => {
     await expect(
       wrapped[0].handler({ url: 'https://bank.example.com' })
     ).rejects.toBeInstanceOf(ToolCallDeniedError);
+  });
+
+  it('preserves require_approval decision in wrapAction errors', async () => {
+    const veto = Veto.fromRules({
+      rules: [
+        {
+          id: 'require-approval-wrap-action',
+          name: 'Require Approval Wrap Action',
+          enabled: true,
+          severity: 'critical',
+          action: 'require_approval',
+          tools: ['transfer'],
+          conditions: [
+            {
+              field: 'arguments.amount',
+              operator: 'greater_than',
+              value: 1000,
+            },
+          ],
+        },
+      ],
+      logLevel: 'silent',
+    });
+
+    const wrappedTransfer = wrapAction(
+      veto,
+      'transfer',
+      async () => 'ok'
+    );
+
+    await expect(
+      wrappedTransfer({ amount: 5000 })
+    ).rejects.toMatchObject({
+      validationResult: expect.objectContaining({
+        decision: 'require_approval',
+      }),
+    });
   });
 
   it('allows all calls when initialized with empty rules', async () => {

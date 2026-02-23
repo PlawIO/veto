@@ -399,6 +399,7 @@ export class Veto {
   private rulesState: LoadedRulesState;
   private readonly browserMode: boolean;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
+  private refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
   private constructor(
     options: VetoOptions,
@@ -808,15 +809,7 @@ export class Veto {
       cloudClient,
     });
 
-    if (options.refreshIntervalMs && options.refreshIntervalMs > 0) {
-      setInterval(() => {
-        void veto.refreshRules().catch((error) => {
-          veto.logger.warn('Failed to refresh cloud policies', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }, options.refreshIntervalMs);
-    }
+    veto.setRefreshInterval(options.refreshIntervalMs);
 
     return veto;
   }
@@ -877,18 +870,15 @@ export class Veto {
   }
 
   private static async loadNodeFsModule(): Promise<NodeFsModule> {
-    const moduleName = ['node', 'fs'].join(':');
-    return await import(moduleName) as NodeFsModule;
+    return await import('node:fs') as NodeFsModule;
   }
 
   private static async loadNodePathModule(): Promise<NodePathModule> {
-    const moduleName = ['node', 'path'].join(':');
-    return await import(moduleName) as NodePathModule;
+    return await import('node:path') as NodePathModule;
   }
 
   private static async loadYamlParser(): Promise<ParseYaml> {
-    const moduleName = ['ya', 'ml'].join('');
-    const yamlModule = await import(moduleName) as { parse: ParseYaml };
+    const yamlModule = await import('yaml') as { parse: ParseYaml };
     return yamlModule.parse;
   }
 
@@ -896,14 +886,11 @@ export class Veto {
     resolvePolicyPackExtends: ResolvePolicyPackExtends;
     validatePolicyIR: ValidatePolicyIR;
   }> {
-    const policyPacksSpecifier = ['..', 'rules', 'policy-packs.js'].join('/');
-    const schemaValidatorSpecifier = ['..', 'rules', 'schema-validator.js'].join('/');
-
     const [policyPacksModule, schemaValidatorModule] = await Promise.all([
-      import(policyPacksSpecifier) as Promise<{
+      import('../rules/policy-packs.js') as Promise<{
         resolvePolicyPackExtends: ResolvePolicyPackExtends;
       }>,
-      import(schemaValidatorSpecifier) as Promise<{
+      import('../rules/schema-validator.js') as Promise<{
         validatePolicyIR: ValidatePolicyIR;
       }>,
     ]);
@@ -3013,6 +3000,25 @@ export class Veto {
     });
   }
 
+  private setRefreshInterval(refreshIntervalMs?: number): void {
+    if (this.refreshIntervalId) {
+      clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
+
+    if (!refreshIntervalMs || refreshIntervalMs <= 0) {
+      return;
+    }
+
+    this.refreshIntervalId = setInterval(() => {
+      void this.refreshRules().catch((error) => {
+        this.logger.warn('Failed to refresh cloud policies', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, refreshIntervalMs);
+  }
+
   /**
    * Get history statistics.
    */
@@ -3040,6 +3046,13 @@ export class Veto {
 
   resetBudget(): void {
     this.budgetTracker?.reset();
+  }
+
+  dispose(): void {
+    if (this.refreshIntervalId) {
+      clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
   }
 }
 
