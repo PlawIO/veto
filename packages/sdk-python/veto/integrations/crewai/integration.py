@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from veto.core.veto import GuardResult, Veto
 
 try:
-    from crewai.tools import BaseTool  # type: ignore[import-not-found]
+    from crewai.tools import BaseTool
 except ImportError as import_error:
     BaseTool = None
     _CREWAI_IMPORT_ERROR: Optional[ImportError] = import_error

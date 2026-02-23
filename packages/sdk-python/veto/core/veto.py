@@ -1422,7 +1422,7 @@ class Veto:
         # CrewAI BaseTool integration
         if hasattr(tool, "_run") and callable(getattr(tool, "_run")):
             try:
-                from crewai.tools import BaseTool as CrewAIBaseTool  # type: ignore[import-not-found]
+                from crewai.tools import BaseTool as CrewAIBaseTool
             except ImportError:
                 CrewAIBaseTool = None
 

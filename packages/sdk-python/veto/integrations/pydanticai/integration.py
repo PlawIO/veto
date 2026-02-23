@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from veto.core.veto import GuardResult, Veto
 
 try:
-    import pydantic_ai as _pydantic_ai  # type: ignore[import-not-found]
+    import pydantic_ai as _pydantic_ai
 except ImportError as import_error:
     _PYDANTICAI_IMPORT_ERROR: Optional[ImportError] = import_error
 else:
