@@ -1,5 +1,11 @@
 # veto (Python SDK)
 
+## 0.10.0
+
+### Minor Changes
+
+- Add a top-level async `protect()` one-liner API to TypeScript and Python SDKs. Highlights: - Introduce `protect()` as the primary onboarding entrypoint (`protect(tools)` and `protect(tool)`). - Add source auto-detection (rules/api key/endpoint/config/local), heuristic pack selection, and allow-all fallback. - Add module-level instance caching so repeated calls reuse initialized Veto state when options match. - Add browser entrypoint support for `protect()` with safe allow-all fallback behavior. - Add Python `Veto.from_rules()` parity helper and top-level `protect` export.
+
 ## 0.9.0
 
 ### Minor Changes
@@ -7,6 +13,7 @@
 - [#121](https://github.com/VulnZap/veto/pull/121) [`574e741`](https://github.com/VulnZap/veto/commit/574e74141d4fe48de50c09e900c29784adb3e158) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add native Python SDK integrations for CrewAI and PydanticAI.
 
   Highlights:
+
   - add `wrap_crewai_tools(veto, tools)` for CrewAI `BaseTool` wrappers
   - add `wrap_pydanticai_tool(veto, tool_name, handler)` for async function tools
   - add `create_veto_tool_decorator(veto, tool_name)` for decorator-style wrapping
@@ -20,6 +27,7 @@
 - [#117](https://github.com/VulnZap/veto/pull/117) [`220e7f1`](https://github.com/VulnZap/veto/commit/220e7f102bee5e57f073584dba38076849277877) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a standalone `guard()` API for the Python SDK so tool calls can be validated without wrapping/executing tools.
 
   Highlights:
+
   - returns typed `GuardResult` with `allow`, `deny`, or `require_approval`
   - preserves real deny/require-approval outcomes for `guard()` callers in log mode
   - includes `rule_id`, `severity`, and `approval_id` when metadata is available
