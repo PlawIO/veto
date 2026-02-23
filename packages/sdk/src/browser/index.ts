@@ -1,6 +1,11 @@
 import { Veto } from './veto.js';
 import { ToolCallDeniedError } from '../core/interceptor.js';
 import type { ValidationResult } from '../types/config.js';
+export {
+  protect,
+  type ProtectOptions,
+  type ProtectMode,
+} from './protect.js';
 
 export { Veto };
 export type {

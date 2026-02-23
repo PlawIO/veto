@@ -29,6 +29,7 @@ from veto.core.veto import (
     WrappedTools,
     WrappedHandler,
 )
+from veto.core.protect import protect
 
 # Core types
 from veto.types.tool import (
@@ -143,6 +144,7 @@ __all__ = [
     "ValidationMode",
     "WrappedTools",
     "WrappedHandler",
+    "protect",
     # Tool types
     "ToolDefinition",
     "ToolCall",

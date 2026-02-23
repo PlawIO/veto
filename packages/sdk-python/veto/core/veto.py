@@ -422,6 +422,69 @@ class Veto:
             event_webhook_config,
         )
 
+    @classmethod
+    def from_rules(
+        cls,
+        *,
+        rules: list[dict[str, Any]],
+        output_rules: Optional[list[dict[str, Any]]] = None,
+        mode: Optional[VetoMode] = None,
+        log_level: Optional[LogLevel] = None,
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        role: Optional[str] = None,
+        validators: Optional[list[Union[Validator, NamedValidator]]] = None,
+        api_key: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        timeout: Optional[int] = None,
+        retries: Optional[int] = None,
+        on_approval_required: Optional[Callable[..., Any]] = None,
+        approval_poll_interval: Optional[float] = None,
+        approval_timeout: Optional[float] = None,
+    ) -> "Veto":
+        resolved_log_level = log_level or "warn"
+        logger = create_logger(resolved_log_level)
+
+        cloud_config = VetoCloudConfig(
+            api_key=api_key,
+            base_url=endpoint or os.environ.get("VETO_API_URL", "https://api.runveto.com"),
+            timeout=timeout or 30000,
+            retries=retries or 2,
+        )
+        cloud_client = VetoCloudClient(cloud_config, logger)
+
+        veto_options = VetoOptions(
+            api_key=api_key,
+            base_url=endpoint,
+            mode=mode,
+            log_level=resolved_log_level,
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            role=role,
+            validators=validators,
+            timeout=timeout,
+            retries=retries,
+            on_approval_required=on_approval_required,
+            approval_poll_interval=approval_poll_interval,
+            approval_timeout=approval_timeout,
+            validation_mode="local",
+        )
+
+        indexed_rules = cls._index_inline_rules(rules)
+        indexed_output_rules = cls._index_inline_output_rules(output_rules or [])
+
+        return cls(
+            veto_options,
+            logger,
+            cloud_client,
+            indexed_rules,
+            indexed_output_rules,
+            "local",
+            None,
+        )
+
     @staticmethod
     def _find_yaml_files(rules_dir: Path, recursive: bool) -> list[Path]:
         if not rules_dir.exists() or not rules_dir.is_dir():
@@ -716,6 +779,80 @@ class Veto:
                         tool_rules.append(normalized_rule)
                 else:
                     state.global_output_rules.append(normalized_rule)
+
+        return state
+
+    @classmethod
+    def _index_inline_rules(
+        cls,
+        rules: list[dict[str, Any]],
+    ) -> LoadedRulesState:
+        state = LoadedRulesState(
+            all_rules=[],
+            rules_by_tool={},
+            global_rules=[],
+        )
+
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+
+            if rule.get("enabled") is False:
+                continue
+
+            normalized_rule = dict(rule)
+            normalized_rule.setdefault("enabled", True)
+            normalized_rule.setdefault("severity", "medium")
+            normalized_rule.setdefault("action", "block")
+
+            state.all_rules.append(normalized_rule)
+
+            tools = normalized_rule.get("tools")
+            if isinstance(tools, list) and tools:
+                for tool_name in tools:
+                    if not isinstance(tool_name, str):
+                        continue
+                    tool_rules = state.rules_by_tool.setdefault(tool_name, [])
+                    tool_rules.append(normalized_rule)
+            else:
+                state.global_rules.append(normalized_rule)
+
+        return state
+
+    @classmethod
+    def _index_inline_output_rules(
+        cls,
+        output_rules: list[dict[str, Any]],
+    ) -> LoadedOutputRulesState:
+        state = LoadedOutputRulesState(
+            all_output_rules=[],
+            output_rules_by_tool={},
+            global_output_rules=[],
+        )
+
+        for output_rule in output_rules:
+            if not isinstance(output_rule, dict):
+                continue
+
+            if output_rule.get("enabled") is False:
+                continue
+
+            normalized_rule = dict(output_rule)
+            normalized_rule.setdefault("enabled", True)
+            normalized_rule.setdefault("severity", "medium")
+            normalized_rule.setdefault("action", "log")
+
+            state.all_output_rules.append(normalized_rule)
+
+            tools = normalized_rule.get("tools")
+            if isinstance(tools, list) and tools:
+                for tool_name in tools:
+                    if not isinstance(tool_name, str):
+                        continue
+                    tool_rules = state.output_rules_by_tool.setdefault(tool_name, [])
+                    tool_rules.append(normalized_rule)
+            else:
+                state.global_output_rules.append(normalized_rule)
 
         return state
 

@@ -12,6 +12,7 @@ from veto.core.veto import (
     WrappedTools,
     WrappedHandler,
 )
+from veto.core.protect import protect
 
 from veto.core.validator import (
     ValidationEngine,
@@ -60,6 +61,7 @@ __all__ = [
     "ValidationMode",
     "WrappedTools",
     "WrappedHandler",
+    "protect",
     # Validator
     "ValidationEngine",
     "ValidationEngineOptions",
