@@ -49,6 +49,10 @@ import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import type { LocalValidationResult } from '../deterministic/types.js';
 import { OutputValidator, type OutputValidationResult } from './output-validator.js';
+import type {
+  VetoBrowserOptions as SharedVetoBrowserOptions,
+  VetoFromCloudOptions as SharedVetoFromCloudOptions,
+} from '../browser/types.js';
 import {
   EventWebhookEmitter,
   resolveEventWebhookConfig,
@@ -312,34 +316,14 @@ export interface VetoOptions {
   ) => void | Promise<void>;
 }
 
-export interface VetoBrowserOptions {
-  rules: Rule[];
-  outputRules?: OutputRule[];
-  mode?: VetoMode;
-  logLevel?: LogLevel;
-  sessionId?: string;
-  agentId?: string;
-  userId?: string;
-  role?: string;
-  validators?: (Validator | NamedValidator)[];
-  apiKey?: string;
-  endpoint?: string;
-  cloudClient?: VetoCloudClient;
-  onApprovalRequired?: (
-    context: ValidationContext,
-    approvalId: string
-  ) => void | Promise<void>;
+export type VetoBrowserOptions = SharedVetoBrowserOptions<VetoCloudClient> & {
   budget?: VetoConfigFile['budget'];
   costs?: VetoConfigFile['costs'];
   approval?: VetoConfigFile['approval'];
   events?: VetoConfigFile['events'];
-}
+};
 
-export interface VetoCloudInitOptions {
-  apiKey: string;
-  endpoint?: string;
-  refreshIntervalMs?: number;
-}
+export type VetoCloudInitOptions = SharedVetoFromCloudOptions;
 
 /**
  * Veto - A guardrail system for AI agent tool calls.

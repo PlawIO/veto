@@ -7,7 +7,7 @@ export type {
   VetoBrowserOptions,
   GuardResult,
   GuardContext,
-} from './veto.js';
+} from './types.js';
 export type {
   Rule,
   OutputRule,

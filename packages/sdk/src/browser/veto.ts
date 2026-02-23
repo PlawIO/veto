@@ -1,4 +1,9 @@
-import type { ValidationContext, ValidationResult, Validator, NamedValidator, LogLevel } from '../types/config.js';
+import type {
+  NamedValidator,
+  ValidationContext,
+  ValidationResult,
+  Validator,
+} from '../types/config.js';
 import type { OutputRule, Rule, RuleSeverity } from '../rules/types.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
@@ -6,66 +11,19 @@ import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { HistoryTracker, type HistoryStats } from '../core/history.js';
-import { BudgetTracker, type BudgetStatus, type BudgetConfig, type ToolCostMap } from '../core/budget.js';
+import { BudgetTracker, type BudgetStatus } from '../core/budget.js';
 import { OutputValidator, type OutputValidationResult } from '../core/output-validator.js';
 import { ToolCallDeniedError } from '../core/interceptor.js';
-
-export type VetoMode = 'strict' | 'log';
-
-export interface GuardContext {
-  sessionId?: string;
-  agentId?: string;
-  userId?: string;
-  role?: string;
-}
-
-export interface GuardResult {
-  decision: 'allow' | 'deny' | 'require_approval';
-  reason?: string;
-  ruleId?: string;
-  severity?: RuleSeverity;
-  approvalId?: string;
-}
-
-export interface BrowserCloudPoliciesResponse {
-  policies: Rule[];
-  outputRules?: OutputRule[];
-}
-
-export interface BrowserCloudClient {
-  fetchPolicies: () => Promise<BrowserCloudPoliciesResponse>;
-  logDecision: (request: {
-    tool_name: string;
-    arguments: Record<string, unknown>;
-    decision: 'allow' | 'deny';
-    reason?: string;
-    mode: 'deterministic';
-    latency_ms: number;
-    source: 'client';
-    context?: Record<string, unknown>;
-  }) => void;
-}
-
-export interface VetoBrowserOptions {
-  rules: Rule[];
-  outputRules?: OutputRule[];
-  mode?: VetoMode;
-  logLevel?: LogLevel;
-  sessionId?: string;
-  agentId?: string;
-  userId?: string;
-  role?: string;
-  validators?: (Validator | NamedValidator)[];
-  apiKey?: string;
-  endpoint?: string;
-  cloudClient?: BrowserCloudClient;
-  onApprovalRequired?: (
-    context: ValidationContext,
-    approvalId: string
-  ) => void | Promise<void>;
-  budget?: BudgetConfig;
-  costs?: ToolCostMap;
-}
+import type {
+  BrowserCloudClient,
+  BrowserCloudDecisionRequest,
+  BrowserCloudPoliciesResponse,
+  GuardContext,
+  GuardResult,
+  VetoBrowserOptions,
+  VetoFromCloudOptions,
+  VetoMode,
+} from './types.js';
 
 interface LoadedRulesState {
   allRules: Rule[];
@@ -74,12 +32,6 @@ interface LoadedRulesState {
   outputRulesByTool: Map<string, OutputRule[]>;
   globalRules: Rule[];
   globalOutputRules: OutputRule[];
-}
-
-interface VetoFromCloudOptions {
-  apiKey: string;
-  endpoint?: string;
-  refreshIntervalMs?: number;
 }
 
 function toNamedValidators(
@@ -189,6 +141,78 @@ function createInlineCloudClient(
     'Content-Type': 'application/json',
     'X-Veto-API-Key': apiKey,
   };
+  const maxRetries = 3;
+  const baseRetryDelayMs = 500;
+  const queue: Array<{ request: BrowserCloudDecisionRequest; attempts: number }> = [];
+  let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let isFlushing = false;
+
+  const scheduleFlush = (delayMs = 0): void => {
+    if (flushTimeoutId) return;
+
+    flushTimeoutId = setTimeout(() => {
+      flushTimeoutId = null;
+      void flushQueue();
+    }, delayMs);
+  };
+
+  const sendDecision = async (request: BrowserCloudDecisionRequest): Promise<void> => {
+    const response = await fetch(`${baseUrl}/v1/decisions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned status ${response.status}`);
+    }
+  };
+
+  const flushQueue = async (): Promise<void> => {
+    if (isFlushing) return;
+    isFlushing = true;
+
+    try {
+      while (queue.length > 0) {
+        const item = queue[0];
+        if (!item) break;
+
+        try {
+          await sendDecision(item.request);
+          queue.shift();
+        } catch (error) {
+          item.attempts += 1;
+
+          if (item.attempts > maxRetries) {
+            queue.shift();
+            logger.warn('Dropping cloud decision log after retries', {
+              attempts: item.attempts - 1,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            continue;
+          }
+
+          const retryDelayMs = Math.min(
+            30_000,
+            baseRetryDelayMs * (2 ** (item.attempts - 1))
+          );
+
+          logger.debug('Retrying cloud decision log', {
+            attempt: item.attempts,
+            retryDelayMs,
+          });
+          scheduleFlush(retryDelayMs);
+          return;
+        }
+      }
+    } finally {
+      isFlushing = false;
+    }
+
+    if (queue.length > 0 && !flushTimeoutId) {
+      scheduleFlush();
+    }
+  };
 
   return {
     async fetchPolicies(): Promise<BrowserCloudPoliciesResponse> {
@@ -207,15 +231,16 @@ function createInlineCloudClient(
     },
 
     logDecision(request): void {
-      fetch(`${baseUrl}/v1/decisions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(request),
-      }).catch((error) => {
-        logger.debug('Cloud decision logging failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+      queue.push({ request, attempts: 0 });
+      scheduleFlush();
+    },
+
+    dispose(): void {
+      if (flushTimeoutId) {
+        clearTimeout(flushTimeoutId);
+        flushTimeoutId = null;
+      }
+      queue.length = 0;
     },
   };
 }
@@ -239,6 +264,7 @@ export class Veto {
 
   private rulesState: LoadedRulesState;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
+  private refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
   private constructor(options: VetoBrowserOptions, logger: Logger) {
     this.logger = logger;
@@ -293,17 +319,28 @@ export class Veto {
       cloudClient,
     });
 
-    if (options.refreshIntervalMs && options.refreshIntervalMs > 0) {
-      setInterval(() => {
-        void veto.refreshRules().catch((error) => {
-          veto.logger.warn('Failed to refresh cloud policies', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }, options.refreshIntervalMs);
-    }
+    veto.setRefreshInterval(options.refreshIntervalMs);
 
     return veto;
+  }
+
+  private setRefreshInterval(refreshIntervalMs?: number): void {
+    if (this.refreshIntervalId) {
+      clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
+
+    if (!refreshIntervalMs || refreshIntervalMs <= 0) {
+      return;
+    }
+
+    this.refreshIntervalId = setInterval(() => {
+      void this.refreshRules().catch((error) => {
+        this.logger.warn('Failed to refresh cloud policies', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, refreshIntervalMs);
   }
 
   private getRulesForTool(toolName: string): Rule[] {
@@ -766,6 +803,15 @@ export class Veto {
 
   resetBudget(): void {
     this.budgetTracker?.reset();
+  }
+
+  dispose(): void {
+    if (this.refreshIntervalId) {
+      clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
+
+    this.cloudClient?.dispose?.();
   }
 }
 
