@@ -17,10 +17,12 @@ import type {
   CloudToolRegistrationResponse,
   CloudValidationResponse,
   CloudPolicyResponse,
+  CloudPoliciesResponse,
   LogDecisionRequest,
   ApprovalData,
   ApprovalPollOptions,
 } from './types.js';
+import type { Rule, OutputRule } from '../rules/types.js';
 
 export interface VetoCloudClientOptions {
   config?: VetoCloudConfig;
@@ -41,7 +43,7 @@ export class VetoCloudClient {
 
   private resolveConfig(config: VetoCloudConfig): ResolvedCloudConfig {
     return {
-      apiKey: config.apiKey ?? process.env.VETO_API_KEY,
+      apiKey: config.apiKey,
       baseUrl: (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, ''),
       timeout: config.timeout ?? 30000,
       retries: config.retries ?? 2,
@@ -315,6 +317,23 @@ export class VetoCloudClient {
     }
   }
 
+  async fetchPolicies(): Promise<CloudPoliciesResponse> {
+    const url = `${this.config.baseUrl}/v1/policies`;
+
+    const response = await this.fetchWithTimeout(url, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`API returned status ${response.status}: ${errorText}`);
+    }
+
+    const payload = await response.json() as unknown;
+    return this.normalizePoliciesResponse(payload);
+  }
+
   logDecision(request: LogDecisionRequest): void {
     const url = `${this.config.baseUrl}/v1/decisions`;
 
@@ -333,6 +352,37 @@ export class VetoCloudClient {
 
   clearRegistrationCache(): void {
     this.registeredTools.clear();
+  }
+
+  private normalizePoliciesResponse(payload: unknown): CloudPoliciesResponse {
+    const objectPayload = (payload && typeof payload === 'object' && !Array.isArray(payload))
+      ? payload as Record<string, unknown>
+      : {};
+
+    const rules = this.extractArray<Rule>(
+      objectPayload.policies,
+      objectPayload.rules,
+      objectPayload.data
+    );
+    const outputRules = this.extractArray<OutputRule>(
+      objectPayload.outputRules,
+      objectPayload.output_rules
+    );
+
+    return {
+      policies: rules,
+      outputRules,
+    };
+  }
+
+  private extractArray<T>(...candidates: unknown[]): T[] {
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) {
+        return candidate as T[];
+      }
+    }
+
+    return [];
   }
 
   private async fetchWithTimeout(

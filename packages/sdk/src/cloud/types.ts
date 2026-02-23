@@ -5,6 +5,7 @@
  */
 
 import type { ArgumentConstraint } from '../deterministic/types.js';
+import type { Rule, OutputRule } from '../rules/types.js';
 
 /**
  * Configuration for the Veto Cloud client.
@@ -121,6 +122,11 @@ export interface CloudPolicyResponse {
   sessionConstraints?: unknown;
   rateLimits?: unknown;
   version: number;
+}
+
+export interface CloudPoliciesResponse {
+  policies: Rule[];
+  outputRules?: OutputRule[];
 }
 
 /**
