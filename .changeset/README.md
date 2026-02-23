@@ -18,6 +18,20 @@ This will prompt you to:
 
 A markdown file will be created in this folder describing your change.
 
+## Package Selection Rules
+
+- **TypeScript SDK changes**: include `"veto-sdk": <bump>`
+- **CLI changes**: include `"veto-cli": <bump>`
+- **Python SDK changes**: include `"@veto/python-release": <bump>`
+
+For Python SDK updates, `@veto/python-release` is an internal marker package.
+The release script reads this marker to:
+
+1. bump `packages/sdk-python/pyproject.toml`
+2. prepend `packages/sdk-python/CHANGELOG.md`
+
+This keeps Python versioning independent from JavaScript SDK version numbers.
+
 ## What Happens Next
 
 When your PR is merged:
@@ -37,6 +51,7 @@ When your PR is merged:
 ---
 "veto-sdk": minor
 "veto-cli": patch
+"@veto/python-release": minor
 ---
 
 Add new `kernel` validation mode for local LLM-based rule evaluation
