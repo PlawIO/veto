@@ -1,5 +1,28 @@
 # veto-sdk
 
+## 1.10.0
+
+### Minor Changes
+
+- [#126](https://github.com/VulnZap/veto/pull/126) [`521d540`](https://github.com/VulnZap/veto/commit/521d540bfbc80995c94438db7ad3e83be3882f04) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a top-level async `protect()` one-liner API to TypeScript and Python SDKs.
+
+  Highlights:
+
+  - Introduce `protect()` as the primary onboarding entrypoint (`protect(tools)` and `protect(tool)`).
+  - Add source auto-detection (rules/api key/endpoint/config/local), heuristic pack selection, and allow-all fallback.
+  - Add module-level instance caching so repeated calls reuse initialized Veto state when options match.
+  - Add browser entrypoint support for `protect()` with safe allow-all fallback behavior.
+  - Add Python `Veto.from_rules()` parity helper and top-level `protect` export.
+
+- [#124](https://github.com/VulnZap/veto/pull/124) [`ec528d8`](https://github.com/VulnZap/veto/commit/ec528d80461fb23ae2779717d307f572c9157981) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a browser-compatible SDK path for Chrome extensions, web workers, and MV3 service workers.
+
+  Highlights:
+
+  - Add `Veto.fromRules()` and `Veto.fromCloud()` factories for browser-safe initialization.
+  - Add `veto-sdk/browser` entrypoint with browser-safe exports and action wrappers.
+  - Add browser-specific tests and cloud reporting support without filesystem dependencies.
+  - Add lifecycle cleanup for cloud refresh intervals and resilient decision logging retries.
+
 ## 1.9.0
 
 ### Minor Changes
@@ -19,6 +42,7 @@
 - [#117](https://github.com/VulnZap/veto/pull/117) [`220e7f1`](https://github.com/VulnZap/veto/commit/220e7f102bee5e57f073584dba38076849277877) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a new standalone `guard()` API to TypeScript and Python SDKs that runs the existing validation pipeline without wrapping or executing tools.
 
   Highlights:
+
   - return typed `GuardResult` with `allow`, `deny`, or `require_approval`
   - preserve real deny/require_approval outcomes in log mode for `guard()` callers
   - include `ruleId`, `severity`, and `approvalId` when metadata is available
