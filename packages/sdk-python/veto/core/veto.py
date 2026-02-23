@@ -1419,6 +1419,23 @@ class Veto:
         tool_name = tool.name
         veto = self
 
+        # CrewAI BaseTool integration
+        if hasattr(tool, "_run") and callable(getattr(tool, "_run")):
+            try:
+                from crewai.tools import BaseTool as CrewAIBaseTool
+            except ImportError:
+                CrewAIBaseTool = None
+
+            if CrewAIBaseTool is not None and isinstance(tool, CrewAIBaseTool):
+                try:
+                    from veto.integrations.crewai import wrap_crewai_tools
+
+                    wrapped_tool = wrap_crewai_tools(veto, [tool])[0]
+                    veto._logger.debug("CrewAI tool wrapped", {"name": tool_name})
+                    return cast(T, wrapped_tool)
+                except Exception:
+                    pass
+
         # For LangChain tools, we need to wrap the 'func' property
         if hasattr(tool, "func") and callable(getattr(tool, "func")):
             original_func = getattr(tool, "func")
