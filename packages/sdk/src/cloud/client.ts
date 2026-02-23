@@ -27,7 +27,7 @@ export interface VetoCloudClientOptions {
   logger: Logger;
 }
 
-const DEFAULT_BASE_URL = 'https://api.veto.dev';
+const DEFAULT_BASE_URL = 'https://api.runveto.com';
 
 export class VetoCloudClient {
   private readonly config: ResolvedCloudConfig;

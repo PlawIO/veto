@@ -344,7 +344,7 @@ class Veto:
         cloud_config = VetoCloudConfig(
             api_key=options.api_key,
             base_url=options.base_url
-            or os.environ.get("VETO_API_URL", "https://api.veto.dev"),
+            or os.environ.get("VETO_API_URL", "https://api.runveto.com"),
             timeout=options.timeout or 30000,
             retries=options.retries or 2,
         )

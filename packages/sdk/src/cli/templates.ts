@@ -28,7 +28,7 @@ validation:
 # Cloud configuration (for mode: "cloud")
 # cloud:
 #   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
-#   # baseUrl: "https://api.veto.dev"  # Set to your endpoint for self-hosted
+#   # baseUrl: "https://api.runveto.com"  # Set to your endpoint for self-hosted
 #   timeout: 30000
 #   retries: 2
 #   retryDelay: 1000
