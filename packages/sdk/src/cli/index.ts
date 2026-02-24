@@ -55,3 +55,14 @@ export {
   type DiscoveredTool,
   type Suggestion,
 } from './scan.js';
+export {
+  diff,
+  type DiffOptions,
+  type DiffResult,
+  type DiffReport,
+  type StructuralDiff,
+  type ImpactReport,
+  type ReplayCall,
+  type ReplayDecision,
+  type RuleChange,
+} from './diff.js';
