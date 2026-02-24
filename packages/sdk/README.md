@@ -108,7 +108,6 @@ logging:
 rules:
   directory: "./rules"
   recursive: true
-
 # Local approval callback (for action: require_approval)
 # approval:
 #   callbackUrl: "http://localhost:8787/approvals"
@@ -176,10 +175,30 @@ const csvAudit = veto.exportDecisions("csv");
 
 ## CLI Commands
 
-| Command            | Description                          |
-| ------------------ | ------------------------------------ |
-| `npx veto init`    | Initialize Veto in current directory |
-| `npx veto version` | Show version                         |
+| Command            | Description                                      |
+| ------------------ | ------------------------------------------------ |
+| `npx veto init`    | Initialize Veto in current directory             |
+| `npx veto learn`   | Observe tool calls and generate starter policies |
+| `npx veto compile` | Compile natural-language policy text into YAML   |
+| `npx veto test`    | Run adversarial policy gap analysis              |
+| `npx veto scan`    | Audit discovered tools vs loaded rule coverage   |
+| `npx veto version` | Show version                                     |
+
+Coverage audit examples:
+
+```bash
+# Human-readable coverage report
+npx veto scan
+
+# CI gate: fail when uncovered tools are found
+npx veto scan --fail-uncovered
+
+# Include inline YAML snippets for uncovered tools
+npx veto scan --suggest
+
+# Machine-readable output for CI pipelines
+npx veto scan --format json
+```
 
 ## General Rule YAML Format
 
