@@ -369,7 +369,7 @@ function extractPackageJsonDependencies(projectDir: string): { found: boolean; d
 }
 
 function extractTomlSection(content: string, sectionName: string): string | null {
-  const escaped = sectionName.replace(/\./g, '\\.');
+  const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const pattern = new RegExp(`\\[${escaped}\\]([\\s\\S]*?)(?=\\n\\[[^\\]]+\\]|$)`, 'm');
   const match = content.match(pattern);
   return match ? match[1] : null;
