@@ -1,5 +1,11 @@
 # veto (Python SDK)
 
+## 0.12.0
+
+### Minor Changes
+
+- Add true `shadow` mode to TypeScript and Python SDKs so wrapped calls never block while preserving real decisions and emitting shadow telemetry.
+
 ## 0.11.0
 
 ### Minor Changes
