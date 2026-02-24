@@ -1,6 +1,6 @@
 {
   "name": "veto-sdk",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "A guardrail system that intercepts and validates AI agent tool calls",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
