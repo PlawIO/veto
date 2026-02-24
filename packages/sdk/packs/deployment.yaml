@@ -1,0 +1,52 @@
+version: "1.0"
+name: deployment-pack
+description: Guardrails for deployment and release tools.
+rules:
+  - id: deploy-require-approval-production
+    name: Require approval for production deploys
+    description: All production deployments must be approved by a human.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - deploy
+      - publish
+      - release
+      - push_to_production
+    condition_groups:
+      - - field: arguments.environment
+          operator: equals
+          value: production
+      - - field: arguments.environment
+          operator: equals
+          value: prod
+      - - field: arguments.env
+          operator: equals
+          value: production
+      - - field: arguments.env
+          operator: equals
+          value: prod
+      - - field: arguments.target
+          operator: equals
+          value: production
+
+  - id: deploy-block-force-push
+    name: Block force deployments
+    description: Block deployments with force/skip-checks flags.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - deploy
+      - publish
+      - release
+    condition_groups:
+      - - field: arguments.force
+          operator: equals
+          value: true
+      - - field: arguments.skip_checks
+          operator: equals
+          value: true
+      - - field: arguments.skip_tests
+          operator: equals
+          value: true

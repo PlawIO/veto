@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Literal, Optional, Protocol, TypeVar, Union, overload, runtime_checkable
 
@@ -30,6 +31,14 @@ TOOL_PACK_HEURISTICS: list[dict[str, Any]] = [
             "withdraw",
             "deposit",
             "invoice",
+            "refund",
+            "charge",
+            "payout",
+            "wire",
+            "bank",
+            "fund",
+            "money",
+            "wallet",
         ],
         "pack": "@veto/financial",
     },
@@ -41,6 +50,13 @@ TOOL_PACK_HEURISTICS: list[dict[str, Any]] = [
             "browse",
             "scroll",
             "type_text",
+            "fill_form",
+            "screenshot",
+            "open_url",
+            "submit_form",
+            "page",
+            "tab",
+            "browser",
         ],
         "pack": "@veto/browser-automation",
     },
@@ -52,6 +68,13 @@ TOOL_PACK_HEURISTICS: list[dict[str, Any]] = [
             "select",
             "insert",
             "table",
+            "fetch_record",
+            "read_record",
+            "db",
+            "collection",
+            "document",
+            "find",
+            "aggregate",
         ],
         "pack": "@veto/data-access",
     },
@@ -63,8 +86,48 @@ TOOL_PACK_HEURISTICS: list[dict[str, Any]] = [
             "terminal",
             "bash",
             "run_code",
+            "write_file",
+            "edit_file",
+            "read_file",
+            "delete_file",
+            "mkdir",
+            "code",
+            "script",
         ],
         "pack": "@veto/coding-agent",
+    },
+    {
+        "patterns": [
+            "email",
+            "send_email",
+            "send_message",
+            "notify",
+            "sms",
+            "slack",
+            "message",
+            "mail",
+            "notification",
+            "chat",
+            "reply",
+        ],
+        "pack": "@veto/communication",
+    },
+    {
+        "patterns": [
+            "deploy",
+            "publish",
+            "release",
+            "push",
+            "rollback",
+            "provision",
+            "terraform",
+            "kubernetes",
+            "k8s",
+            "docker",
+            "helm",
+            "ci_cd",
+        ],
+        "pack": "@veto/deployment",
     },
 ]
 
@@ -259,7 +322,34 @@ def _create_allow_all_instance(options: dict[str, Any]) -> Veto:
     )
 
 
-async def _initialize_veto(tools: list[T], options: dict[str, Any]) -> Veto:
+def _should_emit_auto_apply_message(log_level: Optional[str]) -> bool:
+    return log_level != "silent"
+
+
+def _emit_auto_applied_pack_message(
+    tools: list[T],
+    source: ProtectInitSource,
+    rules: list[dict[str, Any]],
+    packs: list[str],
+    log_level: Optional[str],
+) -> None:
+    if not _should_emit_auto_apply_message(log_level):
+        return
+
+    if source != "heuristic" or not packs:
+        return
+
+    print(f"[veto] Auto-applied policy packs: {', '.join(packs)}", file=sys.stderr)
+    print(
+        f"[veto] {len(rules)} rules active for {len(tools)} tools. Run 'npx veto test' for details.",
+        file=sys.stderr,
+    )
+
+
+async def _initialize_veto(
+    tools: list[T],
+    options: dict[str, Any],
+) -> tuple[Veto, ProtectInitSource, list[dict[str, Any]], list[str], bool]:
     source, inline_rules, inline_output_rules, packs = _build_init_decision(tools, options)
     cache_key = _create_cache_key(
         options,
@@ -271,7 +361,7 @@ async def _initialize_veto(tools: list[T], options: dict[str, Any]) -> Veto:
 
     cached = _instance_cache.get(cache_key)
     if cached is not None:
-        return cached
+        return cached, source, inline_rules, packs, True
 
     try:
         if source in ("rules", "pack", "heuristic", "allow_all"):
@@ -307,7 +397,7 @@ async def _initialize_veto(tools: list[T], options: dict[str, Any]) -> Veto:
         instance = _create_allow_all_instance(options)
 
     _instance_cache[cache_key] = instance
-    return instance
+    return instance, source, inline_rules, packs, False
 
 
 @overload
@@ -337,7 +427,16 @@ async def protect(tools: Union[T, list[T]], **kwargs: Any) -> Union[T, list[T]]:
     normalized_options = dict(kwargs)
 
     tool_list = _to_tools_list(tools)
-    instance = await _initialize_veto(tool_list, normalized_options)
+    instance, source, inline_rules, packs, from_cache = await _initialize_veto(tool_list, normalized_options)
+
+    if not from_cache:
+        _emit_auto_applied_pack_message(
+            tools=tool_list,
+            source=source,
+            rules=inline_rules,
+            packs=packs,
+            log_level=normalized_options.get("log_level"),
+        )
 
     if not kwargs:
         _default_instance = instance

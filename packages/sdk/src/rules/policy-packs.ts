@@ -8,6 +8,8 @@ const BUILT_IN_POLICY_PACK_FILE_NAMES = {
   '@veto/financial': 'financial.yaml',
   '@veto/browser-automation': 'browser-automation.yaml',
   '@veto/data-access': 'data-access.yaml',
+  '@veto/communication': 'communication.yaml',
+  '@veto/deployment': 'deployment.yaml',
 } as const;
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));

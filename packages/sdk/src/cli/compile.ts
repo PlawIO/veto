@@ -49,7 +49,7 @@ Each rule object MUST have these fields:
 - "tools": array of tool name strings this applies to (use general names like "send_email", "transfer_funds", "read_file", "write_file", "execute_command", etc.)
 - "conditions": array of condition objects, each with:
   - "field": dot-notation path (e.g. "arguments.to", "arguments.amount")
-  - "operator": one of "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "matches", "greater_than", "less_than", "in", "not_in", "outside_hours", "within_hours"
+  - "operator": one of "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "matches", "greater_than", "less_than", "length_greater_than", "in", "not_in", "outside_hours", "within_hours"
   - "value": the value to compare against
 
 Common patterns:
@@ -244,7 +244,7 @@ function parseAndValidateLLMOutput(raw: string): LLMOutput {
   const VALID_OPERATORS = new Set([
     'equals', 'not_equals', 'contains', 'not_contains',
     'starts_with', 'ends_with', 'matches',
-    'greater_than', 'less_than', 'in', 'not_in',
+    'greater_than', 'less_than', 'length_greater_than', 'in', 'not_in',
     'outside_hours', 'within_hours',
   ]);
   const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow', 'require_approval']);

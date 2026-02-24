@@ -203,6 +203,26 @@ def _evaluate_time_window(
     return True, minute_of_day >= start_minutes or minute_of_day < end_minutes
 
 
+def _length_comparable_size(value: Any) -> Optional[int]:
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return len(value)
+
+    if isinstance(value, Mapping):
+        return len(value)
+
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed == "":
+            return 0
+
+        if "," in value or ";" in value:
+            return len([item.strip() for item in re.split(r"[;,]", value) if item.strip() != ""])
+
+        return 1
+
+    return None
+
+
 def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) -> bool:
     """Evaluate a single legacy field/operator/value condition."""
     if operator == "equals":
@@ -250,6 +270,17 @@ def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) ->
             return float(field_value) < float(expected)
         except (TypeError, ValueError):
             return False
+    if operator == "length_greater_than":
+        size = _length_comparable_size(field_value)
+        if size is None:
+            return False
+
+        try:
+            expected_size = float(expected)
+        except (TypeError, ValueError):
+            return False
+
+        return float(size) > expected_size
     if operator == "in":
         return isinstance(expected, list) and field_value in expected
     if operator == "not_in":

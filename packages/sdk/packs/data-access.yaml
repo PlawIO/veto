@@ -39,7 +39,7 @@ rules:
     conditions:
       - field: arguments.limit
         operator: greater_than
-        value: 1000
+        value: 10000
 
 output_rules:
   - id: data-access-redact-email

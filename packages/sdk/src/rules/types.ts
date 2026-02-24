@@ -20,6 +20,7 @@ export type ConditionOperator =
   | 'matches'  // Regex match
   | 'greater_than'
   | 'less_than'
+  | 'length_greater_than'
   | 'in'
   | 'not_in'
   | 'outside_hours'

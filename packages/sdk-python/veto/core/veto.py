@@ -186,6 +186,8 @@ class Veto:
         "@veto/financial": "financial.yaml",
         "@veto/browser-automation": "browser-automation.yaml",
         "@veto/data-access": "data-access.yaml",
+        "@veto/communication": "communication.yaml",
+        "@veto/deployment": "deployment.yaml",
     }
 
     def __init__(
