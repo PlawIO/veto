@@ -5,6 +5,7 @@ import { Observer, PolicyGenerator, parseDuration, policiesToYaml } from './lear
 import type { StopCondition } from './learn.js';
 import { compile } from './compile.js';
 import { test } from './test.js';
+import { scan } from './scan.js';
 import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -25,6 +26,7 @@ Commands:
   learn         Observe tool calls and generate policies
   compile       Compile natural language policies to deterministic YAML rules
   test          Run adversarial policy gap analysis
+  scan          Audit tool coverage against loaded rules
   version       Show version information
   help          Show this help message
 
@@ -52,6 +54,11 @@ Test Options:
   --output <file>      Write JSON report to file
   --format <fmt>       Output format: text or json (default: text)
 
+Scan Options:
+  --fail-uncovered     Exit with code 1 when uncovered tools are found
+  --suggest            Include inline YAML starter snippets for uncovered tools
+  --format <fmt>       Output format: text or json (default: text)
+
 Examples:
   veto init                          Initialize Veto in current directory
   veto init --pack coding-agent      Initialize with extends: "@veto/coding-agent"
@@ -63,6 +70,9 @@ Examples:
   veto test                          Analyze policies for gaps
   veto test --policy ./rules         Analyze specific policy directory
   veto test --output report.json     Save JSON report
+  veto scan                          Audit tool coverage in current project
+  veto scan --suggest                Show inline YAML snippets for uncovered tools
+  veto scan --fail-uncovered         Fail CI when uncovered tools are detected
 `);
 }
 
@@ -276,6 +286,17 @@ async function main(): Promise<void> {
         format: (values['format'] as 'text' | 'json') ?? undefined,
       });
       process.exit(testResult.success ? 0 : 1);
+      break;
+    }
+
+    case 'scan': {
+      const scanResult = await scan({
+        quiet: flags['quiet'],
+        failUncovered: flags['fail-uncovered'],
+        suggest: flags['suggest'],
+        format: (values['format'] as 'text' | 'json') ?? undefined,
+      });
+      process.exit(scanResult.success ? 0 : 1);
       break;
     }
 

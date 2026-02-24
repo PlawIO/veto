@@ -47,3 +47,11 @@ export {
   type ParsedRuleSet,
   type ParsedCondition,
 } from './test.js';
+export {
+  scan,
+  type ScanOptions,
+  type ScanResult,
+  type ScanReport,
+  type DiscoveredTool,
+  type Suggestion,
+} from './scan.js';
