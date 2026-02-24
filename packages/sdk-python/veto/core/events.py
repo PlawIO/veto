@@ -141,7 +141,7 @@ def parse_event_webhook_config(
 
 
 def format_generic_payload(event: WebhookEvent) -> dict[str, Any]:
-    payload = {
+    payload: dict[str, Any] = {
         "event_type": event.event_type,
         "tool_name": event.tool_name,
         "arguments": event.arguments,

@@ -1,6 +1,6 @@
 import { Veto } from './veto.js';
 import type { OutputRule, Rule } from '../rules/types.js';
-import type { ProtectMode, ProtectOptions } from '../core/protect.js';
+import type { ProtectOptions } from '../core/protect.js';
 export type { ProtectMode, ProtectOptions } from '../core/protect.js';
 
 interface ToolPackHeuristic {
