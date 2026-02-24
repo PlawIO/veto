@@ -62,6 +62,10 @@ def _raise_tool_denied(tool_name: str, guard_result: "GuardResult") -> None:
     )
 
 
+def _should_raise_on_deny(guard_result: "GuardResult") -> bool:
+    return guard_result.decision == "deny" and guard_result.shadow is not True
+
+
 def _extract_field_names(tool: Any) -> list[str]:
     args_schema = getattr(tool, "args_schema", None)
     if args_schema is None:
@@ -94,7 +98,7 @@ def _build_args_dict(tool: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -
 
 async def _guard_or_raise(veto: "Veto", tool_name: str, args_dict: dict[str, Any]) -> None:
     guard_result = await veto.guard(tool_name, args_dict)
-    if guard_result.decision == "deny":
+    if _should_raise_on_deny(guard_result):
         _raise_tool_denied(tool_name, guard_result)
 
 
@@ -113,7 +117,7 @@ def _guard_or_raise_sync(veto: "Veto", tool_name: str, args_dict: dict[str, Any]
     else:
         guard_result = asyncio.run(_run_guard())
 
-    if guard_result.decision == "deny":
+    if _should_raise_on_deny(guard_result):
         _raise_tool_denied(tool_name, guard_result)
 
 

@@ -61,7 +61,7 @@ describe('browser protect', () => {
     await expect(wrapped[0].handler({ anything: true })).resolves.toBe('allowed');
   });
 
-  it('treats shadow mode as log mode alias', async () => {
+  it('passes shadow mode through to Veto without aliasing', async () => {
     const tool = createTool('transfer_funds');
     const fakeVeto = {
       wrap: vi.fn((tools: TestTool[]) => tools),
@@ -77,7 +77,7 @@ describe('browser protect', () => {
     });
 
     expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
-      mode: 'log',
+      mode: 'shadow',
     }));
   });
 

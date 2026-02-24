@@ -310,6 +310,31 @@ describe('browser entry', () => {
     ).rejects.toBeInstanceOf(ToolCallDeniedError);
   });
 
+  it('allows wrap execution in shadow mode while preserving deny decision in guard', async () => {
+    const handler = vi.fn(async () => 'navigated');
+    const veto = Veto.fromRules({
+      rules: [createNavigateBlockRule()],
+      mode: 'shadow',
+      logLevel: 'silent',
+    });
+
+    const guardResult = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(guardResult.decision).toBe('deny');
+    expect(guardResult.shadow).toBe(true);
+    expect(guardResult.shadowDecision).toBe('deny');
+
+    const wrapped = veto.wrap([{
+      name: 'navigate',
+      handler,
+      inputSchema: {},
+    }]);
+
+    await expect(
+      wrapped[0].handler({ url: 'https://bank.example.com' })
+    ).resolves.toBe('navigated');
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves require_approval decision in wrapAction errors', async () => {
     const veto = Veto.fromRules({
       rules: [

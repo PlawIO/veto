@@ -51,7 +51,10 @@ export function wrapAction<T>(
 ): (args: Record<string, unknown>) => Promise<T> {
   return async (args) => {
     const result = await veto.guard(toolName, args);
-    if (result.decision === 'deny' || result.decision === 'require_approval') {
+    if (
+      (result.decision === 'deny' || result.decision === 'require_approval')
+      && result.shadow !== true
+    ) {
       throw new ToolCallDeniedError(toolName, 'guard', toDeniedValidationResult(result));
     }
     return await handler(args);

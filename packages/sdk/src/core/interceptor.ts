@@ -210,6 +210,7 @@ export class Interceptor {
       throw error;
     }
     const validationResult = aggregatedResult.finalResult;
+    const isShadowOverride = validationResult.metadata?.shadow === true;
 
     // Determine final arguments (may be modified by validators)
     const finalArguments =
@@ -240,12 +241,17 @@ export class Interceptor {
     }
 
     // Refund reserved budget for denied calls
-    if (this.budgetTracker && validationResult.decision === 'deny' && reservedCost > 0) {
+    if (
+      this.budgetTracker
+      && validationResult.decision === 'deny'
+      && !isShadowOverride
+      && reservedCost > 0
+    ) {
       this.budgetTracker.refund(reservedCost);
     }
 
     // Handle denial
-    if (validationResult.decision === 'deny') {
+    if (validationResult.decision === 'deny' && !isShadowOverride) {
       if (this.onDenied) {
         try {
           await this.onDenied(context, validationResult);
@@ -262,6 +268,12 @@ export class Interceptor {
         callId,
         reason: validationResult.reason,
       });
+    } else if (validationResult.decision === 'deny' && isShadowOverride) {
+      this.logger.warn('Tool call would be denied in shadow mode (continuing)', {
+        toolName: call.name,
+        callId,
+        reason: validationResult.reason,
+      });
     } else {
       this.logger.info('Tool call allowed', {
         toolName: call.name,
@@ -272,7 +284,7 @@ export class Interceptor {
     }
 
     return {
-      allowed: validationResult.decision !== 'deny',
+      allowed: validationResult.decision !== 'deny' || isShadowOverride,
       validationResult,
       aggregatedResult,
       originalCall: call,

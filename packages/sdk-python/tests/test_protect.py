@@ -132,18 +132,23 @@ async def test_protect_log_mode_allows(isolated_cwd):
     assert await wrapped[0].handler({"amount": 2000}) == "executed"
 
 
-async def test_protect_shadow_mode_aliases_to_log(isolated_cwd):
+async def test_protect_passes_shadow_mode_through_without_aliasing(
+    isolated_cwd, monkeypatch: pytest.MonkeyPatch
+):
     _ = isolated_cwd
-    tool = MockTool("transfer_funds", "executed-shadow")
+    tool = MockTool("transfer_funds")
+    from_rules_mock = MagicMock(return_value=FakeVeto())
+    monkeypatch.setattr(protect_module.Veto, "from_rules", from_rules_mock)
 
-    wrapped = await protect(
+    await protect(
         [tool],
-        rules=[_amount_block_rule("transfer_funds")],
+        rules=[],
         mode="shadow",
         log_level="silent",
     )
 
-    assert await wrapped[0].handler({"amount": 2000}) == "executed-shadow"
+    assert from_rules_mock.call_count == 1
+    assert from_rules_mock.call_args.kwargs["mode"] == "shadow"
 
 
 async def test_protect_heuristics_detect_financial_pack(isolated_cwd):

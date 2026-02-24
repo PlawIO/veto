@@ -7,7 +7,7 @@ import type { LogLevel, ValidationContext } from '../types/config.js';
 import type { BudgetConfig, ToolCostMap } from './budget.js';
 import { Veto, type VetoMode } from './veto.js';
 
-export type ProtectMode = VetoMode | 'shadow';
+export type ProtectMode = VetoMode;
 
 export interface ProtectOptions {
   // Policy source (pick one, auto-detected if omitted)
@@ -189,15 +189,6 @@ function stableSerialize(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
-function normalizeProtectMode(mode: ProtectMode | undefined): VetoMode | undefined {
-  if (mode === 'shadow') {
-    // TODO: PLW-94 true shadow mode behavior.
-    return 'log';
-  }
-
-  return mode;
-}
-
 function toToolsArray<T extends { name: string }>(input: T | T[]): T[] {
   return Array.isArray(input) ? input : [input];
 }
@@ -327,7 +318,7 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     pack: options.pack,
     apiKey: options.apiKey,
     endpoint: options.endpoint,
-    mode: normalizeProtectMode(options.mode),
+    mode: options.mode,
     logLevel: options.logLevel,
     sessionId: options.sessionId,
     agentId: options.agentId,
@@ -349,7 +340,7 @@ function createAllowAllInstance(options: ProtectOptions): Veto {
   return Veto.fromRules({
     rules: [],
     outputRules: [],
-    mode: normalizeProtectMode(options.mode),
+    mode: options.mode,
     logLevel: options.logLevel,
     sessionId: options.sessionId,
     agentId: options.agentId,
@@ -414,7 +405,7 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
         instance = Veto.fromRules({
           rules: inlineRules.rules,
           outputRules: inlineRules.outputRules,
-          mode: normalizeProtectMode(options.mode),
+          mode: options.mode,
           logLevel: options.logLevel,
           sessionId: options.sessionId,
           agentId: options.agentId,
@@ -434,7 +425,7 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
       case 'local': {
         instance = await Veto.init({
           configDir: options.configDir,
-          mode: normalizeProtectMode(options.mode),
+          mode: options.mode,
           logLevel: options.logLevel,
           sessionId: options.sessionId,
           agentId: options.agentId,

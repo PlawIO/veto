@@ -129,7 +129,7 @@ export function createVetoInputGuardrail<
   const guardrailFunction: InputGuardrail<TContext, TAgent, TResponseInputItem>['guardrailFunction'] =
     async (_ctx, _agent, input) => {
       const result = await veto.guard('agent_input', { input });
-      if (result.decision === 'deny') {
+      if (result.decision === 'deny' && result.shadow !== true) {
         return {
           tripwireTriggered: true,
           outputInfo: {
@@ -201,7 +201,7 @@ export function createVetoToolGuardrails(
     const args = parseToolArguments(resolveToolArguments(data.context));
     const result = await veto.guard(toolName, args);
 
-    if (result.decision === 'deny') {
+    if (result.decision === 'deny' && result.shadow !== true) {
       return rejectToolGuardrail(result.reason ?? 'Policy violation');
     }
 

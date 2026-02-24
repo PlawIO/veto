@@ -1,7 +1,6 @@
 import { Veto } from './veto.js';
 import type { OutputRule, Rule } from '../rules/types.js';
-import type { ProtectMode, ProtectOptions } from '../core/protect.js';
-import type { VetoMode } from './types.js';
+import type { ProtectOptions } from '../core/protect.js';
 export type { ProtectMode, ProtectOptions } from '../core/protect.js';
 
 interface ToolPackHeuristic {
@@ -54,15 +53,6 @@ function stableSerialize(value: unknown): string {
     .map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`);
 
   return `{${entries.join(',')}}`;
-}
-
-function normalizeProtectMode(mode: ProtectMode | undefined): VetoMode | undefined {
-  if (mode === 'shadow') {
-    // TODO: PLW-94 true shadow mode behavior.
-    return 'log';
-  }
-
-  return mode;
 }
 
 function toToolsArray<T extends { name: string }>(input: T | T[]): T[] {
@@ -122,7 +112,7 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     pack: options.pack,
     apiKey: options.apiKey,
     endpoint: options.endpoint,
-    mode: normalizeProtectMode(options.mode),
+    mode: options.mode,
     logLevel: options.logLevel,
     sessionId: options.sessionId,
     agentId: options.agentId,
@@ -140,7 +130,7 @@ function createAllowAllInstance(options: ProtectOptions): Veto {
   return Veto.fromRules({
     rules: [],
     outputRules: [],
-    mode: normalizeProtectMode(options.mode),
+    mode: options.mode,
     logLevel: options.logLevel,
     sessionId: options.sessionId,
     agentId: options.agentId,
@@ -175,7 +165,7 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
       instance = Veto.fromRules({
         rules: decision.rules,
         outputRules: decision.outputRules,
-        mode: normalizeProtectMode(options.mode),
+        mode: options.mode,
         logLevel: options.logLevel,
         sessionId: options.sessionId,
         agentId: options.agentId,

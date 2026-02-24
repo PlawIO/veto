@@ -9,7 +9,7 @@ from typing import Any, Literal, Optional, Protocol, TypeVar, Union, overload, r
 
 import yaml
 
-from veto.core.veto import Veto, VetoMode, VetoOptions
+from veto.core.veto import Veto, VetoOptions
 
 ProtectMode = Literal["strict", "log", "shadow"]
 
@@ -172,14 +172,6 @@ def _stable_serialize(value: Any) -> str:
     )
 
 
-def _normalize_mode(mode: Optional[ProtectMode]) -> Optional[VetoMode]:
-    if mode == "shadow":
-        # TODO: PLW-94 true shadow mode behavior.
-        return "log"
-
-    return mode
-
-
 def _to_tools_list(tools: Union[T, list[T]]) -> list[T]:
     if isinstance(tools, list):
         return tools
@@ -291,7 +283,7 @@ def _create_cache_key(
         "pack": options.get("pack"),
         "api_key": options.get("api_key"),
         "endpoint": options.get("endpoint"),
-        "mode": _normalize_mode(options.get("mode")),
+        "mode": options.get("mode"),
         "log_level": options.get("log_level"),
         "session_id": options.get("session_id"),
         "agent_id": options.get("agent_id"),
@@ -310,7 +302,7 @@ def _create_allow_all_instance(options: dict[str, Any]) -> Veto:
     return Veto.from_rules(
         rules=[],
         output_rules=[],
-        mode=_normalize_mode(options.get("mode")),
+        mode=options.get("mode"),
         log_level=options.get("log_level"),
         session_id=options.get("session_id"),
         agent_id=options.get("agent_id"),
@@ -368,7 +360,7 @@ async def _initialize_veto(
             instance = Veto.from_rules(
                 rules=inline_rules,
                 output_rules=inline_output_rules,
-                mode=_normalize_mode(options.get("mode")),
+                mode=options.get("mode"),
                 log_level=options.get("log_level"),
                 session_id=options.get("session_id"),
                 agent_id=options.get("agent_id"),
@@ -382,7 +374,7 @@ async def _initialize_veto(
             instance = await Veto.init(
                 VetoOptions(
                     config_dir=options.get("config_dir"),
-                    mode=_normalize_mode(options.get("mode")),
+                    mode=options.get("mode"),
                     log_level=options.get("log_level"),
                     session_id=options.get("session_id"),
                     agent_id=options.get("agent_id"),

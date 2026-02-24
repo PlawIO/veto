@@ -21,6 +21,7 @@ from typing import (
 from dataclasses import dataclass
 import os
 import inspect
+import sys
 from datetime import datetime
 from pathlib import Path
 import yaml
@@ -71,7 +72,7 @@ from veto.rules import (
 
 
 # Veto operating mode
-VetoMode = Literal["strict", "log"]
+VetoMode = Literal["strict", "log", "shadow"]
 ValidationMode = Literal["cloud", "local"]
 
 # Wrapped handler function type
@@ -97,6 +98,8 @@ class GuardResult:
     rule_id: Optional[str] = None
     severity: Optional[GuardSeverity] = None
     approval_id: Optional[str] = None
+    shadow: Optional[bool] = None
+    shadow_decision: Optional[str] = None
 
 
 @dataclass
@@ -190,6 +193,12 @@ class Veto:
         "@veto/deployment": "deployment.yaml",
     }
 
+    @staticmethod
+    def _parse_mode(value: Optional[str]) -> Optional[VetoMode]:
+        if value in ("strict", "log", "shadow"):
+            return cast(VetoMode, value)
+        return None
+
     def __init__(
         self,
         options: VetoOptions,
@@ -202,6 +211,7 @@ class Veto:
     ):
         self._logger = logger
         self._mode: VetoMode = options.mode or "strict"
+        self._resolved_log_level: LogLevel = options.log_level or "info"
         self._validation_mode: ValidationMode = validation_mode
         self._cloud_client = cloud_client
         self._rules = rules
@@ -361,6 +371,7 @@ class Veto:
         resolved_config_dir = Path(options.config_dir or "./veto").resolve()
         rules_dir = resolved_config_dir / "rules"
         recursive_rules = True
+        config_mode: Optional[VetoMode] = None
         config_validation_mode: Optional[ValidationMode] = None
         event_webhook_config: Optional[EventWebhookConfig] = None
 
@@ -370,6 +381,10 @@ class Veto:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config_data = yaml.safe_load(f)
                 if isinstance(config_data, dict):
+                    raw_mode = config_data.get("mode")
+                    if raw_mode in ("strict", "log", "shadow"):
+                        config_mode = cast(VetoMode, raw_mode)
+
                     validation_config = config_data.get("validation")
                     if isinstance(validation_config, dict):
                         raw_mode = validation_config.get("mode")
@@ -402,6 +417,9 @@ class Veto:
             or config_validation_mode
             or "cloud"
         )
+        env_mode = cls._parse_mode(os.environ.get("VETO_MODE"))
+        options.mode = options.mode or config_mode or env_mode or "strict"
+        options.log_level = log_level
 
         rules = cls._load_rules(
             rules_dir=rules_dir,
@@ -446,6 +464,7 @@ class Veto:
         approval_timeout: Optional[float] = None,
     ) -> "Veto":
         resolved_log_level = log_level or "warn"
+        resolved_mode = mode or cls._parse_mode(os.environ.get("VETO_MODE")) or "strict"
         logger = create_logger(resolved_log_level)
 
         cloud_config = VetoCloudConfig(
@@ -459,7 +478,7 @@ class Veto:
         veto_options = VetoOptions(
             api_key=api_key,
             base_url=endpoint,
-            mode=mode,
+            mode=resolved_mode,
             log_level=resolved_log_level,
             session_id=session_id,
             agent_id=agent_id,
@@ -1006,7 +1025,69 @@ class Veto:
         return context.source == "guard"
 
     def _should_apply_log_mode_override(self, context: ValidationContext) -> bool:
-        return self._mode == "log" and not self._is_guard_evaluation(context)
+        return self._mode in ("log", "shadow") and not self._is_guard_evaluation(context)
+
+    def _should_emit_shadow_stderr(self) -> bool:
+        return self._mode == "shadow" and self._resolved_log_level != "silent"
+
+    def _emit_shadow_stderr(
+        self,
+        context: ValidationContext,
+        decision: Literal["deny", "require_approval"],
+        rule_id: Optional[str] = None,
+    ) -> None:
+        if not self._should_emit_shadow_stderr():
+            return
+
+        tag = (
+            "WOULD BE DENIED"
+            if decision == "deny"
+            else "WOULD REQUIRE APPROVAL"
+        )
+        rule_info = f" by {rule_id}" if rule_id else ""
+        args_str = str(context.arguments)[:80]
+        print(
+            f"[shadow] {context.tool_name}({args_str}) - {tag}{rule_info}",
+            file=sys.stderr,
+        )
+
+    def _apply_shadow_mode_override(
+        self,
+        context: ValidationContext,
+        original_decision: Literal["deny", "require_approval"],
+        original_reason: Optional[str],
+        metadata: Optional[dict[str, Any]] = None,
+        rule_id: Optional[str] = None,
+    ) -> ValidationResult:
+        self._logger.warn(
+            (
+                "[shadow] Tool call would be denied"
+                if original_decision == "deny"
+                else "[shadow] Tool call would require approval"
+            ),
+            {
+                "tool": context.tool_name,
+                "decision": original_decision,
+                "reason": original_reason,
+                "rule_id": rule_id,
+                "shadow": True,
+            },
+        )
+        self._emit_shadow_stderr(context, original_decision, rule_id)
+
+        merged_metadata = {
+            **(metadata or {}),
+            "shadow": True,
+            "shadow_decision": original_decision,
+            "shadow_reason": original_reason,
+            "shadow_rule_id": rule_id,
+        }
+
+        return ValidationResult(
+            decision=original_decision,
+            reason=original_reason,
+            metadata=merged_metadata,
+        )
 
     def _resolve_session_id(self, context: ValidationContext) -> Optional[str]:
         return (
@@ -1145,6 +1226,15 @@ class Veto:
 
             if action == "require_approval":
                 if self._should_apply_log_mode_override(context):
+                    if self._mode == "shadow":
+                        return self._apply_shadow_mode_override(
+                            context,
+                            "require_approval",
+                            reason,
+                            metadata,
+                            cast(Optional[str], rule.get("id")),
+                        )
+
                     self._logger.warn(
                         "Tool call would require approval locally (log mode)",
                         {
@@ -1182,6 +1272,15 @@ class Veto:
 
             if action == "block":
                 if self._should_apply_log_mode_override(context):
+                    if self._mode == "shadow":
+                        return self._apply_shadow_mode_override(
+                            context,
+                            "deny",
+                            reason,
+                            metadata,
+                            cast(Optional[str], rule.get("id")),
+                        )
+
                     self._logger.warn(
                         "Tool call would be blocked locally (log mode)",
                         {
@@ -1252,6 +1351,14 @@ class Veto:
         result = validate_deterministic(
             context.tool_name, context.arguments, policy.constraints
         )
+        shadow_context = (
+            {
+                "shadow": True,
+                "shadow_decision": result.decision,
+            }
+            if self._mode == "shadow"
+            else {}
+        )
 
         self._cloud_client.log_decision(
             {
@@ -1267,6 +1374,7 @@ class Veto:
                     "agent_id": self._resolve_agent_id(context),
                     "user_id": self._resolve_user_id(context),
                     "role": self._resolve_role(context),
+                    **shadow_context,
                 },
             }
         )
@@ -1288,6 +1396,14 @@ class Veto:
                 return ValidationResult(decision="allow", reason=local_result.reason)
 
             if self._should_apply_log_mode_override(context):
+                if self._mode == "shadow":
+                    return self._apply_shadow_mode_override(
+                        context,
+                        "deny",
+                        local_result.reason,
+                        {"source": "client"},
+                    )
+
                 self._logger.warn(
                     "Tool call would be blocked locally (log mode)",
                     {"tool": context.tool_name, "reason": local_result.reason},
@@ -1331,7 +1447,11 @@ class Veto:
             reason = str(exc)
             if self._should_apply_log_mode_override(context):
                 self._logger.warn(
-                    "Cloud unavailable (log mode, allowing)",
+                    (
+                        "Cloud unavailable (shadow mode, allowing)"
+                        if self._mode == "shadow"
+                        else "Cloud unavailable (log mode, allowing)"
+                    ),
                     {"reason": reason},
                 )
                 return ValidationResult(
@@ -1366,14 +1486,46 @@ class Veto:
             metadata.update(response.metadata)
 
         if response.decision == "require_approval":
+            approval_reason = response.reason or "Approval required"
             metadata_with_approval = dict(metadata)
             if response.approval_id:
                 metadata_with_approval["approval_id"] = response.approval_id
+            rule_id = self._extract_metadata_string(
+                metadata_with_approval, ["ruleId", "rule_id"]
+            )
+
+            if self._should_apply_log_mode_override(context):
+                if self._mode == "shadow":
+                    return self._apply_shadow_mode_override(
+                        context,
+                        "require_approval",
+                        approval_reason,
+                        metadata_with_approval if metadata_with_approval else None,
+                        rule_id,
+                    )
+
+                self._logger.warn(
+                    "Tool call would require approval (log mode)",
+                    {
+                        "tool": context.tool_name,
+                        "reason": approval_reason,
+                        "approval_id": response.approval_id,
+                        "rule_id": rule_id,
+                    },
+                )
+                return ValidationResult(
+                    decision="allow",
+                    reason=f"[LOG MODE] Would require approval: {approval_reason}",
+                    metadata={
+                        **metadata_with_approval,
+                        "blocked_in_strict_mode": True,
+                    },
+                )
 
             if self._is_guard_evaluation(context):
                 return ValidationResult(
                     decision="require_approval",
-                    reason=response.reason,
+                    reason=approval_reason,
                     metadata=metadata_with_approval if metadata_with_approval else None,
                 )
 
@@ -1446,7 +1598,7 @@ class Veto:
                         )
                         return ValidationResult(
                             decision="deny",
-                            reason=f"Approval {approval_data.status}: {response.reason}",
+                            reason=f"Approval {approval_data.status}: {approval_reason}",
                             metadata=metadata if metadata else None,
                         )
                 except ApprovalTimeoutError:
@@ -1473,6 +1625,16 @@ class Veto:
         else:
             # Cloud returned deny decision
             if self._should_apply_log_mode_override(context):
+                rule_id = self._extract_metadata_string(metadata, ["ruleId", "rule_id"])
+                if self._mode == "shadow":
+                    return self._apply_shadow_mode_override(
+                        context,
+                        "deny",
+                        response.reason,
+                        metadata if metadata else None,
+                        rule_id,
+                    )
+
                 # Log mode: log the block but allow the call
                 self._logger.warn(
                     "Tool call would be blocked (log mode)",
@@ -1900,6 +2062,7 @@ class Veto:
                 ),
                 severity=severity,
                 timestamp=context.timestamp.isoformat(),
+                shadow=True if self._mode == "shadow" else None,
             )
         )
 
@@ -1919,6 +2082,8 @@ class Veto:
             approval_id=self._extract_metadata_string(
                 metadata, ["approvalId", "approval_id"]
             ),
+            shadow=True if self._mode == "shadow" else None,
+            shadow_decision=decision if self._mode == "shadow" and decision != "allow" else None,
         )
 
     async def guard(

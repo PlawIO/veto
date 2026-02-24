@@ -375,7 +375,40 @@ export class Veto {
   }
 
   private shouldApplyLogOverride(source: 'guard' | 'interceptor'): boolean {
-    return this.mode === 'log' && source !== 'guard';
+    return (this.mode === 'log' || this.mode === 'shadow') && source !== 'guard';
+  }
+
+  private applyShadowOverride(
+    toolName: string,
+    decision: 'deny' | 'require_approval',
+    reason: string | undefined,
+    metadata?: Record<string, unknown>,
+    ruleId?: string
+  ): ValidationResult {
+    this.logger.warn(
+      decision === 'deny'
+        ? '[shadow] Tool call would be denied'
+        : '[shadow] Tool call would require approval',
+      {
+        tool: toolName,
+        decision,
+        reason,
+        ruleId,
+        shadow: true,
+      }
+    );
+
+    return {
+      decision,
+      reason,
+      metadata: {
+        ...(metadata ?? {}),
+        shadow: true,
+        shadow_decision: decision,
+        shadow_reason: reason,
+        shadow_rule_id: ruleId,
+      },
+    };
   }
 
   private toRuleMetadata(rule: Rule): Record<string, unknown> {
@@ -479,6 +512,16 @@ export class Veto {
 
       if (rule.action === 'require_approval') {
         if (this.shouldApplyLogOverride(source)) {
+          if (this.mode === 'shadow') {
+            return this.applyShadowOverride(
+              toolName,
+              'require_approval',
+              reason,
+              metadata,
+              rule.id
+            );
+          }
+
           return {
             decision: 'allow',
             reason: `[LOG MODE] Would require approval: ${reason}`,
@@ -506,6 +549,16 @@ export class Veto {
 
       if (rule.action === 'block') {
         if (this.shouldApplyLogOverride(source)) {
+          if (this.mode === 'shadow') {
+            return this.applyShadowOverride(
+              toolName,
+              'deny',
+              reason,
+              metadata,
+              rule.id
+            );
+          }
+
           return {
             decision: 'allow',
             reason: `[LOG MODE] Would block: ${reason}`,
@@ -585,6 +638,13 @@ export class Veto {
       ruleId,
       severity,
       approvalId,
+      shadow: this.mode === 'shadow' ? true : undefined,
+      shadowDecision: (
+        this.mode === 'shadow'
+        && (result.decision === 'deny' || result.decision === 'require_approval')
+      )
+        ? result.decision
+        : undefined,
     };
   }
 
@@ -594,11 +654,20 @@ export class Veto {
     durationMs: number
   ): void {
     if (!this.cloudClient) return;
+    const decision = result.decision === 'allow' ? 'allow' : 'deny';
+    const shadowContext = this.mode === 'shadow'
+      ? {
+          shadow: true,
+          shadow_decision: typeof result.metadata?.shadow_decision === 'string'
+            ? result.metadata.shadow_decision
+            : result.decision,
+        }
+      : {};
 
     this.cloudClient.logDecision({
       tool_name: validationContext.toolName,
       arguments: validationContext.arguments,
-      decision: result.decision === 'deny' ? 'deny' : 'allow',
+      decision,
       reason: result.reason,
       mode: 'deterministic',
       latency_ms: durationMs,
@@ -610,6 +679,7 @@ export class Veto {
         agent_id: validationContext.agentId,
         user_id: validationContext.userId,
         role: validationContext.role,
+        ...shadowContext,
       },
     });
   }
@@ -666,11 +736,13 @@ export class Veto {
         ruleId: guardResult.ruleId,
         severity: guardResult.severity,
         approvalId: guardResult.approvalId,
+        shadow: guardResult.shadow === true ? true : undefined,
+        shadow_decision: guardResult.shadowDecision,
       },
     };
 
     return {
-      allowed: validationResult.decision !== 'deny',
+      allowed: validationResult.decision !== 'deny' || guardResult.shadow === true,
       validationResult,
       originalCall: call,
       finalArguments: call.arguments,
@@ -743,7 +815,7 @@ export class Veto {
         role: this.role,
       });
 
-      if (guardResult.decision === 'deny') {
+      if (guardResult.decision === 'deny' && guardResult.shadow !== true) {
         if (reserved > 0) this.budgetTracker?.refund(reserved);
         throw new ToolCallDeniedError(toolName, callId, {
           decision: 'deny',
@@ -755,7 +827,7 @@ export class Veto {
         });
       }
 
-      if (guardResult.decision === 'require_approval') {
+      if (guardResult.decision === 'require_approval' && guardResult.shadow !== true) {
         if (reserved > 0) this.budgetTracker?.refund(reserved);
         await this.denyWithApprovalHook(
           toolName,

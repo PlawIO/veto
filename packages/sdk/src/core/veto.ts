@@ -64,8 +64,9 @@ import {
  * Veto operating mode.
  * - "strict": Block tool calls when validation fails
  * - "log": Only log validation failures, allow tool calls to proceed
+ * - "shadow": Compute real decisions but never block execution
  */
-export type VetoMode = 'strict' | 'log';
+export type VetoMode = 'strict' | 'log' | 'shadow';
 
 /**
  * Validation mode - how tool calls are validated.
@@ -113,6 +114,8 @@ export interface GuardResult {
   ruleId?: string;
   severity?: RuleSeverity;
   approvalId?: string;
+  shadow?: boolean;
+  shadowDecision?: string;
 }
 
 /**
@@ -359,6 +362,7 @@ export class Veto {
   // Configuration
   private readonly configDir: string;
   private readonly mode: VetoMode;
+  private readonly resolvedLogLevel: LogLevel;
   private readonly validationMode: ValidationMode;
   private readonly startupMode: StartupMode;
   private readonly apiBaseUrl: string;
@@ -413,8 +417,14 @@ export class Veto {
     this.rulesState = rules;
     this.browserMode = browserMode;
 
-    // Resolve mode (strict blocks, log only logs)
-    this.mode = options.mode ?? config.mode ?? 'strict';
+    const envMode = this.browserMode
+      ? undefined
+      : Veto.parseEnvMode(process.env.VETO_MODE);
+    this.mode = options.mode ?? config.mode ?? envMode ?? 'strict';
+    const envLogLevel = this.browserMode
+      ? undefined
+      : Veto.parseEnvLogLevel(process.env.VETO_LOG_LEVEL);
+    this.resolvedLogLevel = options.logLevel ?? envLogLevel ?? config.logging?.level ?? 'info';
 
     const explicitValidationMode = config.validation?.mode;
     const cloudApiKey = options.apiKey
@@ -740,6 +750,10 @@ export class Veto {
   static fromRules(options: VetoBrowserOptions): Veto {
     const logLevel = options.logLevel ?? 'warn';
     const logger = createLogger(logLevel);
+    const envMode = Veto.parseEnvMode(
+      typeof process === 'undefined' ? undefined : process.env.VETO_MODE
+    );
+    const resolvedMode = options.mode ?? envMode;
 
     const cloudClient = options.cloudClient ?? (
       options.apiKey
@@ -754,7 +768,7 @@ export class Veto {
     );
 
     const config: VetoConfigFile = {
-      mode: options.mode ?? 'strict',
+      mode: resolvedMode,
       validation: { mode: 'local' },
       cloud: options.apiKey || options.endpoint
         ? {
@@ -775,7 +789,7 @@ export class Veto {
     );
 
     const vetoOptions: VetoOptions = {
-      mode: options.mode,
+      mode: resolvedMode,
       logLevel,
       sessionId: options.sessionId,
       agentId: options.agentId,
@@ -812,6 +826,26 @@ export class Veto {
     veto.setRefreshInterval(options.refreshIntervalMs);
 
     return veto;
+  }
+
+  private static parseEnvMode(mode: string | undefined): VetoMode | undefined {
+    if (mode === 'strict' || mode === 'log' || mode === 'shadow') {
+      return mode;
+    }
+    return undefined;
+  }
+
+  private static parseEnvLogLevel(level: string | undefined): LogLevel | undefined {
+    if (
+      level === 'debug'
+      || level === 'info'
+      || level === 'warn'
+      || level === 'error'
+      || level === 'silent'
+    ) {
+      return level;
+    }
+    return undefined;
   }
 
   private static isSelfHostedBaseUrl(baseUrl?: string): boolean {
@@ -1050,7 +1084,75 @@ export class Veto {
   }
 
   private shouldApplyLogModeOverride(context: ValidationContext): boolean {
-    return this.mode === 'log' && !this.isGuardEvaluation(context);
+    return (this.mode === 'log' || this.mode === 'shadow') && !this.isGuardEvaluation(context);
+  }
+
+  private shouldEmitShadowStderr(): boolean {
+    return this.mode === 'shadow'
+      && this.resolvedLogLevel !== 'silent'
+      && typeof process !== 'undefined'
+      && typeof process.stderr?.write === 'function';
+  }
+
+  private formatShadowArguments(args: Record<string, unknown>): string {
+    try {
+      return JSON.stringify(args).slice(0, 80);
+    } catch {
+      return '[unserializable-arguments]';
+    }
+  }
+
+  private emitShadowStderr(
+    context: ValidationContext,
+    decision: 'deny' | 'require_approval',
+    ruleId?: string
+  ): void {
+    if (!this.shouldEmitShadowStderr()) return;
+
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const tag = decision === 'deny'
+      ? 'WOULD BE DENIED'
+      : 'WOULD REQUIRE APPROVAL';
+    const ruleInfo = ruleId ? ` by ${ruleId}` : '';
+    const truncatedArgs = this.formatShadowArguments(context.arguments);
+
+    process.stderr.write(
+      `[shadow] ${timestamp} ${context.toolName}(${truncatedArgs}) - ${tag}${ruleInfo}\n`
+    );
+  }
+
+  private applyShadowModeOverride(
+    context: ValidationContext,
+    originalDecision: 'deny' | 'require_approval',
+    originalReason: string | undefined,
+    metadata: Record<string, unknown> | undefined,
+    ruleId?: string
+  ): ValidationResult {
+    this.logger.warn(
+      originalDecision === 'deny'
+        ? '[shadow] Tool call would be denied'
+        : '[shadow] Tool call would require approval',
+      {
+        tool: context.toolName,
+        decision: originalDecision,
+        reason: originalReason,
+        ruleId,
+        shadow: true,
+      }
+    );
+    this.emitShadowStderr(context, originalDecision, ruleId);
+
+    return {
+      decision: originalDecision,
+      reason: originalReason,
+      metadata: {
+        ...(metadata ?? {}),
+        shadow: true,
+        shadow_decision: originalDecision,
+        shadow_reason: originalReason,
+        shadow_rule_id: ruleId,
+      },
+    };
   }
 
   private resolveSessionId(context: ValidationContext): string | undefined {
@@ -1209,6 +1311,9 @@ export class Veto {
       should_block_weight: response.should_block_weight,
       matched_rules: response.matched_rules,
     };
+    const matchedRuleId = Array.isArray(response.matched_rules) && response.matched_rules.length > 0
+      ? String(response.matched_rules[0])
+      : undefined;
 
     if (response.decision === 'pass') {
       this.logger.debug('API allowed tool call', {
@@ -1224,6 +1329,16 @@ export class Veto {
     } else {
       // API returned block decision
       if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            response.reasoning,
+            metadata,
+            matchedRuleId
+          );
+        }
+
         // Log mode: log the block but allow the call
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
@@ -1258,7 +1373,12 @@ export class Veto {
    */
   private handleAPIFailure(reason: string, context: ValidationContext): ValidationResult {
     if (this.shouldApplyLogModeOverride(context)) {
-      this.logger.warn('API unavailable (log mode, allowing)', { reason });
+      this.logger.warn(
+        this.mode === 'shadow'
+          ? 'API unavailable (shadow mode, allowing)'
+          : 'API unavailable (log mode, allowing)',
+        { reason }
+      );
       return {
         decision: 'allow',
         reason: `API unavailable: ${reason}`,
@@ -1298,6 +1418,16 @@ export class Veto {
 
       if (rule.action === 'require_approval') {
         if (this.shouldApplyLogModeOverride(context)) {
+          if (this.mode === 'shadow') {
+            return this.applyShadowModeOverride(
+              context,
+              'require_approval',
+              reason,
+              metadata,
+              rule.id
+            );
+          }
+
           this.logger.warn('Tool call would require approval locally (log mode)', {
             tool: context.toolName,
             ruleId: rule.id,
@@ -1327,6 +1457,16 @@ export class Veto {
 
       if (rule.action === 'block') {
         if (this.shouldApplyLogModeOverride(context)) {
+          if (this.mode === 'shadow') {
+            return this.applyShadowModeOverride(
+              context,
+              'deny',
+              reason,
+              metadata,
+              rule.id
+            );
+          }
+
           this.logger.warn('Tool call would be blocked locally (log mode)', {
             tool: context.toolName,
             ruleId: rule.id,
@@ -1614,6 +1754,9 @@ export class Veto {
       block_weight: response.block_weight,
       matched_rules: response.matched_rules,
     };
+    const matchedRuleId = Array.isArray(response.matched_rules) && response.matched_rules.length > 0
+      ? String(response.matched_rules[0])
+      : undefined;
 
     if (response.decision === 'pass') {
       this.logger.debug('Kernel allowed tool call', {
@@ -1629,6 +1772,16 @@ export class Veto {
     } else {
       // Kernel returned block decision
       if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            response.reasoning,
+            metadata,
+            matchedRuleId
+          );
+        }
+
         // Log mode: log the block but allow the call
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
@@ -1666,7 +1819,12 @@ export class Veto {
     context: ValidationContext
   ): ValidationResult {
     if (this.shouldApplyLogModeOverride(context)) {
-      this.logger.warn('Kernel unavailable (log mode, allowing)', { reason });
+      this.logger.warn(
+        this.mode === 'shadow'
+          ? 'Kernel unavailable (shadow mode, allowing)'
+          : 'Kernel unavailable (log mode, allowing)',
+        { reason }
+      );
       return {
         decision: 'allow',
         reason: `Kernel unavailable: ${reason}`,
@@ -1752,6 +1910,9 @@ export class Veto {
       block_weight: response.block_weight,
       matched_rules: response.matched_rules,
     };
+    const matchedRuleId = Array.isArray(response.matched_rules) && response.matched_rules.length > 0
+      ? String(response.matched_rules[0])
+      : undefined;
 
     if (response.decision === 'pass') {
       this.logger.debug('Custom provider allowed tool call', {
@@ -1767,6 +1928,16 @@ export class Veto {
     } else {
       // Custom provider returned block decision
       if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            response.reasoning,
+            metadata,
+            matchedRuleId
+          );
+        }
+
         // Log mode: log the block but allow the call
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
@@ -1804,7 +1975,12 @@ export class Veto {
     context: ValidationContext
   ): ValidationResult {
     if (this.shouldApplyLogModeOverride(context)) {
-      this.logger.warn('Custom provider unavailable (log mode, allowing)', { reason });
+      this.logger.warn(
+        this.mode === 'shadow'
+          ? 'Custom provider unavailable (shadow mode, allowing)'
+          : 'Custom provider unavailable (log mode, allowing)',
+        { reason }
+      );
       return {
         decision: 'allow',
         reason: `Custom provider unavailable: ${reason}`,
@@ -1857,6 +2033,12 @@ export class Veto {
       context.arguments,
       policy.constraints
     );
+    const shadowContext = this.mode === 'shadow'
+      ? {
+          shadow: true,
+          shadow_decision: result.decision,
+        }
+      : {};
 
     this.getCloudClient().logDecision({
       tool_name: context.toolName,
@@ -1871,6 +2053,7 @@ export class Veto {
         agent_id: this.resolveAgentId(context),
         user_id: this.resolveUserId(context),
         role: this.resolveRole(context),
+        ...shadowContext,
       },
     });
 
@@ -1896,6 +2079,15 @@ export class Veto {
       }
 
       if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            localResult.reason,
+            { source: 'client' }
+          );
+        }
+
         this.logger.warn('Tool call would be blocked locally (log mode)', {
           tool: context.toolName,
           reason: localResult.reason,
@@ -1949,14 +2141,45 @@ export class Veto {
 
       // Handle require_approval decision
       if (response.decision === 'require_approval') {
+        const approvalReason = response.reason ?? 'Approval required';
         const metadataWithApproval = response.approval_id
           ? { ...metadata, approvalId: response.approval_id }
           : metadata;
+        const ruleId = this.extractMetadataString(metadataWithApproval, ['ruleId', 'rule_id']);
+
+        if (this.shouldApplyLogModeOverride(context)) {
+          if (this.mode === 'shadow') {
+            return this.applyShadowModeOverride(
+              context,
+              'require_approval',
+              approvalReason,
+              Object.keys(metadataWithApproval).length > 0
+                ? metadataWithApproval
+                : undefined,
+              ruleId
+            );
+          }
+
+          this.logger.warn('Tool call would require approval (log mode)', {
+            tool: context.toolName,
+            reason: approvalReason,
+            approvalId: response.approval_id,
+            ruleId,
+          });
+          return {
+            decision: 'allow',
+            reason: `[LOG MODE] Would require approval: ${approvalReason}`,
+            metadata: {
+              ...metadataWithApproval,
+              blocked_in_strict_mode: true,
+            },
+          };
+        }
 
         if (this.isGuardEvaluation(context)) {
           return {
             decision: 'require_approval',
-            reason: response.reason,
+            reason: approvalReason,
             metadata: Object.keys(metadataWithApproval).length > 0
               ? metadataWithApproval
               : undefined,
@@ -1967,7 +2190,7 @@ export class Veto {
           return this.handleApprovalFlow(
             context,
             response.approval_id,
-            response.reason,
+            approvalReason,
             Object.keys(metadataWithApproval).length > 0
               ? metadataWithApproval
               : undefined
@@ -1988,6 +2211,17 @@ export class Veto {
 
       // Cloud returned deny
       if (this.shouldApplyLogModeOverride(context)) {
+        const ruleId = this.extractMetadataString(metadata, ['ruleId', 'rule_id']);
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            response.reason,
+            Object.keys(metadata).length > 0 ? metadata : undefined,
+            ruleId
+          );
+        }
+
         this.logger.warn('Tool call would be blocked (log mode)', {
           tool: context.toolName,
           reason: response.reason,
@@ -2012,7 +2246,9 @@ export class Veto {
       const reason = error instanceof Error ? error.message : String(error);
 
       if (this.shouldApplyLogModeOverride(context)) {
-        this.logger.warn('Cloud unavailable (log mode, allowing)', {
+        this.logger.warn(this.mode === 'shadow'
+          ? 'Cloud unavailable (shadow mode, allowing)'
+          : 'Cloud unavailable (log mode, allowing)', {
           reason,
         });
         return {
@@ -2406,7 +2642,14 @@ export class Veto {
   ): void {
     if (!this.browserMode || !this.cloudClient) return;
 
-    const decision = result.decision === 'deny' ? 'deny' : 'allow';
+    const decision = result.decision === 'allow' ? 'allow' : 'deny';
+    const shadowContext = this.mode === 'shadow'
+      ? {
+          shadow: true,
+          shadow_decision: this.extractMetadataString(result.metadata, ['shadow_decision'])
+            ?? result.decision,
+        }
+      : {};
 
     this.cloudClient.logDecision({
       tool_name: context.toolName,
@@ -2423,6 +2666,7 @@ export class Veto {
         agent_id: this.resolveAgentId(context),
         user_id: this.resolveUserId(context),
         role: this.resolveRole(context),
+        ...shadowContext,
       },
     });
   }
@@ -2489,6 +2733,7 @@ export class Veto {
         ? severityFromMetadata ?? 'high'
         : severityFromMetadata,
       timestamp: context.timestamp.toISOString(),
+      shadow: this.mode === 'shadow' ? true : undefined,
     };
 
     this.eventWebhookEmitter.emit(event);
@@ -2511,6 +2756,10 @@ export class Veto {
       ruleId,
       severity,
       approvalId,
+      shadow: this.mode === 'shadow' ? true : undefined,
+      shadowDecision: (this.mode === 'shadow' && decision !== 'allow')
+        ? decision
+        : undefined,
     };
   }
 
@@ -2885,7 +3134,7 @@ export class Veto {
   /**
    * Run a standalone guard check without wrapping or executing a tool.
    *
-   * Unlike interceptor execution, this returns raw validation outcomes in log mode.
+   * Unlike interceptor execution, this returns raw validation outcomes in log/shadow mode.
    */
   async guard(
     toolName: string,

@@ -154,6 +154,10 @@ class Interceptor:
         # Run validation
         aggregated_result = await self._validation_engine.validate(context)
         validation_result = aggregated_result.final_result
+        is_shadow_override = bool(
+            validation_result.metadata
+            and validation_result.metadata.get("shadow") is True
+        )
 
         # Determine final arguments (may be modified by validators)
         final_arguments = (
@@ -188,7 +192,7 @@ class Interceptor:
                 )
 
         # Handle denial
-        if validation_result.decision == "deny":
+        if validation_result.decision == "deny" and not is_shadow_override:
             if self._on_denied:
                 try:
                     result = self._on_denied(context, validation_result)
@@ -211,6 +215,15 @@ class Interceptor:
                     "reason": validation_result.reason,
                 },
             )
+        elif validation_result.decision == "deny" and is_shadow_override:
+            self._logger.warn(
+                "Tool call would be denied in shadow mode (continuing)",
+                {
+                    "tool_name": call.name,
+                    "call_id": call_id,
+                    "reason": validation_result.reason,
+                },
+            )
         else:
             self._logger.info(
                 "Tool call allowed",
@@ -223,7 +236,7 @@ class Interceptor:
             )
 
         return InterceptionResult(
-            allowed=validation_result.decision != "deny",
+            allowed=validation_result.decision != "deny" or is_shadow_override,
             validation_result=validation_result,
             aggregated_result=aggregated_result,
             original_call=call,
