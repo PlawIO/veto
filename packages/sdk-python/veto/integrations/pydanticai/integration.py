@@ -59,7 +59,7 @@ def _build_args_dict(handler: Callable[..., Awaitable[Any]], *args: Any, **kwarg
 
 async def _guard_or_raise(veto: "Veto", tool_name: str, args_dict: dict[str, Any]) -> None:
     guard_result = await veto.guard(tool_name, args_dict)
-    if guard_result.decision == "deny":
+    if guard_result.decision == "deny" and guard_result.shadow is not True:
         raise ToolCallDeniedError(
             tool_name,
             generate_tool_call_id(),

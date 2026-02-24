@@ -134,16 +134,24 @@ describe('protect', () => {
     await expect(wrapped[0].handler({ amount: 2000 })).resolves.toBe('executed');
   });
 
-  it('treats shadow mode as log mode alias', async () => {
-    const tool = createTool('transfer_funds', 'executed-shadow');
+  it('passes shadow mode through to Veto without aliasing', async () => {
+    const tool = createTool('transfer_funds');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
 
-    const wrapped = await protect([tool], {
-      rules: [createAmountBlockRule('transfer_funds')],
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    await protect([tool], {
+      rules: [],
       mode: 'shadow',
       logLevel: 'silent',
     });
 
-    await expect(wrapped[0].handler({ amount: 2000 })).resolves.toBe('executed-shadow');
+    expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'shadow',
+    }));
   });
 
   it('auto-detects financial pack for transfer_funds', async () => {

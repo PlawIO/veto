@@ -11,11 +11,13 @@ function createMockVeto(
   outputDecision: 'allow' | 'block' = 'allow',
   outputReason?: string,
   matchedRuleIds: string[] = [],
+  guardShadow = false,
 ) {
   return {
     guard: vi.fn().mockResolvedValue({
       decision: guardDecision,
       reason: guardReason,
+      shadow: guardShadow ? true : undefined,
     }),
     validateOutput: vi.fn().mockReturnValue({
       decision: outputDecision,
@@ -49,6 +51,15 @@ describe('OpenAI Agents Integration', () => {
 
     expect(result).toEqual({ tripwireTriggered: false });
     expect(veto.guard).toHaveBeenCalledWith('agent_input', { input: 'Summarize this email' });
+  });
+
+  it('input guardrail does not trip on shadow deny', async () => {
+    const veto = createMockVeto('deny', 'Would block in strict', 'allow', undefined, [], true);
+    const guardrail = createVetoInputGuardrail(veto);
+
+    const result = await guardrail.guardrailFunction({}, {}, 'Potentially risky');
+
+    expect(result).toEqual({ tripwireTriggered: false });
   });
 
   it('output guardrail trips when validateOutput blocks and includes rule details', async () => {
@@ -101,6 +112,24 @@ describe('OpenAI Agents Integration', () => {
       },
     });
     expect(veto.guard).toHaveBeenCalledWith('delete_file', { path: '/etc/passwd' });
+  });
+
+  it('tool input guardrail allows shadow denies', async () => {
+    const veto = createMockVeto('deny', 'Would block in strict', 'allow', undefined, [], true);
+    const [toolInputGuardrail] = createVetoToolGuardrails(veto);
+
+    const result = await toolInputGuardrail.guardrailFunction({
+      context: {
+        tool_name: 'delete_file',
+        tool_arguments: '{"path":"/etc/passwd"}',
+      },
+    });
+
+    expect(result).toEqual({
+      behavior: {
+        type: 'allow',
+      },
+    });
   });
 
   it('tool output guardrail rejects blocked output', async () => {

@@ -34,13 +34,19 @@ def _install_fake_pydanticai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "pydantic_ai", pydantic_ai_module)
 
 
-def _make_guard_result(decision: str, reason: str | None = None) -> SimpleNamespace:
+def _make_guard_result(
+    decision: str,
+    reason: str | None = None,
+    *,
+    shadow: bool = False,
+) -> SimpleNamespace:
     return SimpleNamespace(
         decision=decision,
         reason=reason,
         rule_id=None,
         severity=None,
         approval_id=None,
+        shadow=shadow if shadow else None,
     )
 
 
@@ -111,6 +117,33 @@ class TestPydanticAIIntegration:
             "transfer_funds",
             {"amount": 5000.0, "to_account": "ACC-001"},
         )
+
+    async def test_shadow_denied_pydanticai_tool_call_does_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_pydanticai(monkeypatch)
+        integration = _load_pydanticai_integration()
+
+        async def transfer_funds(amount: float, to_account: str) -> str:
+            return f"Transferred ${amount} to {to_account}"
+
+        veto = SimpleNamespace(
+            guard=AsyncMock(
+                return_value=_make_guard_result(
+                    "deny",
+                    "Would block in strict",
+                    shadow=True,
+                )
+            )
+        )
+        wrapped_handler = integration.wrap_pydanticai_tool(
+            veto,
+            "transfer_funds",
+            transfer_funds,
+        )
+
+        result = await wrapped_handler(amount=5000.0, to_account="ACC-001")
+        assert result == "Transferred $5000.0 to ACC-001"
 
     async def test_allowed_pydanticai_tool_call_returns_handler_result(
         self, monkeypatch: pytest.MonkeyPatch

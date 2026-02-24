@@ -94,6 +94,7 @@ def _make_mock_veto(
     *,
     guard_decision: str = "allow",
     guard_reason: str | None = None,
+    guard_shadow: bool = False,
     output_decision: str = "allow",
     output_reason: str | None = None,
     matched_rule_ids: list[str] | None = None,
@@ -103,6 +104,7 @@ def _make_mock_veto(
             return_value=SimpleNamespace(
                 decision=guard_decision,
                 reason=guard_reason,
+                shadow=guard_shadow if guard_shadow else None,
             )
         ),
         validate_output=MagicMock(
@@ -151,6 +153,22 @@ class TestOpenAIAgentsIntegration:
             "agent_input",
             {"input": "Summarize this note"},
         )
+
+    async def test_input_guardrail_allows_shadow_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_openai_agents(monkeypatch)
+        integration = _load_openai_agents_integration()
+        veto = _make_mock_veto(
+            guard_decision="deny",
+            guard_reason="Would be blocked in strict",
+            guard_shadow=True,
+        )
+
+        guardrail = integration.create_veto_input_guardrail(veto)
+        result = await guardrail.guardrail_function(None, None, "Potentially risky")
+
+        assert result.tripwire_triggered is False
 
     async def test_output_guardrail_trips_on_blocked_output_with_rule_details(
         self, monkeypatch: pytest.MonkeyPatch
@@ -214,6 +232,28 @@ class TestOpenAIAgentsIntegration:
             "delete_file",
             {"path": "/etc/passwd"},
         )
+
+    async def test_tool_input_guardrail_allows_shadow_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_fake_openai_agents(monkeypatch)
+        integration = _load_openai_agents_integration()
+        veto = _make_mock_veto(
+            guard_decision="deny",
+            guard_reason="Would be blocked in strict",
+            guard_shadow=True,
+        )
+
+        tool_input_guardrail, _ = integration.create_veto_tool_guardrails(veto)
+        data = SimpleNamespace(
+            context=SimpleNamespace(
+                tool_name="delete_file",
+                tool_arguments='{"path":"/etc/passwd"}',
+            )
+        )
+        result = await tool_input_guardrail.guardrail_function(data)
+
+        assert result.behavior == {"type": "allow"}
 
     async def test_tool_output_guardrail_rejects_blocked_output(
         self, monkeypatch: pytest.MonkeyPatch

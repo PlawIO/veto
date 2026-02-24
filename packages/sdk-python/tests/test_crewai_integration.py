@@ -46,13 +46,19 @@ def _install_fake_crewai(monkeypatch: pytest.MonkeyPatch) -> type:
     return BaseTool
 
 
-def _make_guard_result(decision: str, reason: str | None = None) -> SimpleNamespace:
+def _make_guard_result(
+    decision: str,
+    reason: str | None = None,
+    *,
+    shadow: bool = False,
+) -> SimpleNamespace:
     return SimpleNamespace(
         decision=decision,
         reason=reason,
         rule_id=None,
         severity=None,
         approval_id=None,
+        shadow=shadow if shadow else None,
     )
 
 
@@ -129,6 +135,36 @@ class TestCrewAIIntegration:
             "transfer_funds",
             {"amount": 5000.0, "to_account": "ACC-001"},
         )
+
+    async def test_shadow_denied_crewai_tool_call_does_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        BaseTool = _install_fake_crewai(monkeypatch)
+        integration = _load_crewai_integration()
+
+        class TransferArgs:
+            model_fields = {"amount": object(), "to_account": object()}
+
+        class TransferTool(BaseTool):
+            name = "transfer_funds"
+            args_schema = TransferArgs
+
+            def _run(self, amount: float, to_account: str) -> str:
+                return f"Transferred ${amount} to {to_account}"
+
+        veto = SimpleNamespace(
+            guard=AsyncMock(
+                return_value=_make_guard_result(
+                    "deny",
+                    "Would block in strict",
+                    shadow=True,
+                )
+            )
+        )
+        wrapped_tool = integration.wrap_crewai_tools(veto, [TransferTool()])[0]
+
+        result = wrapped_tool._run(5000.0, "ACC-001")
+        assert result == "Transferred $5000.0 to ACC-001"
 
     async def test_allowed_crewai_tool_call_executes_run_and_returns_result(
         self, monkeypatch: pytest.MonkeyPatch

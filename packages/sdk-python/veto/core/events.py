@@ -39,6 +39,7 @@ class WebhookEvent:
     rule_id: Optional[str]
     severity: Optional[WebhookSeverity]
     timestamp: str
+    shadow: Optional[bool] = None
 
 
 _VALID_EVENT_TYPES: tuple[WebhookEventType, ...] = (
@@ -140,7 +141,7 @@ def parse_event_webhook_config(
 
 
 def format_generic_payload(event: WebhookEvent) -> dict[str, Any]:
-    return {
+    payload = {
         "event_type": event.event_type,
         "tool_name": event.tool_name,
         "arguments": event.arguments,
@@ -150,6 +151,9 @@ def format_generic_payload(event: WebhookEvent) -> dict[str, Any]:
         "severity": event.severity,
         "timestamp": event.timestamp,
     }
+    if event.shadow is True:
+        payload["shadow"] = True
+    return payload
 
 
 def format_slack_payload(event: WebhookEvent) -> dict[str, Any]:
@@ -253,6 +257,11 @@ def format_cef_payload(event: WebhookEvent) -> str:
             f"severity={_escape_cef(event.severity or '')}",
             f"timestamp={_escape_cef(event.timestamp)}",
             f"arguments={_escape_cef(json.dumps(event.arguments))}",
+            *(
+                ["shadow=true"]
+                if event.shadow is True
+                else []
+            ),
         ]
     )
     return "|".join(

@@ -14,6 +14,7 @@ export interface VetoWebhookEvent {
   ruleId?: string;
   severity?: RuleSeverity;
   timestamp: string;
+  shadow?: boolean;
 }
 
 export interface EventWebhookConfig {
@@ -140,7 +141,7 @@ export function resolveEventWebhookConfig(
 export function formatGenericPayload(
   event: VetoWebhookEvent
 ): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     event_type: event.eventType,
     tool_name: event.toolName,
     arguments: event.arguments,
@@ -150,6 +151,12 @@ export function formatGenericPayload(
     severity: event.severity ?? null,
     timestamp: event.timestamp,
   };
+
+  if (event.shadow === true) {
+    payload.shadow = true;
+  }
+
+  return payload;
 }
 
 export function formatSlackPayload(
@@ -227,6 +234,7 @@ export function formatCefPayload(event: VetoWebhookEvent): string {
     `severity=${escapeCef(event.severity ?? '')}`,
     `timestamp=${escapeCef(event.timestamp)}`,
     `arguments=${escapeCef(JSON.stringify(event.arguments))}`,
+    ...(event.shadow === true ? ['shadow=true'] : []),
   ].join(' ');
 
   return [

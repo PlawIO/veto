@@ -101,7 +101,7 @@ def create_veto_input_guardrail(veto: "Veto", name: Optional[str] = None) -> Any
         _ = agent
         result = await veto.guard("agent_input", {"input": input_data})
 
-        if result.decision == "deny":
+        if result.decision == "deny" and result.shadow is not True:
             return _build_guardrail_output(
                 tripwire_triggered=True,
                 output_info={"reason": result.reason},
@@ -160,7 +160,7 @@ def create_veto_tool_guardrails(
         args = _parse_tool_arguments(data)
         result = await veto.guard(tool_name, args)
 
-        if result.decision == "deny":
+        if result.decision == "deny" and result.shadow is not True:
             reason = result.reason or "Policy violation"
             return ToolGuardrailFunctionOutput.reject_content(reason)
 

@@ -7,7 +7,7 @@ import type {
 import type { OutputRule, Rule, RuleSeverity } from '../rules/types.js';
 import type { BudgetConfig, ToolCostMap } from '../core/budget.js';
 
-export type VetoMode = 'strict' | 'log';
+export type VetoMode = 'strict' | 'log' | 'shadow';
 
 export interface GuardContext {
   sessionId?: string;
@@ -22,6 +22,8 @@ export interface GuardResult {
   ruleId?: string;
   severity?: RuleSeverity;
   approvalId?: string;
+  shadow?: boolean;
+  shadowDecision?: string;
 }
 
 export interface BrowserCloudPoliciesResponse {
