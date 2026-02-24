@@ -6,6 +6,7 @@ import type { StopCondition } from './learn.js';
 import { compile } from './compile.js';
 import { test } from './test.js';
 import { scan } from './scan.js';
+import { diff } from './diff.js';
 import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -27,6 +28,7 @@ Commands:
   compile       Compile natural language policies to deterministic YAML rules
   test          Run adversarial policy gap analysis
   scan          Audit tool coverage against loaded rules
+  diff          Compare policy snapshots and optional log impact replay
   version       Show version information
   help          Show this help message
 
@@ -59,6 +61,13 @@ Scan Options:
   --suggest            Include inline YAML starter snippets for uncovered tools
   --format <fmt>       Output format: text or json (default: text)
 
+Diff Options:
+  <policy-path>        Compare working file with HEAD snapshot (git mode)
+  --old <path>         Explicit old policy file or directory
+  --new <path>         Explicit new policy file or directory
+  --log <path>         JSONL tool-call log for deterministic impact replay
+  --format <fmt>       Output format: text or json (default: text)
+
 Examples:
   veto init                          Initialize Veto in current directory
   veto init --pack coding-agent      Initialize with extends: "@veto/coding-agent"
@@ -73,6 +82,9 @@ Examples:
   veto scan                          Audit tool coverage in current project
   veto scan --suggest                Show inline YAML snippets for uncovered tools
   veto scan --fail-uncovered         Fail CI when uncovered tools are detected
+  veto diff financial.yaml           Compare veto/rules/financial.yaml vs HEAD
+  veto diff --old v1 --new v2        Compare two policy directories
+  veto diff financial.yaml --log calls.jsonl
 `);
 }
 
@@ -82,6 +94,7 @@ function printVersion(): void {
 
 interface ParsedArgs {
   command: string;
+  positionals: string[];
   flags: Record<string, boolean>;
   values: Record<string, string>;
 }
@@ -89,12 +102,14 @@ interface ParsedArgs {
 function parseArgs(args: string[]): ParsedArgs {
   const flags: Record<string, boolean> = {};
   const values: Record<string, string> = {};
+  const positionals: string[] = [];
   let command = '';
 
   const valueFlags = new Set([
     'runs', 'duration', 'output', 'margin',
     'input', 'file', 'provider', 'model',
     'policy', 'format', 'pack',
+    'old', 'new', 'log',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -118,10 +133,12 @@ function parseArgs(args: string[]): ParsedArgs {
       }
     } else if (!command) {
       command = arg;
+    } else {
+      positionals.push(arg);
     }
   }
 
-  return { command, flags, values };
+  return { command, positionals, flags, values };
 }
 
 async function runLearn(flags: Record<string, boolean>, values: Record<string, string>): Promise<void> {
@@ -228,7 +245,7 @@ async function runLearn(flags: Record<string, boolean>, values: Record<string, s
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const { command, flags, values } = parseArgs(args);
+  const { command, positionals, flags, values } = parseArgs(args);
 
   if (flags['help'] || command === 'help') {
     printHelp();
@@ -297,6 +314,24 @@ async function main(): Promise<void> {
         format: (values['format'] as 'text' | 'json') ?? undefined,
       });
       process.exit(scanResult.success ? 0 : 1);
+      break;
+    }
+
+    case 'diff': {
+      if (positionals.length > 1) {
+        console.error('Error: diff command accepts at most one <policy-path> positional argument');
+        process.exit(1);
+      }
+
+      const diffResult = await diff({
+        quiet: flags['quiet'],
+        policyPath: positionals[0],
+        old: values['old'],
+        new: values['new'],
+        log: values['log'],
+        format: (values['format'] as 'text' | 'json') ?? undefined,
+      });
+      process.exit(diffResult.success ? 0 : 1);
       break;
     }
 

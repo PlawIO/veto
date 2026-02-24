@@ -175,14 +175,15 @@ const csvAudit = veto.exportDecisions("csv");
 
 ## CLI Commands
 
-| Command            | Description                                      |
-| ------------------ | ------------------------------------------------ |
-| `npx veto init`    | Initialize Veto in current directory             |
-| `npx veto learn`   | Observe tool calls and generate starter policies |
-| `npx veto compile` | Compile natural-language policy text into YAML   |
-| `npx veto test`    | Run adversarial policy gap analysis              |
-| `npx veto scan`    | Audit discovered tools vs loaded rule coverage   |
-| `npx veto version` | Show version                                     |
+| Command            | Description                                           |
+| ------------------ | ----------------------------------------------------- |
+| `npx veto init`    | Initialize Veto in current directory                  |
+| `npx veto learn`   | Observe tool calls and generate starter policies      |
+| `npx veto compile` | Compile natural-language policy text into YAML        |
+| `npx veto test`    | Run adversarial policy gap analysis                   |
+| `npx veto scan`    | Audit discovered tools vs loaded rule coverage        |
+| `npx veto diff`    | Diff policy snapshots and replay deterministic impact |
+| `npx veto version` | Show version                                          |
 
 Coverage audit examples:
 
@@ -198,6 +199,22 @@ npx veto scan --suggest
 
 # Machine-readable output for CI pipelines
 npx veto scan --format json
+```
+
+Policy diff examples:
+
+```bash
+# Compare working rule file against HEAD (git snapshot)
+npx veto diff financial.yaml
+
+# Compare two explicit snapshots (file or directory mode)
+npx veto diff --old ./rules-v1 --new ./rules-v2
+
+# Include deterministic replay impact from historical calls
+npx veto diff financial.yaml --log calls.jsonl
+
+# Machine-readable structural + impact report
+npx veto diff --old ./rules-v1 --new ./rules-v2 --log calls.jsonl --format json
 ```
 
 ## General Rule YAML Format
