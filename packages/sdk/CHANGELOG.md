@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.12.0
+
+### Minor Changes
+
+- [#129](https://github.com/VulnZap/veto/pull/129) [`4ccb94c`](https://github.com/VulnZap/veto/commit/4ccb94cd5bcb3a873ae9656eb1a9c029eb008b82) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add true `shadow` mode to TypeScript and Python SDKs so wrapped calls never block while preserving real decisions and emitting shadow telemetry.
+
 ## 1.11.0
 
 ### Minor Changes
