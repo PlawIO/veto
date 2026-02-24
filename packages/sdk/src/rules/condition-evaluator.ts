@@ -311,6 +311,42 @@ function evaluateTimeWindow(
   };
 }
 
+function getLengthComparableValue(value: unknown): number | null {
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+
+  if (value instanceof Set || value instanceof Map) {
+    return value.size;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      return 0;
+    }
+
+    if (value.includes(',') || value.includes(';')) {
+      return value
+        .split(/[;,]/)
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+        .length;
+    }
+
+    return 1;
+  }
+
+  if (value && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype || prototype === null) {
+      return Object.keys(value as Record<string, unknown>).length;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Evaluate a single legacy field/operator/value condition.
  */
@@ -355,6 +391,19 @@ export function evaluateLegacyCondition(
       return Number(fieldValue) > Number(expected);
     case 'less_than':
       return Number(fieldValue) < Number(expected);
+    case 'length_greater_than': {
+      const fieldLength = getLengthComparableValue(fieldValue);
+      if (fieldLength === null) {
+        return false;
+      }
+
+      const expectedLength = Number(expected);
+      if (Number.isNaN(expectedLength)) {
+        return false;
+      }
+
+      return fieldLength > expectedLength;
+    }
     case 'in':
       return Array.isArray(expected) && expected.includes(fieldValue);
     case 'not_in':

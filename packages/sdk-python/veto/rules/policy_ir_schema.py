@@ -318,6 +318,7 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 "matches",
                 "greater_than",
                 "less_than",
+                "length_greater_than",
                 "in",
                 "not_in",
                 "outside_hours",

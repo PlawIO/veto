@@ -42,20 +42,110 @@ interface ToolPackHeuristic {
 
 const TOOL_PACK_HEURISTICS: readonly ToolPackHeuristic[] = [
   {
-    patterns: ['transfer', 'payment', 'balance', 'withdraw', 'deposit', 'invoice'],
+    patterns: [
+      'transfer',
+      'payment',
+      'balance',
+      'withdraw',
+      'deposit',
+      'invoice',
+      'refund',
+      'charge',
+      'payout',
+      'wire',
+      'bank',
+      'fund',
+      'money',
+      'wallet',
+    ],
     pack: '@veto/financial',
   },
   {
-    patterns: ['navigate', 'click', 'goto', 'browse', 'scroll', 'type_text'],
+    patterns: [
+      'navigate',
+      'click',
+      'goto',
+      'browse',
+      'scroll',
+      'type_text',
+      'fill_form',
+      'screenshot',
+      'open_url',
+      'submit_form',
+      'page',
+      'tab',
+      'browser',
+    ],
     pack: '@veto/browser-automation',
   },
   {
-    patterns: ['query', 'sql', 'database', 'select', 'insert', 'table'],
+    patterns: [
+      'query',
+      'sql',
+      'database',
+      'select',
+      'insert',
+      'table',
+      'fetch_record',
+      'read_record',
+      'db',
+      'collection',
+      'document',
+      'find',
+      'aggregate',
+    ],
     pack: '@veto/data-access',
   },
   {
-    patterns: ['exec', 'shell', 'command', 'terminal', 'bash', 'run_code'],
+    patterns: [
+      'exec',
+      'shell',
+      'command',
+      'terminal',
+      'bash',
+      'run_code',
+      'write_file',
+      'edit_file',
+      'read_file',
+      'delete_file',
+      'mkdir',
+      'code',
+      'script',
+    ],
     pack: '@veto/coding-agent',
+  },
+  {
+    patterns: [
+      'email',
+      'send_email',
+      'send_message',
+      'notify',
+      'sms',
+      'slack',
+      'message',
+      'mail',
+      'notification',
+      'chat',
+      'reply',
+    ],
+    pack: '@veto/communication',
+  },
+  {
+    patterns: [
+      'deploy',
+      'publish',
+      'release',
+      'push',
+      'rollback',
+      'provision',
+      'terraform',
+      'kubernetes',
+      'k8s',
+      'docker',
+      'helm',
+      'ci_cd',
+    ],
+    pack: '@veto/deployment',
   },
 ];
 
@@ -273,16 +363,43 @@ function createAllowAllInstance(options: ProtectOptions): Veto {
   });
 }
 
+function shouldEmitAutoApplyMessage(logLevel: LogLevel | undefined): boolean {
+  return logLevel !== 'silent';
+}
+
+function emitAutoAppliedPackMessage<T extends { name: string }>(
+  tools: readonly T[],
+  decision: ProtectInitDecision,
+  logLevel: LogLevel | undefined
+): void {
+  if (!shouldEmitAutoApplyMessage(logLevel)) {
+    return;
+  }
+
+  if (decision.source !== 'heuristic' || !decision.inlineRules || decision.inlineRules.packs.length === 0) {
+    return;
+  }
+
+  process.stderr.write(
+    `[veto] Auto-applied policy packs: ${decision.inlineRules.packs.join(', ')}\n`
+  );
+  process.stderr.write(
+    `[veto] ${decision.inlineRules.rules.length} rules active for ${tools.length} tools. Run 'npx veto test' for details.\n`
+  );
+}
+
 async function initializeVeto<T extends { name: string }>(tools: readonly T[], options: ProtectOptions): Promise<{
   instance: Veto;
   cacheKey: string;
+  decision: ProtectInitDecision;
+  fromCache: boolean;
 }> {
   const decision = buildInitDecision(tools, options);
   const cacheKey = createCacheKey(options, decision);
 
   const cached = _instanceCache.get(cacheKey);
   if (cached) {
-    return { instance: cached, cacheKey };
+    return { instance: cached, cacheKey, decision, fromCache: true };
   }
 
   let instance: Veto;
@@ -339,7 +456,7 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
 
   _instanceCache.set(cacheKey, instance);
 
-  return { instance, cacheKey };
+  return { instance, cacheKey, decision, fromCache: false };
 }
 
 export async function protect<T extends { name: string }>(
@@ -362,7 +479,11 @@ export async function protect<T extends { name: string }>(
 
   const normalizedOptions = options ?? {};
   const tools = toToolsArray(input);
-  const { instance } = await initializeVeto(tools, normalizedOptions);
+  const { instance, decision, fromCache } = await initializeVeto(tools, normalizedOptions);
+
+  if (!fromCache) {
+    emitAutoAppliedPackMessage(tools, decision, normalizedOptions.logLevel);
+  }
 
   if (options === undefined) {
     _defaultInstance = instance;

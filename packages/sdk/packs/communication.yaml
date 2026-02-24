@@ -1,0 +1,53 @@
+version: "1.0"
+name: communication-pack
+description: Guardrails for email and messaging tools.
+rules:
+  - id: comm-block-mass-recipients
+    name: Block mass email sends
+    description: Require approval when sending to more than 5 recipients.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - send_email
+      - send_message
+      - notify
+      - send_notification
+    conditions:
+      - field: arguments.to
+        operator: length_greater_than
+        value: 5
+
+  - id: comm-block-sensitive-content
+    name: Block emails containing credentials
+    description: Block messages that contain password-like or key-like strings.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - send_email
+      - send_message
+    condition_groups:
+      - - field: arguments.body
+          operator: matches
+          value: '(?:[Pp]assword|[Ss]ecret|[Aa][Pp][Ii][_-]?[Kk]ey|[Tt]oken)\s*[:=]\s*\S+'
+      - - field: arguments.subject
+          operator: matches
+          value: "(?:[Pp]assword|[Cc]redentials|[Ss]ecret)"
+
+output_rules:
+  - id: comm-redact-pii-in-output
+    name: Redact PII from messaging outputs
+    description: Redact phone numbers and emails from messaging tool outputs.
+    enabled: true
+    severity: medium
+    action: redact
+    tools:
+      - send_email
+      - read_email
+      - get_messages
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b'
+    redact_with: "[REDACTED_PHONE]"
