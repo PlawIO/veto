@@ -193,6 +193,7 @@ Migration notes:
 
 - Legacy REPL is still available via `npx veto repl --legacy`.
 - Studio template fallback is opt-in (`--demo-template` or `studio.generation.allowTemplateFallback: true`).
+- OpenTUI currently requires Bun runtime APIs. On Node.js, Studio auto-falls back to ANSI renderer.
 
 Veto Studio examples:
 
