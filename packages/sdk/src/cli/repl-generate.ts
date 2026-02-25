@@ -22,6 +22,11 @@ interface ReplConfigFile {
     maxTokens?: number;
     timeout?: number;
   };
+  studio?: {
+    generation?: {
+      allowTemplateFallback?: boolean;
+    };
+  };
 }
 
 export interface GeneratePolicyRequest {
@@ -72,6 +77,12 @@ export interface GeneratePolicyResult {
   notes?: string;
   explanation?: string;
   warnings: string[];
+}
+
+export interface GenerationConnectivityResult {
+  connected: boolean;
+  mode?: EndpointMode;
+  reason?: string;
 }
 
 export interface ExplainPolicyResult {
@@ -234,6 +245,22 @@ export function resolveEndpointConfig(projectDir = process.cwd()): EndpointConfi
   return null;
 }
 
+function resolveAllowTemplateFallback(
+  config: ReplConfigFile,
+  explicitAllowTemplateFallback: boolean | undefined
+): boolean {
+  if (explicitAllowTemplateFallback !== undefined) {
+    return explicitAllowTemplateFallback;
+  }
+
+  if (config.studio?.generation?.allowTemplateFallback !== undefined) {
+    return config.studio.generation.allowTemplateFallback;
+  }
+
+  // Preserve legacy REPL behavior unless Studio explicitly disables fallback.
+  return true;
+}
+
 function createHeaders(config: EndpointConfig): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -248,6 +275,54 @@ function createHeaders(config: EndpointConfig): Record<string, string> {
   }
 
   return headers;
+}
+
+export async function checkGenerationConnectivity(options: {
+  projectDir?: string;
+  timeoutMs?: number;
+} = {}): Promise<GenerationConnectivityResult> {
+  const projectDir = resolve(options.projectDir ?? process.cwd());
+  const endpoint = resolveEndpointConfig(projectDir);
+
+  if (!endpoint) {
+    return {
+      connected: false,
+      reason: 'No generation endpoint configured.',
+    };
+  }
+
+  const timeoutMs = options.timeoutMs ?? Math.min(endpoint.timeoutMs, 5000);
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(endpoint.baseUrl, {
+      method: 'GET',
+      headers: createHeaders(endpoint),
+      signal: abortController.signal,
+    });
+
+    if (response.status >= 500) {
+      return {
+        connected: false,
+        mode: endpoint.mode,
+        reason: `Endpoint responded with status ${response.status}.`,
+      };
+    }
+
+    return {
+      connected: true,
+      mode: endpoint.mode,
+    };
+  } catch (error) {
+    return {
+      connected: false,
+      mode: endpoint.mode,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function postJson<TResponse>(
@@ -594,7 +669,15 @@ function extractNumericAmount(prompt: string): number | null {
 function detectAction(prompt: string): Rule['action'] {
   const normalized = prompt.toLowerCase();
 
-  if (/require\s+approval|needs?\s+approval|ask\s+for\s+approval|approve/.test(normalized)) {
+  if (/(do\s+not|don't|never|cannot|can't|without)\s+approve|no\s+approval/.test(normalized)) {
+    return 'block';
+  }
+
+  if (/block|deny|forbid|prevent|disallow|stop/.test(normalized)) {
+    return 'block';
+  }
+
+  if (/require\s+approval|needs?\s+approval|ask\s+for\s+approval|manual\s+approval|human\s+approval/.test(normalized)) {
     return 'require_approval';
   }
 
@@ -610,8 +693,8 @@ function detectAction(prompt: string): Rule['action'] {
     return 'allow';
   }
 
-  if (/block|deny|forbid|prevent|disallow|stop/.test(normalized)) {
-    return 'block';
+  if (/\bapprove\b/.test(normalized)) {
+    return 'allow';
   }
 
   return 'require_approval';
@@ -1131,11 +1214,22 @@ export async function generatePolicyFromPrompt(options: {
   rulesDirectory?: string;
   tools: DiscoveredTool[];
   existingRules: Rule[];
+  allowTemplateFallback?: boolean;
 }): Promise<GeneratePolicyResult> {
   const projectDir = resolve(options.projectDir ?? process.cwd());
+  const config = parseConfig(projectDir);
   const endpoint = resolveEndpointConfig(projectDir);
+  const allowTemplateFallback = resolveAllowTemplateFallback(
+    config,
+    options.allowTemplateFallback
+  );
 
   if (!endpoint) {
+    if (!allowTemplateFallback) {
+      throw new Error(
+        'No generation endpoint configured. Configure VETO_API_KEY, kernel mode, or self-hosted llm.baseUrl, or enable demo template fallback.'
+      );
+    }
     return generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
   }
 
@@ -1148,6 +1242,12 @@ export async function generatePolicyFromPrompt(options: {
         existingRules: options.existingRules,
       });
     } catch (error) {
+      if (!allowTemplateFallback) {
+        throw new Error(
+          `Kernel generation failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+
       const fallback = generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
       return {
         ...fallback,
@@ -1190,6 +1290,12 @@ export async function generatePolicyFromPrompt(options: {
       warnings: [],
     };
   } catch (error) {
+    if (!allowTemplateFallback) {
+      throw new Error(
+        `Generation endpoint failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
     const fallback = generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
     return {
       ...fallback,

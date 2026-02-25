@@ -77,7 +77,7 @@ export async function loadBenchmarkSamples(
         if (sample) {
           samples.push(sample);
         }
-      } catch (error) {
+      } catch {
         // Skip malformed lines
         continue;
       }
@@ -393,7 +393,7 @@ function extractCategory(filePath: string): string {
  */
 function shuffleArray<T>(array: T[], seed?: number): T[] {
   const result = [...array];
-  let random = seed !== undefined ? seededRandom(seed) : Math.random;
+  const random = seed !== undefined ? seededRandom(seed) : Math.random;
 
   for (let i = result.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));

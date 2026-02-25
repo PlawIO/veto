@@ -238,6 +238,51 @@ rules:
     expect(rules).toHaveLength(2);
   });
 
+  it('maps negated approval prompts to block action in template mode', () => {
+    const generated = generateTemplatePolicy(
+      'do not approve invoices above 50 dollars',
+      [
+        {
+          name: 'approve_invoice',
+          parameters: ['amount'],
+          locations: ['src/invoice.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<{ action?: string }>;
+    expect(rules[0]?.action).toBe('block');
+  });
+
+  it('blocks generation when no endpoint is configured and template fallback is disabled', async () => {
+    await expect(() =>
+      generatePolicyFromPrompt({
+        prompt: 'block transfer_funds above 1000',
+        projectDir: TEST_DIR,
+        rulesDirectory: join(TEST_DIR, 'veto/rules'),
+        tools: [
+          {
+            name: 'transfer_funds',
+            parameters: ['amount'],
+            locations: ['src/agent.ts'],
+            sources: ['source-ts'],
+            covered: false,
+            coverageReason: 'none',
+            matchedRuleIds: [],
+          },
+        ],
+        existingRules: [],
+        allowTemplateFallback: false,
+      })
+    ).rejects.toThrow('No generation endpoint configured');
+  });
+
   it('persists bounded deduplicated command history', () => {
     const historyPath = join(TEST_DIR, '.veto_history');
     writeFileSync(historyPath, 'one\ntwo\none\n', 'utf-8');

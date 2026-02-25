@@ -67,6 +67,19 @@ logging:
 rules:
   directory: "./rules"
   recursive: true
+
+# Veto Studio configuration
+# studio:
+#   workspace:
+#     # Persisted startup workspace (absolute or relative path)
+#     defaultDirectory: "."
+#     includeExamples: false
+#     includeTests: false
+#   generation:
+#     # If false, Studio blocks generation when no endpoint is configured
+#     allowTemplateFallback: false
+#   renderer:
+#     preferred: "auto" # auto | opentui | ansi
 `;
 
 /**
