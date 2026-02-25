@@ -293,11 +293,34 @@ async function readStdinText(): Promise<string | undefined> {
 }
 
 function toRuleFileName(toolName: string): string {
-  const slug = toolName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-');
+  const value = toolName.toLowerCase();
+  let slug = '';
+  let previousWasDash = false;
+
+  for (const character of value) {
+    const isAlphaNumeric =
+      (character >= 'a' && character <= 'z') ||
+      (character >= '0' && character <= '9');
+
+    if (isAlphaNumeric) {
+      slug += character;
+      previousWasDash = false;
+      continue;
+    }
+
+    if (!previousWasDash) {
+      slug += '-';
+      previousWasDash = true;
+    }
+  }
+
+  while (slug.startsWith('-')) {
+    slug = slug.slice(1);
+  }
+
+  while (slug.endsWith('-')) {
+    slug = slug.slice(0, -1);
+  }
 
   return `${slug || 'policy'}.generated.yaml`;
 }
