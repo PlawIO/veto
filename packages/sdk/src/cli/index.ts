@@ -66,6 +66,21 @@ export {
   type StartReplOptions,
 } from './repl.js';
 export { startStudio, selectStudioRenderer, type StartStudioOptions } from './studio/start.js';
+export { runCli, runCliOrExit } from './runner.js';
+export {
+  printHeadlessResult,
+  runPolicyGenerateCommand,
+  runPolicyApplyCommand,
+  runGuardCheckCommand,
+  runDoctorCommand,
+  runCloudLoginCommand,
+  runCloudWhoamiCommand,
+  runCloudOrgUseCommand,
+  runCloudProjectUseCommand,
+  runCloudLogoutCommand,
+  resolvePolicySavePath,
+  type HeadlessResult,
+} from './headless.js';
 export {
   createInitialStudioState,
   discoverWorkspaceCandidates,

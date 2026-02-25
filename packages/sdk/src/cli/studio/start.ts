@@ -7,14 +7,17 @@ import {
   resolvePreferredWorkspaceIndex,
   type StudioRenderer,
   type StudioRendererPreference,
+  type StudioTheme,
 } from './state.js';
 import { createAnsiRenderer } from './renderers/ansi.js';
 import { createOpenTuiRenderer } from './renderers/opentui.js';
+import { createInkRenderer } from './renderers/ink.js';
 
 export interface StartStudioOptions {
   cwd?: string;
   directory?: string;
   renderer?: StudioRendererPreference;
+  theme?: StudioTheme;
   includeExamples?: boolean;
   includeTests?: boolean;
   demoTemplate?: boolean;
@@ -31,11 +34,15 @@ function createRendererByMode(mode: StudioRendererPreference): StudioRenderer {
     return createAnsiRenderer();
   }
 
+  if (mode === 'ink') {
+    return createInkRenderer();
+  }
+
   if (mode === 'opentui') {
     return createOpenTuiRenderer();
   }
 
-  return createAnsiRenderer();
+  return createInkRenderer();
 }
 
 export async function selectStudioRenderer(
@@ -47,9 +54,9 @@ export async function selectStudioRenderer(
     return { renderer };
   }
 
-  if (preference === 'opentui') {
+  if (preference === 'ink') {
     try {
-      const renderer = createRendererByMode('opentui');
+      const renderer = createRendererByMode('ink');
       await renderer.init();
       return { renderer };
     } catch (error) {
@@ -57,13 +64,39 @@ export async function selectStudioRenderer(
       await fallback.init();
       return {
         renderer: fallback,
-        warning: `OpenTUI unavailable, using ANSI fallback: ${error instanceof Error ? error.message : String(error)}`,
+        warning: `Ink unavailable, using ANSI fallback: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
 
+  if (preference === 'opentui') {
+    try {
+      const renderer = createRendererByMode('opentui');
+      await renderer.init();
+      return { renderer };
+    } catch (error) {
+      try {
+        const inkFallback = createRendererByMode('ink');
+        await inkFallback.init();
+        return {
+          renderer: inkFallback,
+          warning: `OpenTUI unavailable, using Ink fallback: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      } catch (inkError) {
+        const fallback = createRendererByMode('ansi');
+        await fallback.init();
+        return {
+          renderer: fallback,
+          warning: `OpenTUI and Ink unavailable, using ANSI fallback: ${
+            error instanceof Error ? error.message : String(error)
+          }; ${inkError instanceof Error ? inkError.message : String(inkError)}`,
+        };
+      }
+    }
+  }
+
   try {
-    const renderer = createRendererByMode('opentui');
+    const renderer = createRendererByMode('ink');
     await renderer.init();
     return { renderer };
   } catch (error) {
@@ -71,7 +104,7 @@ export async function selectStudioRenderer(
     await fallback.init();
     return {
       renderer: fallback,
-      warning: `OpenTUI unavailable, using ANSI fallback: ${error instanceof Error ? error.message : String(error)}`,
+      warning: `Ink unavailable, using ANSI fallback: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -111,6 +144,7 @@ export async function startStudio(options: StartStudioOptions = {}): Promise<voi
     cwd,
     version,
     rendererPreference,
+    theme: options.theme,
     includeExamples,
     includeTests,
     demoTemplate: options.demoTemplate,

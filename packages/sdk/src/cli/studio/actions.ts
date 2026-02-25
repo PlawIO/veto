@@ -943,6 +943,7 @@ export function buildStudioRenderModel(state: StudioState): StudioRenderModel {
   return {
     title: state.brandName,
     subtitle,
+    theme: state.theme,
     lines,
     footer: 'Keys: ↑/↓ navigate | Enter select | Tab next | Esc back | / palette | q quit',
   };

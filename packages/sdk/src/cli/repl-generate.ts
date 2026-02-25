@@ -257,8 +257,7 @@ function resolveAllowTemplateFallback(
     return config.studio.generation.allowTemplateFallback;
   }
 
-  // Preserve legacy REPL behavior unless Studio explicitly disables fallback.
-  return true;
+  return false;
 }
 
 function createHeaders(config: EndpointConfig): Record<string, string> {
@@ -1270,6 +1269,58 @@ export async function generatePolicyFromPrompt(options: {
     },
     model: endpoint.model,
   };
+
+  if (endpoint.mode === 'cloud') {
+    const matchedTools = findMatchingToolNames(options.prompt, options.tools);
+    const selectedToolName = matchedTools[0] ?? options.tools[0]?.name;
+
+    if (!selectedToolName) {
+      if (!allowTemplateFallback) {
+        throw new Error('Cloud generation requires at least one discovered tool in the workspace.');
+      }
+
+      return generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
+    }
+
+    try {
+      const response = await postJson<GeneratePolicyResponse>(
+        `${endpoint.baseUrl}/v1/policies/generate`,
+        {
+          toolName: selectedToolName,
+          prompt: options.prompt,
+          modeHint: 'auto',
+        },
+        createHeaders(endpoint),
+        endpoint.timeoutMs
+      );
+
+      const normalized = coerceGenerateResponse(response);
+      validateGeneratedYaml(normalized.yaml);
+
+      return {
+        mode: endpoint.mode,
+        yaml: normalized.yaml,
+        notes: normalized.notes,
+        explanation: normalized.explanation,
+        warnings: [],
+      };
+    } catch (error) {
+      if (!allowTemplateFallback) {
+        throw new Error(
+          `Generation endpoint failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+
+      const fallback = generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
+      return {
+        ...fallback,
+        warnings: [
+          `Generation endpoint failed, falling back to template mode: ${error instanceof Error ? error.message : String(error)}`,
+          ...fallback.warnings,
+        ],
+      };
+    }
+  }
 
   try {
     const response = await postJson<GeneratePolicyResponse>(
