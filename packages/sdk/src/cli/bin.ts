@@ -7,6 +7,7 @@ import { compile } from './compile.js';
 import { test } from './test.js';
 import { scan } from './scan.js';
 import { diff } from './diff.js';
+import { startRepl } from './repl.js';
 import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -20,9 +21,10 @@ function printHelp(): void {
 Veto - AI Agent Tool Call Guardrail
 
 Usage:
-  veto <command> [options]
+  veto [command] [options]
 
 Commands:
+  repl          Start interactive policy shell
   init          Initialize Veto in the current directory
   learn         Observe tool calls and generate policies
   compile       Compile natural language policies to deterministic YAML rules
@@ -32,11 +34,27 @@ Commands:
   version       Show version information
   help          Show this help message
 
+No command:
+  Starts the interactive policy REPL
+
 Options:
+  --repl               Force interactive REPL mode
   --force, -f          Force overwrite existing files (init)
   --pack <name>        Scaffold with a built-in policy pack (init)
   --quiet, -q          Suppress output
   --help, -h           Show help
+
+REPL Slash Commands:
+  /scan                            Rescan tools and pack suggestions
+  /test <tool>({args})             Local-only policy evaluation (no network)
+  /test-suite                      Run generated scenarios against current rules
+  /explain <ruleId>                Explain a rule in plain language
+  /list                            Show loaded session rules
+  /load <file>                     Merge a YAML rule file into session
+  /export [file]                   Export merged session rules
+  /clear                           Reload baseline rules, drop session additions
+  /quit                            Exit REPL
+  Aliases: /q /? /s /t /ts /e /ls /x /c
 
 Learn Options:
   --runs <n>            Stop after n tool calls
@@ -70,6 +88,9 @@ Diff Options:
 
 Examples:
   veto init                          Initialize Veto in current directory
+  veto                               Start interactive REPL
+  veto --repl                        Start interactive REPL (explicit flag)
+  veto repl                          Start interactive REPL
   veto init --pack coding-agent      Initialize with extends: "@veto/coding-agent"
   veto init --force                  Reinitialize, overwriting existing files
   veto learn --runs 10               Observe 10 tool calls then generate policies
@@ -257,7 +278,22 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (flags['repl']) {
+    if (command && command !== '') {
+      console.error('Error: --repl cannot be combined with another command');
+      process.exit(1);
+    }
+    await startRepl({ version: VERSION });
+    process.exit(0);
+  }
+
   switch (command) {
+    case 'repl': {
+      await startRepl({ version: VERSION });
+      process.exit(0);
+      break;
+    }
+
     case 'init': {
       const result = await init({
         force: flags['force'],
@@ -336,10 +372,7 @@ async function main(): Promise<void> {
     }
 
     case '': {
-      console.log('Veto - AI Agent Tool Call Guardrail');
-      console.log('');
-      console.log('Run "veto help" for usage information.');
-      console.log('Run "veto init" to initialize Veto in your project.');
+      await startRepl({ version: VERSION });
       process.exit(0);
       break;
     }

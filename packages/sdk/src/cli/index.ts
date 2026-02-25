@@ -56,6 +56,48 @@ export {
   type Suggestion,
 } from './scan.js';
 export {
+  startRepl,
+  executeReplInput,
+  parseTestInvocation,
+  evaluateToolCallHybrid,
+  loadHistoryFile,
+  persistHistoryFile,
+  type ReplCommandResult,
+  type StartReplOptions,
+} from './repl.js';
+export {
+  createReplSessionContext,
+  clearSessionRules,
+  loadSessionRulesFromFile,
+  exportRulesYaml,
+  listRuleSummaries,
+  rescanReplContext,
+  reloadReplContext,
+  findRuleById,
+  getRuleSourceInfo,
+  getRulesForTool,
+  type ReplSessionContext,
+  type RuleSourceInfo,
+} from './repl-context.js';
+export {
+  resolveEndpointConfig,
+  generatePolicyFromPrompt,
+  explainRule,
+  interpretNaturalLanguageIntent,
+  generateTemplatePolicy,
+  validateGeneratedYaml,
+  buildTemplateExplanation,
+  type ReplIntent,
+  type ReplIntentResult,
+  type GeneratePolicyRequest,
+  type GeneratePolicyResponse,
+  type GeneratePolicyResult,
+  type ExplainPolicyRequest,
+  type ExplainPolicyResponse,
+  type ExplainPolicyResult,
+  type GenerationMode,
+} from './repl-generate.js';
+export {
   diff,
   type DiffOptions,
   type DiffResult,

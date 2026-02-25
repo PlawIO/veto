@@ -177,6 +177,9 @@ const csvAudit = veto.exportDecisions("csv");
 
 | Command            | Description                                           |
 | ------------------ | ----------------------------------------------------- |
+| `npx veto`         | Start interactive policy REPL                         |
+| `npx veto --repl`  | Start interactive policy REPL (explicit flag)         |
+| `npx veto repl`    | Start interactive policy REPL                         |
 | `npx veto init`    | Initialize Veto in current directory                  |
 | `npx veto learn`   | Observe tool calls and generate starter policies      |
 | `npx veto compile` | Compile natural-language policy text into YAML        |
@@ -184,6 +187,34 @@ const csvAudit = veto.exportDecisions("csv");
 | `npx veto scan`    | Audit discovered tools vs loaded rule coverage        |
 | `npx veto diff`    | Diff policy snapshots and replay deterministic impact |
 | `npx veto version` | Show version                                          |
+
+Interactive REPL examples:
+
+```bash
+# Start interactive policy shell
+npx veto
+
+# Start interactive policy shell (explicit flag)
+npx veto --repl
+
+# Test a call locally (no network)
+/test transfer_funds({"amount": 50000})
+
+# Ask a what-if question in plain language
+what would happen if my agent tried to transfer $50,000?
+
+# Explain a rule
+/explain fin-block-high-transfers
+
+# Run scenario suite
+test my agent against current rules
+
+# Export merged rules
+/export
+
+# Save generated YAML to a custom file during prompt flow
+# Save to ./veto/rules/transfer-funds-block-25000.yaml? [Y/n/edit/path]
+```
 
 Coverage audit examples:
 
