@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.15.1
+
+### Patch Changes
+
+- [#140](https://github.com/VulnZap/veto/pull/140) [`d9e05b5`](https://github.com/VulnZap/veto/commit/d9e05b516eaedb902c6d20c9071bc41a874e4ed5) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix Studio runtime behavior by shipping `@opentui/core` as a runtime dependency and correcting CLI version detection under `npx`.
+
 ## 1.15.0
 
 ### Minor Changes
