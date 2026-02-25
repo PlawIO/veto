@@ -8,6 +8,7 @@ import { test } from './test.js';
 import { scan } from './scan.js';
 import { diff } from './diff.js';
 import { startRepl } from './repl.js';
+import { agentInit, agentPolicyList, agentPolicyAdd, agentScan, agentConfig } from './agent.js';
 import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -26,6 +27,7 @@ Usage:
 Commands:
   repl          Start interactive policy shell
   init          Initialize Veto in the current directory
+  agent         Agent-native commands (policy add, list, scan, config)
   learn         Observe tool calls and generate policies
   compile       Compile natural language policies to deterministic YAML rules
   test          Run adversarial policy gap analysis
@@ -34,6 +36,13 @@ Commands:
   version       Show version information
   help          Show this help message
 
+Agent Commands:
+  agent init              Initialize Veto in agent mode (no prompts)
+  agent policy add "..."  Add a policy from natural language
+  agent policy list       List all policies in the project
+  agent scan              Scan tools and show coverage
+  agent config            Show current Veto configuration
+
 No command:
   Starts the interactive policy REPL
 
@@ -41,6 +50,10 @@ Options:
   --repl               Force interactive REPL mode
   --force, -f          Force overwrite existing files (init)
   --pack <name>        Scaffold with a built-in policy pack (init)
+  --mode <mode>        Validation mode: local, cloud, kernel, custom (init)
+  --approval           Enable human approval webhook (init)
+  --agent              Agent mode - no interactive prompts (init)
+  --yes, -y            Skip confirmation prompts (init)
   --quiet, -q          Suppress output
   --help, -h           Show help
 
@@ -87,11 +100,14 @@ Diff Options:
   --format <fmt>       Output format: text or json (default: text)
 
 Examples:
-  veto init                          Initialize Veto in current directory
+  veto init                          Initialize Veto in current directory (interactive wizard)
+  veto init --agent                  Initialize in agent mode (no prompts)
+  veto init --agent --pack @veto/financial --mode local
   veto                               Start interactive REPL
   veto --repl                        Start interactive REPL (explicit flag)
   veto repl                          Start interactive REPL
   veto init --pack coding-agent      Initialize with extends: "@veto/coding-agent"
+  veto init --mode cloud --approval  Initialize with cloud mode + human approval
   veto init --force                  Reinitialize, overwriting existing files
   veto learn --runs 10               Observe 10 tool calls then generate policies
   veto learn --duration 30m          Observe for 30 minutes
@@ -130,7 +146,8 @@ function parseArgs(args: string[]): ParsedArgs {
     'runs', 'duration', 'output', 'margin',
     'input', 'file', 'provider', 'model',
     'policy', 'format', 'pack',
-    'old', 'new', 'log',
+    'old', 'new', 'log', 'mode',
+    'directory', 'prompt',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -149,6 +166,7 @@ function parseArgs(args: string[]): ParsedArgs {
         switch (f) {
           case 'f': flags['force'] = true; break;
           case 'q': flags['quiet'] = true; break;
+          case 'y': flags['yes'] = true; break;
           case 'h': flags['help'] = true; break;
         }
       }
@@ -299,8 +317,100 @@ async function main(): Promise<void> {
         force: flags['force'],
         pack: values['pack'],
         quiet: flags['quiet'],
+        agent: flags['agent'],
+        yes: flags['yes'],
+        mode: values['mode'] as 'local' | 'cloud' | 'kernel' | 'custom' | undefined,
+        approval: flags['approval'],
       });
       process.exit(result.success ? 0 : 1);
+      break;
+    }
+
+    case 'agent': {
+      const subCommand = positionals[0] ?? 'help';
+      const subArgs = positionals.slice(1);
+
+      switch (subCommand) {
+        case 'init': {
+          await agentInit({
+            directory: values['directory'],
+            format: values['format'] as 'json' | 'yaml' | undefined,
+          });
+          process.exit(0);
+          break;
+        }
+
+        case 'policy': {
+          const policyCmd = subArgs[0] ?? 'help';
+
+          switch (policyCmd) {
+            case 'add': {
+              const prompt = values['prompt'] ?? subArgs.slice(1).join(' ');
+              if (!prompt) {
+                console.error('Error: policy add requires a prompt');
+                console.error('Usage: veto agent policy add "block external API calls"');
+                process.exit(1);
+              }
+              await agentPolicyAdd(prompt, {
+                directory: values['directory'],
+                format: values['format'] as 'json' | 'yaml' | undefined,
+              });
+              process.exit(0);
+              break;
+            }
+
+            case 'list': {
+              await agentPolicyList({
+                directory: values['directory'],
+                format: values['format'] as 'json' | 'yaml' | undefined,
+              });
+              process.exit(0);
+              break;
+            }
+
+            default: {
+              console.error(`Unknown agent policy command: ${policyCmd}`);
+              console.error('Usage: veto agent policy [add|list]');
+              process.exit(1);
+            }
+          }
+          break;
+        }
+
+        case 'scan': {
+          await agentScan({
+            directory: values['directory'],
+            format: values['format'] as 'json' | 'yaml' | undefined,
+          });
+          process.exit(0);
+          break;
+        }
+
+        case 'config': {
+          await agentConfig({
+            directory: values['directory'],
+            format: values['format'] as 'json' | 'yaml' | undefined,
+          });
+          process.exit(0);
+          break;
+        }
+
+        case 'help':
+        default: {
+          console.log('Agent commands:');
+          console.log('  veto agent init              Initialize Veto in agent mode');
+          console.log('  veto agent policy add "..."  Add a policy from natural language');
+          console.log('  veto agent policy list       List all policies');
+          console.log('  veto agent scan              Scan tools and show coverage');
+          console.log('  veto agent config            Show current configuration');
+          console.log('');
+          console.log('Options:');
+          console.log('  --directory <path>  Project directory');
+          console.log('  --format json|yaml  Output format (default: json)');
+          process.exit(0);
+          break;
+        }
+      }
       break;
     }
 
