@@ -77,6 +77,19 @@ describe('veto studio', () => {
     expect(candidates[index]?.path).toBe(resolve(TEST_DIR, 'node-app'));
   });
 
+  it('falls back to ANSI renderer with a runtime-specific message outside Bun', async () => {
+    if (process.versions.bun) {
+      return;
+    }
+
+    const { selectStudioRenderer } = await import('../../src/cli/studio/start.js');
+    const selection = await selectStudioRenderer('opentui');
+
+    expect(selection.renderer.mode).toBe('ansi');
+    expect(selection.warning).toContain('requires Bun runtime APIs');
+    await selection.renderer.dispose();
+  });
+
   it('falls back to ANSI renderer when OpenTUI init fails in auto mode', async () => {
     vi.doMock('../../src/cli/studio/renderers/opentui.js', () => ({
       createOpenTuiRenderer: () => ({
