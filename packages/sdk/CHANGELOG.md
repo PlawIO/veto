@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 1.14.0
+
+### Minor Changes
+
+- [#135](https://github.com/VulnZap/veto/pull/135) [`d48c9dd`](https://github.com/VulnZap/veto/commit/d48c9dd2fb156192fa794dfc4fa4cc7a42a34e65) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix the CLI agent init typings and add the missing `picocolors` dependency for the new CLI color utilities.
+
 ## 1.13.0
 
 ### Minor Changes
