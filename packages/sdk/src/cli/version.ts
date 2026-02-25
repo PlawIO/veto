@@ -8,7 +8,7 @@ interface PackageJson {
 }
 
 const FALLBACK_VERSION = '0.0.0';
-const PACKAGE_NAME = 'veto-sdk';
+const SUPPORTED_PACKAGE_NAMES = new Set(['veto-sdk', 'veto-cli']);
 
 function readVersionFromPackageJson(packageJsonPath: string): string | undefined {
   if (!existsSync(packageJsonPath)) {
@@ -35,7 +35,7 @@ function readVersionFromNpmEnv(): string | undefined {
     return undefined;
   }
 
-  if (packageName && packageName !== PACKAGE_NAME) {
+  if (packageName && !SUPPORTED_PACKAGE_NAMES.has(packageName)) {
     return undefined;
   }
 
@@ -43,6 +43,11 @@ function readVersionFromNpmEnv(): string | undefined {
 }
 
 export function getCliVersion(): string {
+  const explicitVersion = process.env.VETO_CLI_VERSION?.trim();
+  if (explicitVersion) {
+    return explicitVersion;
+  }
+
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = join(currentDir, '..', '..', 'package.json');
   const fileVersion = readVersionFromPackageJson(packageJsonPath);

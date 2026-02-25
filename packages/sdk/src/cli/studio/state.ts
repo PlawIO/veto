@@ -22,8 +22,9 @@ export type StudioView =
   | 'review'
   | 'setup';
 
-export type StudioRendererPreference = 'auto' | 'opentui' | 'ansi';
-export type StudioRendererMode = 'opentui' | 'ansi';
+export type StudioTheme = 'veto' | 'claude' | 'high-contrast';
+export type StudioRendererPreference = 'auto' | 'ink' | 'opentui' | 'ansi';
+export type StudioRendererMode = 'ink' | 'opentui' | 'ansi';
 
 export interface StudioWorkspaceCandidate {
   name: string;
@@ -70,6 +71,7 @@ export interface StudioSetupState {
 export interface StudioState {
   brandName: string;
   version: string;
+  theme: StudioTheme;
   cwd: string;
   view: StudioView;
   paletteOpen: boolean;
@@ -100,6 +102,7 @@ export interface StudioState {
 export interface StudioRenderModel {
   title: string;
   subtitle?: string;
+  theme: StudioTheme;
   lines: string[];
   footer?: string;
 }
@@ -157,6 +160,7 @@ export interface CreateInitialStudioStateOptions {
   cwd?: string;
   version: string;
   rendererPreference: StudioRendererPreference;
+  theme?: StudioTheme;
   includeExamples?: boolean;
   includeTests?: boolean;
   demoTemplate?: boolean;
@@ -373,6 +377,7 @@ export function createInitialStudioState(options: CreateInitialStudioStateOption
   return {
     brandName: 'Veto Studio',
     version: options.version,
+    theme: options.theme ?? 'veto',
     cwd,
     view: 'workspace',
     paletteOpen: false,

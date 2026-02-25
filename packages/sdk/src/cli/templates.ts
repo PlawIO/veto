@@ -79,7 +79,7 @@ rules:
 #     # If false, Studio blocks generation when no endpoint is configured
 #     allowTemplateFallback: false
 #   renderer:
-#     preferred: "auto" # auto | opentui | ansi
+#     preferred: "auto" # auto | ink | opentui | ansi
 `;
 
 /**

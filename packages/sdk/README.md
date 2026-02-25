@@ -175,46 +175,59 @@ const csvAudit = veto.exportDecisions("csv");
 
 ## CLI Commands
 
-| Command                  | Description                                           |
-| ------------------------ | ----------------------------------------------------- |
-| `npx veto`               | Start Veto Studio (full-screen TUI)                   |
-| `npx veto --repl`        | Start Veto Studio (explicit flag)                     |
-| `npx veto repl`          | Start Veto Studio                                     |
-| `npx veto repl --legacy` | Start legacy line-based REPL                          |
-| `npx veto init`          | Initialize Veto in current directory                  |
-| `npx veto learn`         | Observe tool calls and generate starter policies      |
-| `npx veto compile`       | Compile natural-language policy text into YAML        |
-| `npx veto test`          | Run adversarial policy gap analysis                   |
-| `npx veto scan`          | Audit discovered tools vs loaded rule coverage        |
-| `npx veto diff`          | Diff policy snapshots and replay deterministic impact |
-| `npx veto version`       | Show version                                          |
+Canonical package:
+
+```bash
+npx veto-cli@latest
+```
+
+Compatibility package (still supported):
+
+```bash
+npx veto-sdk@latest
+```
+
+| Command                                                                               | Description                                     |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `veto`                                                                                | Start Veto Studio (default interactive mode)    |
+| `veto studio`                                                                         | Start Veto Studio explicitly                    |
+| `veto repl --legacy`                                                                  | Start legacy line-based REPL                    |
+| `veto policy generate --tool <name> --prompt <text> [--target local\|cloud] [--json]` | Generate policy YAML (interactive-independent)  |
+| `veto policy apply --file <path> [--target local\|cloud] [--json]`                    | Apply policy file locally or create cloud draft |
+| `veto guard check --tool <name> --args <json> [--mode ...] [--json]`                  | Run a deterministic guard check for a tool call |
+| `veto cloud login`                                                                    | Start cloud device login                        |
+| `veto cloud whoami`                                                                   | Show cloud CLI context                          |
+| `veto doctor`                                                                         | Runtime/auth/connectivity diagnostics           |
+| `veto init`, `veto learn`, `veto compile`, `veto test`, `veto scan`, `veto diff`      | Existing core workflows                         |
+| `veto version`                                                                        | Show version                                    |
 
 Migration notes:
 
-- Legacy REPL is still available via `npx veto repl --legacy`.
+- Legacy REPL is still available via `veto repl --legacy`.
+- `veto-cli` is the canonical package. `veto-sdk` CLI path remains compatibility-first.
 - Studio template fallback is opt-in (`--demo-template` or `studio.generation.allowTemplateFallback: true`).
-- OpenTUI currently requires Bun runtime APIs. On Node.js, Studio auto-falls back to ANSI renderer.
+- Studio defaults to Ink on Node.js. OpenTUI remains optional (`--renderer opentui`) for Bun runtimes.
 
 Veto Studio examples:
 
 ```bash
 # Start full-screen Veto Studio
-npx veto
+npx veto-cli@latest
 
 # Start Studio with explicit flag
-npx veto --repl
+npx veto-cli@latest studio
 
 # Force ANSI renderer
-npx veto repl --renderer ansi
+npx veto-cli@latest studio --renderer ansi
 
 # Open a specific workspace from multi-repo root
-npx veto repl --directory ./packages/sdk
+npx veto-cli@latest studio --directory ./packages/sdk
 
 # Enable explicit template demo mode (otherwise no silent fallback in Studio)
-npx veto repl --demo-template
+npx veto-cli@latest studio --demo-template
 
 # Legacy line-based REPL remains available
-npx veto repl --legacy
+npx veto-cli@latest repl --legacy
 ```
 
 Legacy REPL slash-command examples:

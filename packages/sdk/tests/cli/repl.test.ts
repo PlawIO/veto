@@ -175,7 +175,7 @@ rules:
     expect(afterClearList.lines.join('\n')).not.toContain('extra-rule');
   });
 
-  it('uses template generation without LLM configuration', async () => {
+  it('uses template generation when explicitly enabled without LLM configuration', async () => {
     const result = await generatePolicyFromPrompt({
       prompt: 'block transfer_funds over $25000',
       projectDir: TEST_DIR,
@@ -192,6 +192,7 @@ rules:
         },
       ],
       existingRules: [],
+      allowTemplateFallback: true,
     });
 
     expect(result.mode).toBe('template');
@@ -323,6 +324,16 @@ rules:
   name: 'transfer_funds',
   execute: async ({ amount }) => amount,
 });
+`
+    );
+    writeFixture(
+      'veto/veto.config.yaml',
+      `version: "1.0"
+validation:
+  mode: "local"
+studio:
+  generation:
+    allowTemplateFallback: true
 `
     );
 

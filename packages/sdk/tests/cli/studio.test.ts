@@ -91,11 +91,11 @@ describe('veto studio', () => {
   });
 
   it('falls back to ANSI renderer when OpenTUI init fails in auto mode', async () => {
-    vi.doMock('../../src/cli/studio/renderers/opentui.js', () => ({
-      createOpenTuiRenderer: () => ({
-        mode: 'opentui' as const,
+    vi.doMock('../../src/cli/studio/renderers/ink.js', () => ({
+      createInkRenderer: () => ({
+        mode: 'ink' as const,
         init: async () => {
-          throw new Error('OpenTUI failed');
+          throw new Error('Ink failed');
         },
         render: async () => undefined,
         readEvent: async () => ({ type: 'quit', raw: 'q' }),
@@ -107,7 +107,37 @@ describe('veto studio', () => {
     const selection = await selectStudioRenderer('auto');
 
     expect(selection.renderer.mode).toBe('ansi');
-    expect(selection.warning).toContain('OpenTUI unavailable');
+    expect(selection.warning).toContain('Ink unavailable');
+    await selection.renderer.dispose();
+  });
+
+  it('falls back to Ink when OpenTUI init fails in explicit opentui mode', async () => {
+    vi.doMock('../../src/cli/studio/renderers/opentui.js', () => ({
+      createOpenTuiRenderer: () => ({
+        mode: 'opentui' as const,
+        init: async () => {
+          throw new Error('OpenTUI failed');
+        },
+        render: async () => undefined,
+        readEvent: async () => ({ type: 'quit', raw: 'q' }),
+        dispose: async () => undefined,
+      }),
+    }));
+    vi.doMock('../../src/cli/studio/renderers/ink.js', () => ({
+      createInkRenderer: () => ({
+        mode: 'ink' as const,
+        init: async () => undefined,
+        render: async () => undefined,
+        readEvent: async () => ({ type: 'quit', raw: 'q' }),
+        dispose: async () => undefined,
+      }),
+    }));
+
+    const { selectStudioRenderer } = await import('../../src/cli/studio/start.js');
+    const selection = await selectStudioRenderer('opentui');
+
+    expect(selection.renderer.mode).toBe('ink');
+    expect(selection.warning).toContain('OpenTUI unavailable, using Ink fallback');
     await selection.renderer.dispose();
   });
 });

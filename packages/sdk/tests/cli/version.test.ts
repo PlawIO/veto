@@ -20,6 +20,7 @@ describe('cli version', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    delete process.env.VETO_CLI_VERSION;
     delete process.env.npm_package_name;
     delete process.env.npm_package_version;
   });
@@ -34,7 +35,7 @@ describe('cli version', () => {
   });
 
   it('uses npm environment version when package metadata is unavailable and package name matches', async () => {
-    process.env.npm_package_name = 'veto-sdk';
+    process.env.npm_package_name = 'veto-cli';
     process.env.npm_package_version = '9.9.9-test';
 
     vi.doMock('node:fs', () => ({
@@ -45,5 +46,13 @@ describe('cli version', () => {
     const { getCliVersion } = await import('../../src/cli/version.js');
 
     expect(getCliVersion()).toBe('9.9.9-test');
+  });
+
+  it('uses explicit VETO_CLI_VERSION when provided', async () => {
+    process.env.VETO_CLI_VERSION = '1.2.3-explicit';
+
+    const { getCliVersion } = await import('../../src/cli/version.js');
+
+    expect(getCliVersion()).toBe('1.2.3-explicit');
   });
 });
