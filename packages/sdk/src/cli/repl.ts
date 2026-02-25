@@ -12,6 +12,8 @@ import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import type { Rule, RuleCondition } from '../rules/types.js';
 import type { ArgumentConstraint, LocalValidationResult } from '../deterministic/types.js';
+import type { DiscoveredTool } from './scan.js';
+import { colors } from './colors.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import { Veto } from '../core/veto.js';
 import { createPackRulesTemplate } from './templates.js';
@@ -81,6 +83,13 @@ export interface ReplCommandResult {
   ok: boolean;
   lines: string[];
   exit?: boolean;
+}
+
+export interface ToolImpact {
+  toolName: string;
+  locations: string[];
+  isCovered: boolean;
+  matchReason: string;
 }
 
 export interface StartReplOptions {
@@ -542,12 +551,110 @@ function formatScanSummary(context: ReplSessionContext): string[] {
   return lines;
 }
 
+function formatToolList(context: ReplSessionContext): string[] {
+  const lines: string[] = [];
+  const tools = context.discoveredTools;
+
+  if (tools.length === 0) {
+    return ['  (no tools discovered)'];
+  }
+
+  const maxToolsToShow = 20;
+  const displayTools = tools.slice(0, maxToolsToShow);
+  const truncated = tools.length > maxToolsToShow;
+
+  for (const tool of displayTools) {
+    const location = tool.locations[0] || 'unknown';
+    const status = tool.covered ? '' : ' [uncovered]';
+    lines.push(`  - ${tool.name} (${location})${status}`);
+  }
+
+  if (truncated) {
+    lines.push(`  ... and ${tools.length - maxToolsToShow} more`);
+  }
+
+  return lines;
+}
+
+export function analyzeToolImpact(rules: Rule[], tools: DiscoveredTool[]): ToolImpact[] {
+  const targetTools = new Set<string>();
+  for (const rule of rules) {
+    if (rule.tools) {
+      for (const t of rule.tools) {
+        targetTools.add(t);
+      }
+    }
+  }
+
+  const impacts: ToolImpact[] = [];
+  for (const toolName of targetTools) {
+    const tool = tools.find((t) => t.name === toolName);
+    if (tool) {
+      impacts.push({
+        toolName,
+        locations: [...tool.locations],
+        isCovered: tool.covered,
+        matchReason: tool.coverageReason ?? (tool.covered ? 'Tool is covered by existing rules' : 'No matching rules found'),
+      });
+    } else {
+      impacts.push({
+        toolName,
+        locations: [],
+        isCovered: false,
+        matchReason: 'Tool not discovered in project',
+      });
+    }
+  }
+  return impacts;
+}
+
+function formatToolImpactSummary(impacts: ToolImpact[]): string[] {
+  const lines: string[] = [];
+
+  if (impacts.length === 0) {
+    return lines;
+  }
+
+  const covered = impacts.filter((i) => i.isCovered);
+  const uncovered = impacts.filter((i) => !i.isCovered);
+
+  for (const impact of uncovered) {
+    const locs = impact.locations.length > 0
+      ? impact.locations.slice(0, 2).join(', ')
+      : 'not found in project';
+    lines.push(`  ${colors.uncoveredBadge} ${impact.toolName} -> ${locs}`);
+  }
+
+  for (const impact of covered) {
+    const locs = impact.locations.length > 0
+      ? impact.locations.slice(0, 2).join(', ')
+      : 'unknown';
+    lines.push(`  ${colors.coveredBadge} ${impact.toolName} -> ${locs}`);
+  }
+
+  return lines;
+}
+
 function formatStartupBanner(version: string, context: ReplSessionContext): string[] {
-  return [
-    `veto v${version} — interactive policy shell`,
-    ...formatScanSummary(context),
-    'Type what you want to enforce, ask what-if questions, or run /commands.',
-  ];
+  const lines: string[] = [];
+
+  lines.push(`=== Veto Policy Shell v${version} ===`);
+  lines.push(`Project: ${context.projectDir}`);
+  lines.push('');
+  lines.push(`Tools discovered: ${context.discoveredTools.length}`);
+  lines.push(...formatToolList(context));
+  lines.push('');
+  lines.push(`Rules loaded: ${context.allRules.length}`);
+
+  const coverage = context.scanReport.summary;
+  if (coverage.total > 0) {
+    lines.push(`Coverage: ${coverage.covered}/${coverage.total} (${coverage.coveragePercent.toFixed(1)}%)`);
+  }
+
+  lines.push('');
+  lines.push('What policy do you want? (or "help" for commands)');
+
+  return lines;
 }
 
 async function writeFileContent(filePath: string, content: string): Promise<void> {
@@ -770,7 +877,7 @@ async function handleSimulationRequest(
       ok: false,
       lines: [
         `Simulated ${toolName}(${JSON.stringify(safeArgs)})`,
-        `✗ DENIED by '${result.matchedRule?.id ?? 'unknown-rule'}' (${sourceText})`,
+        `[DENIED] by '${result.matchedRule?.id ?? 'unknown-rule'}' (${sourceText})`,
         `  ${result.reason}`,
         '  Local evaluation path: deterministic + full local fallback (no network).',
       ],
@@ -782,8 +889,8 @@ async function handleSimulationRequest(
     lines: [
       `Simulated ${toolName}(${JSON.stringify(safeArgs)})`,
       result.matchedRule
-        ? `✓ ALLOWED by '${result.matchedRule.id}'`
-        : '✓ ALLOWED',
+        ? `[OK] ALLOWED by '${result.matchedRule.id}'`
+        : '[OK] ALLOWED',
       `  ${result.reason}`,
       '  Local evaluation path: deterministic + full local fallback (no network).',
     ],
@@ -909,24 +1016,36 @@ async function handleGenerationPrompt(
   });
 
   const parsed = validateGeneratedYaml(generated.yaml);
-  const parsedRules = Array.isArray(parsed.rules) ? parsed.rules : [];
-  const suggestedRuleId = parsedRules.length === 1
-    && parsedRules[0]
-    && typeof parsedRules[0] === 'object'
-    && typeof (parsedRules[0] as Record<string, unknown>).id === 'string'
-    ? (parsedRules[0] as Record<string, unknown>).id as string
+  const parsedRules = (Array.isArray(parsed.rules) ? parsed.rules : []) as Rule[];
+  const suggestedRuleId = parsedRules.length === 1 && parsedRules[0]?.id
+    ? parsedRules[0].id
     : undefined;
   const suggestedSavePath = suggestedRuleId
     ? `./veto/rules/${toSlug(suggestedRuleId)}.yaml`
     : DEFAULT_EXPORT_PATH;
 
+  const impacts = analyzeToolImpact(parsedRules, context.discoveredTools);
+
   const lines: string[] = [];
-  lines.push(`Generated ${parsedRules.length} rule(s) using ${generated.mode} mode:`);
-  lines.push('');
+
+  lines.push('Proposed Policy:');
+  lines.push('-'.repeat(40));
   lines.push(generated.yaml.trimEnd());
+  lines.push('-'.repeat(40));
+
+  if (impacts.length > 0) {
+    lines.push('');
+    lines.push('Tool Impact:');
+    const impactLines = formatToolImpactSummary(impacts);
+    for (const line of impactLines) {
+      lines.push(line);
+    }
+    const covered = impacts.filter((i) => i.isCovered).length;
+    const total = impacts.length;
+    lines.push(`Impact: ${total} tool(s) affected by this policy (${covered}/${total} covered)`);
+  }
 
   if (generated.notes) {
-    lines.push('');
     lines.push(`Notes: ${generated.notes}`);
   }
 
@@ -935,23 +1054,62 @@ async function handleGenerationPrompt(
   }
 
   let yamlToSave = generated.yaml;
-  let selectedSavePath = suggestedSavePath;
+  const selectedSavePath = suggestedSavePath;
 
   while (true) {
-    const answer = (await ask(`Save to ${selectedSavePath}? [Y/n/edit/path] `)).trim();
+    const answer = (await ask('[A]ccept [M]odify [S]kip [I]nspect [?]help: ')).trim();
     const normalizedAnswer = answer.toLowerCase();
 
-    if (normalizedAnswer === 'n' || normalizedAnswer === 'no') {
-      lines.push('Not saved.');
+    if (normalizedAnswer === '?' || normalizedAnswer === 'help') {
+      lines.push('');
+      lines.push('A - Accept and save the generated policy to file');
+      lines.push('M - Modify the policy in your editor');
+      lines.push('S - Skip and discard the generated policy');
+      lines.push('I - Inspect tool details and coverage');
+      lines.push('? - Show this help');
+      lines.push('');
+      continue;
+    }
+
+    if (normalizedAnswer === 'i' || normalizedAnswer === 'inspect') {
+      lines.push('');
+      lines.push('=== Tool Impact Details ===');
+      for (const impact of impacts) {
+        lines.push('');
+        lines.push(`Tool: ${colors.tool(impact.toolName)}`);
+        lines.push(`  Status: ${impact.isCovered ? colors.covered('Covered') : colors.uncovered('Uncovered')}`);
+        lines.push(`  Reason: ${impact.matchReason}`);
+        if (impact.locations.length > 0) {
+          lines.push(`  Locations:`);
+          for (const loc of impact.locations) {
+            lines.push(`    - ${colors.path(loc)}`);
+          }
+        }
+      }
+      lines.push('');
+      lines.push('Proposed Policy:');
+      lines.push('-'.repeat(40));
+      lines.push(yamlToSave.trimEnd());
+      lines.push('-'.repeat(40));
+      continue;
+    }
+
+    if (normalizedAnswer === 's' || normalizedAnswer === 'skip') {
+      lines.push('Skipped. Not saved.');
       break;
     }
 
-    if (normalizedAnswer === 'edit' || normalizedAnswer === 'e') {
+    if (normalizedAnswer === 'edit') {
       try {
         const edited = await openEditor(yamlToSave);
         validateGeneratedYaml(edited);
         yamlToSave = edited;
         lines.push('Edited YAML validated successfully.');
+        lines.push('');
+        lines.push('Proposed Policy (edited):');
+        lines.push('-'.repeat(40));
+        lines.push(yamlToSave.trimEnd());
+        lines.push('-'.repeat(40));
       } catch (error) {
         const details = formatPolicySchemaError(error);
         lines.push('Edited YAML is invalid:');
@@ -962,22 +1120,28 @@ async function handleGenerationPrompt(
       continue;
     }
 
-    if (normalizedAnswer === 'path' || normalizedAnswer === 'p') {
-      const customPath = (await ask('Enter output path: ')).trim();
-      if (!customPath) {
-        lines.push('Path cannot be empty.');
-      } else {
-        selectedSavePath = customPath;
+    if (normalizedAnswer === 'm' || normalizedAnswer === 'modify') {
+      try {
+        const edited = await openEditor(yamlToSave);
+        validateGeneratedYaml(edited);
+        yamlToSave = edited;
+        lines.push('Edited YAML validated successfully.');
+        lines.push('');
+        lines.push('Proposed Policy (edited):');
+        lines.push('-'.repeat(40));
+        lines.push(yamlToSave.trimEnd());
+        lines.push('-'.repeat(40));
+      } catch (error) {
+        const details = formatPolicySchemaError(error);
+        lines.push('Edited YAML is invalid:');
+        for (const detail of details) {
+          lines.push(`  - ${detail}`);
+        }
       }
       continue;
     }
 
-    if (answer.endsWith('.yaml') || answer.endsWith('.yml') || answer.startsWith('./') || answer.startsWith('veto/')) {
-      selectedSavePath = answer;
-      continue;
-    }
-
-    if (normalizedAnswer === '' || normalizedAnswer === 'y' || normalizedAnswer === 'yes') {
+    if (normalizedAnswer === '' || normalizedAnswer === 'a' || normalizedAnswer === 'accept' || normalizedAnswer === 'y') {
       const outputPath = resolve(context.projectDir, selectedSavePath);
 
       if (existsSync(outputPath)) {
@@ -994,7 +1158,7 @@ async function handleGenerationPrompt(
       break;
     }
 
-    lines.push('Please answer y, n, edit, or path.');
+    lines.push('Please answer A, M, S, or ? for help.');
   }
 
   return {
@@ -1032,7 +1196,7 @@ async function handleTestCommand(argText: string, context: ReplSessionContext): 
       return {
         ok: true,
         lines: [
-          `✓ ALLOWED by '${result.matchedRule.id}'`,
+          `[OK] ALLOWED by '${result.matchedRule.id}'`,
           `  ${result.reason}`,
           '  Local evaluation path: deterministic + full local fallback (no network).',
         ],
@@ -1042,7 +1206,7 @@ async function handleTestCommand(argText: string, context: ReplSessionContext): 
     return {
       ok: true,
       lines: [
-        '✓ ALLOWED',
+        '[OK] ALLOWED',
         `  ${result.reason}`,
         '  Local evaluation path: deterministic + full local fallback (no network).',
       ],
@@ -1059,7 +1223,7 @@ async function handleTestCommand(argText: string, context: ReplSessionContext): 
   return {
     ok: false,
     lines: [
-      `✗ DENIED by '${result.matchedRule?.id ?? 'unknown-rule'}' (${sourceText})`,
+      `[DENIED] by '${result.matchedRule?.id ?? 'unknown-rule'}' (${sourceText})`,
       `  ${result.reason}`,
       '  Local evaluation path: deterministic + full local fallback (no network).',
     ],
@@ -1295,7 +1459,7 @@ export async function startRepl(options: StartReplOptions = {}): Promise<void> {
 
   try {
     while (!shouldExit) {
-      const line = await askQuestion(rl, 'veto> ');
+      const line = await askQuestion(rl, 'policy> ');
       if (line === null) {
         break;
       }

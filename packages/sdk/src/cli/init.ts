@@ -32,6 +32,12 @@ export interface InitOptions {
   yes?: boolean;
   /** Suppress output */
   quiet?: boolean;
+  /** Run in non-interactive agent mode */
+  agent?: boolean;
+  /** Validation mode selection */
+  mode?: 'local' | 'cloud' | 'kernel' | 'custom';
+  /** Enable human approval flow */
+  approval?: boolean;
 }
 
 /**
