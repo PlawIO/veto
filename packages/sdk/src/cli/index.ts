@@ -65,6 +65,19 @@ export {
   type ReplCommandResult,
   type StartReplOptions,
 } from './repl.js';
+export { startStudio, selectStudioRenderer, type StartStudioOptions } from './studio/start.js';
+export {
+  createInitialStudioState,
+  discoverWorkspaceCandidates,
+  loadStudioPreferences,
+  persistStudioPreferences,
+  resolvePreferredWorkspaceIndex,
+  type StudioState,
+  type StudioView,
+  type StudioRendererPreference,
+  type StudioRendererMode,
+  type StudioWorkspaceCandidate,
+} from './studio/state.js';
 export {
   createReplSessionContext,
   clearSessionRules,
@@ -87,11 +100,13 @@ export {
   generateTemplatePolicy,
   validateGeneratedYaml,
   buildTemplateExplanation,
+  checkGenerationConnectivity,
   type ReplIntent,
   type ReplIntentResult,
   type GeneratePolicyRequest,
   type GeneratePolicyResponse,
   type GeneratePolicyResult,
+  type GenerationConnectivityResult,
   type ExplainPolicyRequest,
   type ExplainPolicyResponse,
   type ExplainPolicyResult,

@@ -8,12 +8,14 @@ import { test } from './test.js';
 import { scan } from './scan.js';
 import { diff } from './diff.js';
 import { startRepl } from './repl.js';
+import { startStudio } from './studio/start.js';
 import { agentInit, agentPolicyList, agentPolicyAdd, agentScan, agentConfig } from './agent.js';
+import { getCliVersion } from './version.js';
 import type { CustomProvider } from '../custom/types.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-const VERSION = '0.1.0';
+const VERSION = getCliVersion();
 
 const VALID_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'openrouter']);
 
@@ -25,7 +27,7 @@ Usage:
   veto [command] [options]
 
 Commands:
-  repl          Start interactive policy shell
+  repl          Start Veto Studio (full-screen TUI)
   init          Initialize Veto in the current directory
   agent         Agent-native commands (policy add, list, scan, config)
   learn         Observe tool calls and generate policies
@@ -44,10 +46,16 @@ Agent Commands:
   agent config            Show current Veto configuration
 
 No command:
-  Starts the interactive policy REPL
+  Starts Veto Studio (same as "veto repl")
 
 Options:
-  --repl               Force interactive REPL mode
+  --repl               Force Studio mode (same as "veto repl")
+  --legacy             Use legacy line-based REPL instead of Studio
+  --directory <path>   Set workspace directory for Studio/scan
+  --renderer <mode>    Renderer: auto, opentui, ansi (Studio)
+  --include-examples   Include examples/** when scanning workspace
+  --include-tests      Include test/**, tests/**, __tests__/** when scanning
+  --demo-template      Allow template-only generation when endpoints are unavailable
   --force, -f          Force overwrite existing files (init)
   --pack <name>        Scaffold with a built-in policy pack (init)
   --mode <mode>        Validation mode: local, cloud, kernel, custom (init)
@@ -88,6 +96,9 @@ Test Options:
   --format <fmt>       Output format: text or json (default: text)
 
 Scan Options:
+  --directory <path>   Project directory to scan
+  --include-examples   Include examples/** in discovery scope
+  --include-tests      Include test directories in discovery scope
   --fail-uncovered     Exit with code 1 when uncovered tools are found
   --suggest            Include inline YAML starter snippets for uncovered tools
   --format <fmt>       Output format: text or json (default: text)
@@ -103,9 +114,13 @@ Examples:
   veto init                          Initialize Veto in current directory (interactive wizard)
   veto init --agent                  Initialize in agent mode (no prompts)
   veto init --agent --pack @veto/financial --mode local
-  veto                               Start interactive REPL
-  veto --repl                        Start interactive REPL (explicit flag)
-  veto repl                          Start interactive REPL
+  veto                               Start Veto Studio
+  veto --repl                        Start Veto Studio (explicit flag)
+  veto repl                          Start Veto Studio
+  veto repl --legacy                 Start legacy line-based REPL
+  veto repl --renderer ansi          Force ANSI renderer
+  veto repl --directory ./packages/sdk
+  veto repl --demo-template          Enable explicit template demo mode
   veto init --pack coding-agent      Initialize with extends: "@veto/coding-agent"
   veto init --mode cloud --approval  Initialize with cloud mode + human approval
   veto init --force                  Reinitialize, overwriting existing files
@@ -117,6 +132,7 @@ Examples:
   veto test --policy ./rules         Analyze specific policy directory
   veto test --output report.json     Save JSON report
   veto scan                          Audit tool coverage in current project
+  veto scan --directory ./packages/sdk
   veto scan --suggest                Show inline YAML snippets for uncovered tools
   veto scan --fail-uncovered         Fail CI when uncovered tools are detected
   veto diff financial.yaml           Compare veto/rules/financial.yaml vs HEAD
@@ -147,7 +163,7 @@ function parseArgs(args: string[]): ParsedArgs {
     'input', 'file', 'provider', 'model',
     'policy', 'format', 'pack',
     'old', 'new', 'log', 'mode',
-    'directory', 'prompt',
+    'directory', 'prompt', 'renderer',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -178,6 +194,39 @@ function parseArgs(args: string[]): ParsedArgs {
   }
 
   return { command, positionals, flags, values };
+}
+
+function parseRendererPreference(rawValue: string | undefined): 'auto' | 'opentui' | 'ansi' {
+  if (!rawValue) {
+    return 'auto';
+  }
+
+  if (rawValue === 'auto' || rawValue === 'opentui' || rawValue === 'ansi') {
+    return rawValue;
+  }
+
+  console.error(`Error: invalid --renderer value "${rawValue}". Expected auto|opentui|ansi.`);
+  process.exit(1);
+}
+
+async function runStudio(flags: Record<string, boolean>, values: Record<string, string>): Promise<void> {
+  if (flags['legacy']) {
+    await startRepl({
+      cwd: values['directory'],
+      version: VERSION,
+    });
+    return;
+  }
+
+  await startStudio({
+    cwd: process.cwd(),
+    directory: values['directory'],
+    renderer: parseRendererPreference(values['renderer']),
+    includeExamples: flags['include-examples'],
+    includeTests: flags['include-tests'],
+    demoTemplate: flags['demo-template'],
+    version: VERSION,
+  });
 }
 
 async function runLearn(flags: Record<string, boolean>, values: Record<string, string>): Promise<void> {
@@ -301,13 +350,13 @@ async function main(): Promise<void> {
       console.error('Error: --repl cannot be combined with another command');
       process.exit(1);
     }
-    await startRepl({ version: VERSION });
+    await runStudio(flags, values);
     process.exit(0);
   }
 
   switch (command) {
     case 'repl': {
-      await startRepl({ version: VERSION });
+      await runStudio(flags, values);
       process.exit(0);
       break;
     }
@@ -454,9 +503,12 @@ async function main(): Promise<void> {
 
     case 'scan': {
       const scanResult = await scan({
+        directory: values['directory'],
         quiet: flags['quiet'],
         failUncovered: flags['fail-uncovered'],
         suggest: flags['suggest'],
+        includeExamples: flags['include-examples'],
+        includeTests: flags['include-tests'],
         format: (values['format'] as 'text' | 'json') ?? undefined,
       });
       process.exit(scanResult.success ? 0 : 1);
@@ -482,7 +534,7 @@ async function main(): Promise<void> {
     }
 
     case '': {
-      await startRepl({ version: VERSION });
+      await runStudio(flags, values);
       process.exit(0);
       break;
     }

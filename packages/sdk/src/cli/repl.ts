@@ -40,9 +40,9 @@ import {
   type ReplIntent,
   validateGeneratedYaml,
 } from './repl-generate.js';
+import { getCliVersion } from './version.js';
 
 const DEFAULT_HISTORY_LIMIT = 1000;
-const DEFAULT_VERSION = '0.1.0';
 const DEFAULT_EXPORT_PATH = './veto/rules/repl.generated.yaml';
 
 const HELP_LINES = [
@@ -1422,7 +1422,7 @@ function createReplCompleter(context: ReplSessionContext): (line: string) => [st
 export async function startRepl(options: StartReplOptions = {}): Promise<void> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const context = await createReplSessionContext(cwd);
-  const version = options.version ?? DEFAULT_VERSION;
+  const version = options.version ?? getCliVersion();
 
   const historyPath = resolveHistoryPath(options.historyPath);
   const priorHistory = loadHistoryFile(historyPath, DEFAULT_HISTORY_LIMIT);

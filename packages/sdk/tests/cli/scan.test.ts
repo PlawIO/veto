@@ -240,6 +240,45 @@ rules:
     expect(result.report.discoveredTools).toHaveLength(0);
   });
 
+  it('excludes examples and tests by default', async () => {
+    writeFixture(
+      'examples/agent.ts',
+      `const t = tool({ name: 'example_tool', execute: async () => null });`
+    );
+    writeFixture(
+      'tests/agent.ts',
+      `const t = tool({ name: 'test_tool', execute: async () => null });`
+    );
+
+    const result = await scan({ directory: TEST_DIR, quiet: true });
+    const names = result.report.discoveredTools.map((tool) => tool.name);
+
+    expect(names).not.toContain('example_tool');
+    expect(names).not.toContain('test_tool');
+  });
+
+  it('includes examples and tests when include flags are enabled', async () => {
+    writeFixture(
+      'examples/agent.ts',
+      `const t = tool({ name: 'example_tool', execute: async () => null });`
+    );
+    writeFixture(
+      'tests/agent.ts',
+      `const t = tool({ name: 'test_tool', execute: async () => null });`
+    );
+
+    const result = await scan({
+      directory: TEST_DIR,
+      quiet: true,
+      includeExamples: true,
+      includeTests: true,
+    });
+    const names = result.report.discoveredTools.map((tool) => tool.name);
+
+    expect(names).toContain('example_tool');
+    expect(names).toContain('test_tool');
+  });
+
   it('honors custom rules directory from veto.config.yaml', async () => {
     writeFixture(
       'src/agent.ts',

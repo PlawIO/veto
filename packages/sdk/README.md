@@ -175,28 +175,50 @@ const csvAudit = veto.exportDecisions("csv");
 
 ## CLI Commands
 
-| Command            | Description                                           |
-| ------------------ | ----------------------------------------------------- |
-| `npx veto`         | Start interactive policy REPL                         |
-| `npx veto --repl`  | Start interactive policy REPL (explicit flag)         |
-| `npx veto repl`    | Start interactive policy REPL                         |
-| `npx veto init`    | Initialize Veto in current directory                  |
-| `npx veto learn`   | Observe tool calls and generate starter policies      |
-| `npx veto compile` | Compile natural-language policy text into YAML        |
-| `npx veto test`    | Run adversarial policy gap analysis                   |
-| `npx veto scan`    | Audit discovered tools vs loaded rule coverage        |
-| `npx veto diff`    | Diff policy snapshots and replay deterministic impact |
-| `npx veto version` | Show version                                          |
+| Command                  | Description                                           |
+| ------------------------ | ----------------------------------------------------- |
+| `npx veto`               | Start Veto Studio (full-screen TUI)                   |
+| `npx veto --repl`        | Start Veto Studio (explicit flag)                     |
+| `npx veto repl`          | Start Veto Studio                                     |
+| `npx veto repl --legacy` | Start legacy line-based REPL                          |
+| `npx veto init`          | Initialize Veto in current directory                  |
+| `npx veto learn`         | Observe tool calls and generate starter policies      |
+| `npx veto compile`       | Compile natural-language policy text into YAML        |
+| `npx veto test`          | Run adversarial policy gap analysis                   |
+| `npx veto scan`          | Audit discovered tools vs loaded rule coverage        |
+| `npx veto diff`          | Diff policy snapshots and replay deterministic impact |
+| `npx veto version`       | Show version                                          |
 
-Interactive REPL examples:
+Migration notes:
+
+- Legacy REPL is still available via `npx veto repl --legacy`.
+- Studio template fallback is opt-in (`--demo-template` or `studio.generation.allowTemplateFallback: true`).
+
+Veto Studio examples:
 
 ```bash
-# Start interactive policy shell
+# Start full-screen Veto Studio
 npx veto
 
-# Start interactive policy shell (explicit flag)
+# Start Studio with explicit flag
 npx veto --repl
 
+# Force ANSI renderer
+npx veto repl --renderer ansi
+
+# Open a specific workspace from multi-repo root
+npx veto repl --directory ./packages/sdk
+
+# Enable explicit template demo mode (otherwise no silent fallback in Studio)
+npx veto repl --demo-template
+
+# Legacy line-based REPL remains available
+npx veto repl --legacy
+```
+
+Legacy REPL slash-command examples:
+
+```bash
 # Test a call locally (no network)
 /test transfer_funds({"amount": 50000})
 
@@ -211,9 +233,6 @@ test my agent against current rules
 
 # Export merged rules
 /export
-
-# Save generated YAML to a custom file during prompt flow
-# Save to ./veto/rules/transfer-funds-block-25000.yaml? [Y/n/edit/path]
 ```
 
 Coverage audit examples:
@@ -221,6 +240,12 @@ Coverage audit examples:
 ```bash
 # Human-readable coverage report
 npx veto scan
+
+# Scan an explicit workspace directory
+npx veto scan --directory ./packages/sdk
+
+# Include examples/ and tests/ directories in scan scope
+npx veto scan --include-examples --include-tests
 
 # CI gate: fail when uncovered tools are found
 npx veto scan --fail-uncovered

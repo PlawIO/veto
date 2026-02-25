@@ -14,6 +14,11 @@ interface ReplConfigFile {
   };
 }
 
+export interface ReplContextScanOptions {
+  includeExamples?: boolean;
+  includeTests?: boolean;
+}
+
 export interface RuleSourceInfo {
   source: string;
   line?: number;
@@ -24,6 +29,7 @@ export interface ReplSessionContext {
   vetoDir: string;
   rulesDir: string;
   recursiveRules: boolean;
+  scanOptions: Required<ReplContextScanOptions>;
   baselineRules: Rule[];
   sessionRules: Rule[];
   allRules: Rule[];
@@ -255,9 +261,19 @@ function computeSessionSourceMap(sessionRules: readonly Rule[], sessionSourceByR
   return map;
 }
 
-async function createScanReport(projectDir: string, rulesDir: string): Promise<ScanReport> {
+async function createScanReport(
+  projectDir: string,
+  rulesDir: string,
+  scanOptions: Required<ReplContextScanOptions>
+): Promise<ScanReport> {
   try {
-    const result = await scan({ directory: projectDir, quiet: true, suggest: true });
+    const result = await scan({
+      directory: projectDir,
+      quiet: true,
+      suggest: true,
+      includeExamples: scanOptions.includeExamples,
+      includeTests: scanOptions.includeTests,
+    });
     return result.report;
   } catch {
     return createEmptyScanReport(projectDir, rulesDir);
@@ -302,18 +318,26 @@ function applyContextRules(
   context.rulesByTool = mergedIndex.rulesByTool;
 }
 
-export async function createReplSessionContext(projectDir: string = process.cwd()): Promise<ReplSessionContext> {
+export async function createReplSessionContext(
+  projectDir: string = process.cwd(),
+  options: ReplContextScanOptions = {}
+): Promise<ReplSessionContext> {
   const resolvedProjectDir = resolve(projectDir);
   const config = normalizeRulesConfig(resolvedProjectDir);
+  const scanOptions: Required<ReplContextScanOptions> = {
+    includeExamples: options.includeExamples ?? false,
+    includeTests: options.includeTests ?? false,
+  };
 
   const baseline = loadRulesFromDirectory(config.rulesDir, config.recursiveRules);
-  const report = await createScanReport(resolvedProjectDir, config.rulesDir);
+  const report = await createScanReport(resolvedProjectDir, config.rulesDir, scanOptions);
 
   const context: ReplSessionContext = {
     projectDir: resolvedProjectDir,
     vetoDir: config.vetoDir,
     rulesDir: config.rulesDir,
     recursiveRules: config.recursiveRules,
+    scanOptions,
     baselineRules: baseline.rules,
     sessionRules: [],
     allRules: baseline.rules,
@@ -328,7 +352,7 @@ export async function createReplSessionContext(projectDir: string = process.cwd(
 }
 
 export async function rescanReplContext(context: ReplSessionContext): Promise<ScanReport> {
-  const report = await createScanReport(context.projectDir, context.rulesDir);
+  const report = await createScanReport(context.projectDir, context.rulesDir, context.scanOptions);
   context.scanReport = report;
   context.discoveredTools = report.discoveredTools;
   return report;

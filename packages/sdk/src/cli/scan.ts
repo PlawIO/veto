@@ -49,6 +49,8 @@ export interface ScanOptions {
   failUncovered?: boolean;
   suggest?: boolean;
   format?: ReportFormat;
+  includeExamples?: boolean;
+  includeTests?: boolean;
 }
 
 export interface DiscoveredTool {
@@ -102,7 +104,7 @@ export interface ScanResult {
   report: ScanReport;
 }
 
-const SCAN_IGNORE_DIRECTORIES = new Set([
+const BASE_SCAN_IGNORE_DIRECTORIES = new Set([
   '.git',
   'node_modules',
   'dist',
@@ -114,10 +116,10 @@ const SCAN_IGNORE_DIRECTORIES = new Set([
   'venv',
   '__pycache__',
   '.pytest_cache',
-  'test',
-  'tests',
-  '__tests__',
 ]);
+
+const TEST_DIRECTORIES = new Set(['test', 'tests', '__tests__']);
+const EXAMPLES_DIRECTORIES = new Set(['example', 'examples']);
 
 const JS_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -448,7 +450,32 @@ function detectFrameworks(jsDependencies: readonly string[], pythonDependencies:
   return [...frameworks].sort((a, b) => a.localeCompare(b));
 }
 
-function walkSourceFiles(dirPath: string, files: string[]): void {
+function shouldIgnoreDirectory(
+  entry: string,
+  options: { includeExamples: boolean; includeTests: boolean }
+): boolean {
+  const normalized = entry.toLowerCase();
+
+  if (BASE_SCAN_IGNORE_DIRECTORIES.has(normalized)) {
+    return true;
+  }
+
+  if (!options.includeExamples && EXAMPLES_DIRECTORIES.has(normalized)) {
+    return true;
+  }
+
+  if (!options.includeTests && TEST_DIRECTORIES.has(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
+function walkSourceFiles(
+  dirPath: string,
+  files: string[],
+  options: { includeExamples: boolean; includeTests: boolean }
+): void {
   if (!existsSync(dirPath)) {
     return;
   }
@@ -460,10 +487,10 @@ function walkSourceFiles(dirPath: string, files: string[]): void {
     const stats = statSync(fullPath);
 
     if (stats.isDirectory()) {
-      if (SCAN_IGNORE_DIRECTORIES.has(entry)) {
+      if (shouldIgnoreDirectory(entry, options)) {
         continue;
       }
-      walkSourceFiles(fullPath, files);
+      walkSourceFiles(fullPath, files, options);
       continue;
     }
 
@@ -688,9 +715,13 @@ function detectPythonTools(
   }
 }
 
-function scanSourceFiles(projectDir: string, discovered: Map<string, MutableDiscoveredTool>): void {
+function scanSourceFiles(
+  projectDir: string,
+  discovered: Map<string, MutableDiscoveredTool>,
+  options: { includeExamples: boolean; includeTests: boolean }
+): void {
   const files: string[] = [];
-  walkSourceFiles(projectDir, files);
+  walkSourceFiles(projectDir, files, options);
 
   for (const filePath of files) {
     const extension = extname(filePath).toLowerCase();
@@ -858,6 +889,8 @@ export async function scan(options: ScanOptions = {}): Promise<ScanResult> {
     failUncovered = false,
     suggest = false,
     format = 'text',
+    includeExamples = false,
+    includeTests = false,
   } = options;
 
   const normalizedFormat: ReportFormat = format === 'json' ? 'json' : 'text';
@@ -870,7 +903,10 @@ export async function scan(options: ScanOptions = {}): Promise<ScanResult> {
     addToolDiscovery(discovered, toolName, 'policy', []);
   }
 
-  scanSourceFiles(projectDir, discovered);
+  scanSourceFiles(projectDir, discovered, {
+    includeExamples,
+    includeTests,
+  });
   applyCoverage(discovered, policyContext.rulesByTool, policyContext.globalRules);
 
   const packageJson = extractPackageJsonDependencies(projectDir);
