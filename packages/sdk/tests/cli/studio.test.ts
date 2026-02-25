@@ -111,6 +111,19 @@ describe('veto studio', () => {
     await selection.renderer.dispose();
   });
 
+  it('falls back to ANSI renderer when Ink module fails to load in auto mode', async () => {
+    vi.doMock('../../src/cli/studio/renderers/ink.js', () => {
+      throw new Error('Ink module load failed');
+    });
+
+    const { selectStudioRenderer } = await import('../../src/cli/studio/start.js');
+    const selection = await selectStudioRenderer('auto');
+
+    expect(selection.renderer.mode).toBe('ansi');
+    expect(selection.warning).toContain('Ink unavailable');
+    await selection.renderer.dispose();
+  });
+
   it('falls back to Ink when OpenTUI init fails in explicit opentui mode', async () => {
     vi.doMock('../../src/cli/studio/renderers/opentui.js', () => ({
       createOpenTuiRenderer: () => ({

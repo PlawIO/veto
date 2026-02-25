@@ -10,8 +10,6 @@ import {
   type StudioTheme,
 } from './state.js';
 import { createAnsiRenderer } from './renderers/ansi.js';
-import { createOpenTuiRenderer } from './renderers/opentui.js';
-import { createInkRenderer } from './renderers/ink.js';
 
 export interface StartStudioOptions {
   cwd?: string;
@@ -29,19 +27,22 @@ interface RendererSelectionResult {
   warning?: string;
 }
 
-function createRendererByMode(mode: StudioRendererPreference): StudioRenderer {
+async function createRendererByMode(mode: StudioRendererPreference): Promise<StudioRenderer> {
   if (mode === 'ansi') {
     return createAnsiRenderer();
   }
 
   if (mode === 'ink') {
+    const { createInkRenderer } = await import('./renderers/ink.js');
     return createInkRenderer();
   }
 
   if (mode === 'opentui') {
+    const { createOpenTuiRenderer } = await import('./renderers/opentui.js');
     return createOpenTuiRenderer();
   }
 
+  const { createInkRenderer } = await import('./renderers/ink.js');
   return createInkRenderer();
 }
 
@@ -49,18 +50,18 @@ export async function selectStudioRenderer(
   preference: StudioRendererPreference
 ): Promise<RendererSelectionResult> {
   if (preference === 'ansi') {
-    const renderer = createRendererByMode('ansi');
+    const renderer = await createRendererByMode('ansi');
     await renderer.init();
     return { renderer };
   }
 
   if (preference === 'ink') {
     try {
-      const renderer = createRendererByMode('ink');
+      const renderer = await createRendererByMode('ink');
       await renderer.init();
       return { renderer };
     } catch (error) {
-      const fallback = createRendererByMode('ansi');
+      const fallback = await createRendererByMode('ansi');
       await fallback.init();
       return {
         renderer: fallback,
@@ -71,19 +72,19 @@ export async function selectStudioRenderer(
 
   if (preference === 'opentui') {
     try {
-      const renderer = createRendererByMode('opentui');
+      const renderer = await createRendererByMode('opentui');
       await renderer.init();
       return { renderer };
     } catch (error) {
       try {
-        const inkFallback = createRendererByMode('ink');
+        const inkFallback = await createRendererByMode('ink');
         await inkFallback.init();
         return {
           renderer: inkFallback,
           warning: `OpenTUI unavailable, using Ink fallback: ${error instanceof Error ? error.message : String(error)}`,
         };
       } catch (inkError) {
-        const fallback = createRendererByMode('ansi');
+        const fallback = await createRendererByMode('ansi');
         await fallback.init();
         return {
           renderer: fallback,
@@ -96,11 +97,11 @@ export async function selectStudioRenderer(
   }
 
   try {
-    const renderer = createRendererByMode('ink');
+    const renderer = await createRendererByMode('ink');
     await renderer.init();
     return { renderer };
   } catch (error) {
-    const fallback = createRendererByMode('ansi');
+    const fallback = await createRendererByMode('ansi');
     await fallback.init();
     return {
       renderer: fallback,
