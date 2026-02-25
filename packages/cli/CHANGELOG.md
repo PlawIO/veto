@@ -1,5 +1,14 @@
 # veto-cli
 
+## 1.16.1
+
+### Patch Changes
+
+- [#144](https://github.com/VulnZap/veto/pull/144) [`1f4eca1`](https://github.com/VulnZap/veto/commit/1f4eca107a62d7fe1a2490e149d45c1ab8a95513) Thanks [@yazcaleb](https://github.com/yazcaleb)! - fix(cli): lazy-load Studio renderers so Ink import failures fall back to ANSI instead of crashing on startup (for example on Node 22.12).
+
+- Updated dependencies [[`1f4eca1`](https://github.com/VulnZap/veto/commit/1f4eca107a62d7fe1a2490e149d45c1ab8a95513)]:
+  - veto-sdk@1.16.1
+
 ## 1.16.0
 
 ### Minor Changes
