@@ -74,7 +74,11 @@ export async function agentInit(options: AgentOptions = {}): Promise<AgentResult
     });
 
     if (!options.format || options.format === 'json') {
-      console.log(JSON.stringify({ success: result.success, data: result, error: result.messages.join('; ') }));
+      const output: Record<string, unknown> = { success: result.success, data: result };
+      if (result.messages.length > 0) {
+        output.messages = result.messages;
+      }
+      console.log(JSON.stringify(output));
     } else {
       console.log(stringify({ ...result }));
     }
