@@ -1,5 +1,15 @@
 # veto-sdk
 
+## 1.13.0
+
+### Minor Changes
+
+- [#131](https://github.com/VulnZap/veto/pull/131) [`40b7552`](https://github.com/VulnZap/veto/commit/40b7552935d1a72894114b098a1630181b016257) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a new `npx veto scan` CLI command to audit discovered tool coverage against loaded rules, with optional CI fail gating (`--fail-uncovered`), inline YAML suggestions (`--suggest`), and `text|json` output formats.
+
+- [#134](https://github.com/VulnZap/veto/pull/134) [`b499d76`](https://github.com/VulnZap/veto/commit/b499d763697e4839eac534352d0df1a843aeb321) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add an interactive REPL for `npx veto` with natural-language policy generation, local `/test` and simulation flows, rule explain/export/load/clear commands, and persistent shell history.
+
+- [#133](https://github.com/VulnZap/veto/pull/133) [`eb23217`](https://github.com/VulnZap/veto/commit/eb23217fd1e99efbe0fbd4acdcf667cbea10c204) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add `npx veto diff` for structural policy diffs and deterministic replay impact analysis from JSONL call logs.
+
 ## 1.12.0
 
 ### Minor Changes
