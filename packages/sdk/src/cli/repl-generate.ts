@@ -424,11 +424,148 @@ function pickRuleIdFromInput(input: string, existingRules: readonly Rule[]): str
 }
 
 function toSlug(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-');
+  const lower = value.toLowerCase();
+  let slug = '';
+  let previousWasDash = false;
+
+  for (let i = 0; i < lower.length; i++) {
+    const code = lower.charCodeAt(i);
+    const isLetter = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+
+    if (isLetter || isDigit) {
+      slug += lower[i];
+      previousWasDash = false;
+      continue;
+    }
+
+    if (slug.length > 0 && !previousWasDash) {
+      slug += '-';
+      previousWasDash = true;
+    }
+  }
+
+  return slug.endsWith('-') ? slug.slice(0, -1) : slug;
+}
+
+function includesAnyPhrase(value: string, phrases: readonly string[]): boolean {
+  for (const phrase of phrases) {
+    if (value.includes(phrase)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isAsciiLetterOrDigit(code: number): boolean {
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122);
+}
+
+function isEmailTokenChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return isAsciiLetterOrDigit(code)
+    || char === '.'
+    || char === '_'
+    || char === '%'
+    || char === '+'
+    || char === '-'
+    || char === '@';
+}
+
+function isLocalEmailChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return isAsciiLetterOrDigit(code)
+    || char === '.'
+    || char === '_'
+    || char === '%'
+    || char === '+'
+    || char === '-';
+}
+
+function isDomainEmailChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return isAsciiLetterOrDigit(code)
+    || char === '.'
+    || char === '-';
+}
+
+function isLikelyEmailAddress(value: string): boolean {
+  const atIndex = value.indexOf('@');
+  if (atIndex <= 0 || atIndex !== value.lastIndexOf('@')) {
+    return false;
+  }
+
+  const local = value.slice(0, atIndex);
+  const domain = value.slice(atIndex + 1);
+
+  if (!local || domain.length < 3) {
+    return false;
+  }
+
+  if (
+    domain.startsWith('.')
+    || domain.endsWith('.')
+    || domain.startsWith('-')
+    || domain.endsWith('-')
+  ) {
+    return false;
+  }
+
+  const lastDotIndex = domain.lastIndexOf('.');
+  if (lastDotIndex <= 0 || lastDotIndex >= domain.length - 1) {
+    return false;
+  }
+
+  if (domain.length - lastDotIndex - 1 < 2) {
+    return false;
+  }
+
+  for (let i = 0; i < local.length; i++) {
+    if (!isLocalEmailChar(local[i])) {
+      return false;
+    }
+  }
+
+  for (let i = 0; i < domain.length; i++) {
+    if (!isDomainEmailChar(domain[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function extractEmailFromText(input: string): string | undefined {
+  let token = '';
+
+  const flush = (): string | undefined => {
+    if (token.length === 0) {
+      return undefined;
+    }
+
+    const candidate = token;
+    token = '';
+    return isLikelyEmailAddress(candidate) ? candidate : undefined;
+  };
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+
+    if (isEmailTokenChar(char)) {
+      token += char;
+      continue;
+    }
+
+    const candidate = flush();
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return flush();
 }
 
 function extractNumericAmount(prompt: string): number | null {
@@ -684,16 +821,17 @@ function inferSimulationCall(
 ): { toolName?: string; args: Record<string, unknown> } {
   const toolNames = findMatchingToolNames(input, tools);
   const args: Record<string, unknown> = {};
+  const normalizedInput = input.toLowerCase();
 
   const amount = extractNumericAmount(input);
   if (amount !== null) {
     args.amount = amount;
   }
 
-  const emailMatch = input.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
-  if (emailMatch) {
-    args.to = emailMatch[0];
-  } else if (/external domain|outside company|non-company/i.test(input)) {
+  const email = extractEmailFromText(input);
+  if (email) {
+    args.to = email;
+  } else if (includesAnyPhrase(normalizedInput, ['external domain', 'outside company', 'non-company'])) {
     args.to = 'user@gmail.com';
   }
 
@@ -744,7 +882,17 @@ function interpretIntentHeuristically(
 ): ReplIntentResult {
   const normalized = input.toLowerCase();
 
-  if (/test my agent|test current rules|test the rules|run .*scenario|scenario suite/.test(normalized)) {
+  const hasRunScenarioPhrase = normalized.includes('run') && normalized.includes('scenario');
+
+  if (
+    includesAnyPhrase(normalized, [
+      'test my agent',
+      'test current rules',
+      'test the rules',
+      'scenario suite',
+    ])
+    || hasRunScenarioPhrase
+  ) {
     return {
       mode: 'template',
       intent: 'test_suite',
@@ -753,7 +901,14 @@ function interpretIntentHeuristically(
     };
   }
 
-  if (/^explain\b|\bexplain the\b|\bexplain rule\b|\bwhat does .* rule\b/.test(normalized)) {
+  const startsWithExplain = normalized === 'explain' || normalized.startsWith('explain ');
+  const asksWhatRuleDoes = normalized.includes('what does') && normalized.includes('rule');
+
+  if (
+    startsWithExplain
+    || includesAnyPhrase(normalized, ['explain the', 'explain rule'])
+    || asksWhatRuleDoes
+  ) {
     return {
       mode: 'template',
       intent: 'explain',
@@ -763,7 +918,13 @@ function interpretIntentHeuristically(
     };
   }
 
-  if (/what would happen|would .* be (blocked|allowed|denied)|if my agent|simulate|dry run|try to/.test(normalized)) {
+  const asksWouldDecision = normalized.includes('would')
+    && includesAnyPhrase(normalized, ['be blocked', 'be allowed', 'be denied']);
+
+  if (
+    includesAnyPhrase(normalized, ['what would happen', 'if my agent', 'simulate', 'dry run', 'try to'])
+    || asksWouldDecision
+  ) {
     const simulated = inferSimulationCall(input, tools, existingRules);
     return {
       mode: 'template',
@@ -789,7 +950,8 @@ function shouldAttemptRemoteIntentParsing(input: string, heuristic: ReplIntentRe
   }
 
   const normalized = input.toLowerCase();
-  return /\?|what|would|happen|if|should|explain|why|test|suite|scenario/.test(normalized);
+  return input.includes('?')
+    || includesAnyPhrase(normalized, ['what', 'would', 'happen', 'if', 'should', 'explain', 'why', 'test', 'suite', 'scenario']);
 }
 
 async function generateViaKernel(options: {
