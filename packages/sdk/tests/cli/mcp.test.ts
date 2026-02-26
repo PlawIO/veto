@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  createMcpGatewayServerForTesting,
   createDefaultMcpConfigTemplate,
   resolveMcpConfigForTesting,
   runMcpDoctorCommand,
@@ -151,5 +152,99 @@ describe('mcp cli commands', () => {
 
     const raw = readFileSync(path, 'utf-8');
     expect(raw.length).toBeGreaterThan(50);
+  });
+
+  it('rejects tools/call requests without a non-empty tool name', async () => {
+    const gateway = createMcpGatewayServerForTesting({
+      listen: {
+        host: '127.0.0.1',
+        port: 0,
+      },
+      policy: {
+        serverUrl: 'http://127.0.0.1:65534',
+        apiKey: 'veto_test_key_1234567890',
+      },
+      upstreams: [
+        {
+          name: 'default',
+          transport: 'mcp-sse',
+          url: 'http://127.0.0.1:65534',
+          timeoutMs: 1000,
+        },
+      ],
+      logging: {
+        level: 'info',
+      },
+    });
+
+    await gateway.start();
+    const address = gateway.getAddress();
+    expect(address).not.toBeNull();
+
+    try {
+      const response = await fetch(`http://${address!.host}:${address!.port}/default`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            arguments: { amount: 100 },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as { error?: { code?: number; message?: string } };
+      expect(body.error?.code).toBe(-32602);
+      expect(body.error?.message).toContain('params.name');
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it('rejects oversized HTTP bodies', async () => {
+    const gateway = createMcpGatewayServerForTesting({
+      listen: {
+        host: '127.0.0.1',
+        port: 0,
+      },
+      policy: {
+        serverUrl: 'http://127.0.0.1:65534',
+        apiKey: 'veto_test_key_1234567890',
+      },
+      upstreams: [
+        {
+          name: 'default',
+          transport: 'mcp-sse',
+          url: 'http://127.0.0.1:65534',
+          timeoutMs: 1000,
+        },
+      ],
+      logging: {
+        level: 'info',
+      },
+    });
+
+    await gateway.start();
+    const address = gateway.getAddress();
+    expect(address).not.toBeNull();
+
+    const oversizedPayload = 'x'.repeat(1_100_000);
+
+    try {
+      const response = await fetch(`http://${address!.host}:${address!.port}/default`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: oversizedPayload,
+      });
+
+      expect(response.status).toBe(413);
+      const body = await response.json() as { error?: { message?: string } };
+      expect(body.error?.message).toContain('Request body exceeds');
+    } finally {
+      await gateway.stop();
+    }
   });
 });

@@ -10,6 +10,9 @@ const DEFAULT_POLICY_SERVER_URL = 'http://localhost:3001';
 const DEFAULT_LISTEN_HOST = '127.0.0.1';
 const DEFAULT_LISTEN_PORT = 8799;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_HTTP_BODY_BYTES = 1_048_576;
+const MAX_STDIO_BUFFER_BYTES = 1_048_576;
+const MAX_PENDING_STDIO_REQUESTS = 1_000;
 
 type McpTransport = 'mcp-sse' | 'mcp-stdio';
 type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -171,7 +174,7 @@ function resolveMcpUpstreamHttpUrl(rawUrl: string): string {
   }
 
   if (parsed.protocol === 'mcp:' || parsed.protocol === 'mcp+sse:') {
-    parsed.protocol = 'http:';
+    parsed = new URL(parsed.toString().replace(/^mcp(\+sse)?:\/\//i, 'http://'));
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -556,7 +559,6 @@ class UpstreamRuntime {
   private stdioBuffer = '';
   private pendingStdio = new Map<string | number, {
     resolve: (response: JsonRpcResponse) => void;
-    reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
 
@@ -584,7 +586,14 @@ class UpstreamRuntime {
 
     for (const [id, pending] of this.pendingStdio) {
       clearTimeout(pending.timer);
-      pending.reject(new Error(`Stdio request ${String(id)} canceled during shutdown`));
+      pending.resolve({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32603,
+          message: `Stdio request ${String(id)} canceled during shutdown`,
+        },
+      });
     }
     this.pendingStdio.clear();
   }
@@ -626,41 +635,51 @@ class UpstreamRuntime {
 
     if (message.method === 'tools/call') {
       const params = (message.params ?? {}) as unknown as McpToolCallParams;
-      if (params.name) {
-        const result = await this.policyClient.validate(params.name, params.arguments ?? {});
-        this.emitDecision({
-          type: 'decision',
-          upstream: this.upstream.name,
-          toolName: params.name,
-          decision: result.decision,
-          reason: result.reason,
-          latencyMs: result.latencyMs,
-          timestamp: new Date().toISOString(),
-          requestId: message.id !== undefined ? String(message.id) : undefined,
-          transport: this.upstream.transport,
-        });
+      const toolName = typeof params.name === 'string' ? params.name.trim() : '';
+      if (!toolName) {
+        return {
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32602,
+            message: 'Invalid tools/call request: params.name must be a non-empty string',
+          },
+        };
+      }
 
-        if (result.decision === 'deny') {
-          return {
-            jsonrpc: '2.0',
-            id: message.id,
-            error: {
-              code: -32001,
-              message: `Tool call denied: ${result.reason ?? 'policy violation'}`,
-            },
-          };
-        }
+      const result = await this.policyClient.validate(toolName, asRecord(params.arguments));
+      this.emitDecision({
+        type: 'decision',
+        upstream: this.upstream.name,
+        toolName,
+        decision: result.decision,
+        reason: result.reason,
+        latencyMs: result.latencyMs,
+        timestamp: new Date().toISOString(),
+        requestId: message.id !== undefined ? String(message.id) : undefined,
+        transport: this.upstream.transport,
+      });
 
-        if (result.decision === 'require_approval') {
-          return {
-            jsonrpc: '2.0',
-            id: message.id,
-            error: {
-              code: -32002,
-              message: `Tool call requires approval: ${result.reason ?? 'pending review'}`,
-            },
-          };
-        }
+      if (result.decision === 'deny') {
+        return {
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32001,
+            message: `Tool call denied: ${result.reason ?? 'policy violation'}`,
+          },
+        };
+      }
+
+      if (result.decision === 'require_approval') {
+        return {
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32002,
+            message: `Tool call requires approval: ${result.reason ?? 'pending review'}`,
+          },
+        };
       }
     }
 
@@ -804,28 +823,50 @@ class UpstreamRuntime {
     };
   }
 
-  private forwardViaStdio(message: JsonRpcRequest): Promise<JsonRpcResponse> {
+  private async forwardViaStdio(message: JsonRpcRequest): Promise<JsonRpcResponse> {
     if (!this.stdioProcess?.stdin?.writable) {
-      return Promise.resolve({
+      return {
         jsonrpc: '2.0',
         id: message.id,
         error: {
           code: -32603,
           message: 'Stdio process not running',
         },
-      });
+      };
     }
 
     if (message.id === undefined) {
-      this.stdioProcess.stdin.write(`${JSON.stringify(message)}\n`);
-      return Promise.resolve({
+      try {
+        await this.writeToStdio(`${JSON.stringify(message)}\n`);
+      } catch (error) {
+        return {
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: `Failed to write to stdio upstream: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        };
+      }
+
+      return {
         jsonrpc: '2.0',
         result: null,
-      });
+      };
     }
 
-    return new Promise((resolveResponse, rejectResponse) => {
-      const id = message.id!;
+    if (this.pendingStdio.size >= MAX_PENDING_STDIO_REQUESTS) {
+      return {
+        jsonrpc: '2.0',
+        id: message.id,
+        error: {
+          code: -32603,
+          message: `Too many pending stdio requests (max ${MAX_PENDING_STDIO_REQUESTS})`,
+        },
+      };
+    }
+
+    const id = message.id;
+    return await new Promise((resolveResponse) => {
       const timer = setTimeout(() => {
         this.pendingStdio.delete(id);
         resolveResponse({
@@ -840,12 +881,65 @@ class UpstreamRuntime {
 
       this.pendingStdio.set(id, {
         resolve: resolveResponse,
-        reject: rejectResponse,
         timer,
       });
 
-      this.stdioProcess!.stdin.write(`${JSON.stringify(message)}\n`);
+      this.writeToStdio(`${JSON.stringify(message)}\n`).catch((error) => {
+        const pending = this.pendingStdio.get(id);
+        if (!pending) {
+          return;
+        }
+        clearTimeout(pending.timer);
+        this.pendingStdio.delete(id);
+        resolveResponse({
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32603,
+            message: `Failed to write to stdio upstream: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        });
+      });
     });
+  }
+
+  private writeToStdio(payload: string): Promise<void> {
+    const stdin = this.stdioProcess?.stdin;
+    if (!stdin || !stdin.writable) {
+      return Promise.reject(new Error('Stdio process not running'));
+    }
+
+    return new Promise((resolveWrite, rejectWrite) => {
+      const onError = (error: Error) => {
+        stdin.off('error', onError);
+        rejectWrite(error);
+      };
+
+      stdin.once('error', onError);
+      stdin.write(payload, (error?: Error | null) => {
+        stdin.off('error', onError);
+        if (error) {
+          rejectWrite(error);
+          return;
+        }
+        resolveWrite();
+      });
+    });
+  }
+
+  private failPendingStdioRequests(message: string): void {
+    for (const [id, pending] of this.pendingStdio) {
+      clearTimeout(pending.timer);
+      pending.resolve({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32603,
+          message,
+        },
+      });
+    }
+    this.pendingStdio.clear();
   }
 
   private startStdioProcess(): void {
@@ -862,7 +956,15 @@ class UpstreamRuntime {
     this.stdioProcess = child;
 
     child.stdout.on('data', (chunk: Buffer) => {
-      this.stdioBuffer += chunk.toString();
+      if (this.stdioBuffer.length + chunk.length > MAX_STDIO_BUFFER_BYTES) {
+        this.stdioBuffer = '';
+        this.failPendingStdioRequests(
+          `Stdio buffer exceeded ${MAX_STDIO_BUFFER_BYTES} bytes for upstream '${this.upstream.name}'`,
+        );
+        return;
+      }
+
+      this.stdioBuffer += chunk.toString('utf-8');
       const lines = this.stdioBuffer.split('\n');
       this.stdioBuffer = lines.pop() ?? '';
 
@@ -898,34 +1000,12 @@ class UpstreamRuntime {
 
     child.on('error', (error) => {
       const message = `Stdio process error for upstream '${this.upstream.name}': ${error.message}`;
-      for (const [id, pending] of this.pendingStdio) {
-        clearTimeout(pending.timer);
-        pending.resolve({
-          jsonrpc: '2.0',
-          id,
-          error: {
-            code: -32603,
-            message,
-          },
-        });
-      }
-      this.pendingStdio.clear();
+      this.failPendingStdioRequests(message);
     });
 
     child.on('exit', (code) => {
       const message = `Stdio process exited for upstream '${this.upstream.name}' with code ${String(code)}`;
-      for (const [id, pending] of this.pendingStdio) {
-        clearTimeout(pending.timer);
-        pending.resolve({
-          jsonrpc: '2.0',
-          id,
-          error: {
-            code: -32603,
-            message,
-          },
-        });
-      }
-      this.pendingStdio.clear();
+      this.failPendingStdioRequests(message);
       this.stdioProcess = null;
     });
   }
@@ -985,6 +1065,22 @@ class McpGatewayServer {
     });
 
     this.server = null;
+  }
+
+  getAddress(): { host: string; port: number } | null {
+    if (!this.server) {
+      return null;
+    }
+
+    const address = this.server.address();
+    if (!address || typeof address === 'string') {
+      return null;
+    }
+
+    return {
+      host: address.address,
+      port: address.port,
+    };
   }
 
   private resolveUpstream(pathname: string): UpstreamRuntime | null {
@@ -1057,11 +1153,14 @@ class McpGatewayServer {
     try {
       payload = await this.readBody(req);
     } catch (error) {
-      this.writeJson(res, 400, {
+      const reason = error instanceof Error ? error.message : String(error);
+      const tooLarge = reason.includes('Request body exceeds');
+
+      this.writeJson(res, tooLarge ? 413 : 400, {
         jsonrpc: '2.0',
         error: {
-          code: -32700,
-          message: `Invalid JSON body: ${error instanceof Error ? error.message : String(error)}`,
+          code: tooLarge ? -32603 : -32700,
+          message: tooLarge ? reason : `Invalid JSON body: ${reason}`,
         },
       });
       return;
@@ -1073,11 +1172,36 @@ class McpGatewayServer {
   }
 
   private async readBody(req: IncomingMessage): Promise<unknown> {
+    const contentLengthHeader = req.headers['content-length'];
+    if (typeof contentLengthHeader === 'string') {
+      const declaredLength = Number.parseInt(contentLengthHeader, 10);
+      if (Number.isInteger(declaredLength) && declaredLength > MAX_HTTP_BODY_BYTES) {
+        throw new Error(`Request body exceeds ${MAX_HTTP_BODY_BYTES} bytes`);
+      }
+    }
+
     const chunks: Buffer[] = [];
+    let totalBytes = 0;
     await new Promise<void>((resolveRead, rejectRead) => {
-      req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      req.on('end', () => resolveRead());
-      req.on('error', rejectRead);
+      const onData = (chunk: string | Buffer) => {
+        const normalized = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        totalBytes += normalized.byteLength;
+        if (totalBytes > MAX_HTTP_BODY_BYTES) {
+          req.off('data', onData);
+          req.off('end', onEnd);
+          req.off('error', onError);
+          req.destroy();
+          rejectRead(new Error(`Request body exceeds ${MAX_HTTP_BODY_BYTES} bytes`));
+          return;
+        }
+        chunks.push(normalized);
+      };
+      const onEnd = () => resolveRead();
+      const onError = (error: Error) => rejectRead(error);
+
+      req.on('data', onData);
+      req.on('end', onEnd);
+      req.on('error', onError);
     });
 
     if (chunks.length === 0) {
@@ -1383,4 +1507,8 @@ export async function runMcpServeCommand(options: McpServeOptions = {}): Promise
 
 export function resolveMcpConfigForTesting(options: McpServeOptions): ResolvedMcpConfig {
   return buildConfigFromServeOptions(options);
+}
+
+export function createMcpGatewayServerForTesting(config: McpConfig): Pick<McpGatewayServer, 'start' | 'stop' | 'getAddress'> {
+  return new McpGatewayServer(config);
 }
