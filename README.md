@@ -25,6 +25,16 @@ pip install veto
 npm install -g veto-cli
 ```
 
+## skills.sh Skill (Agents)
+
+Veto ships a dedicated skill for coding agents that need safe, non-destructive policy operations.
+
+- Install all Veto skills: `npx skills add VulnZap/veto`
+- Skill name: `veto-policy-runtime`
+- Path: [`skills/veto-policy-runtime/SKILL.md`](./skills/veto-policy-runtime/SKILL.md)
+- Goal: create/apply/check policies with deterministic-first behavior
+- Safety: create-only workflow (no policy delete, no in-place policy edits)
+
 ## How It Works
 
 ```
