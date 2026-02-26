@@ -25,6 +25,7 @@ import {
   runPolicyGenerateCommand,
 } from './headless.js';
 import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } from './agent.js';
+import { runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
 
 const VERSION = getCliVersion();
 
@@ -56,6 +57,9 @@ Canonical Commands:
   cloud org use <id>
   cloud project use <id>
   cloud logout
+  mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
+  mcp doctor [--config <path>] [--json]
+  mcp init [--output <path>] [--json]
   doctor
 
 Core Commands:
@@ -99,6 +103,9 @@ Examples:
   veto guard check --tool approve_invoice --args '{"amount":120}' --mode local --json
   veto cloud login
   veto cloud whoami --json
+  veto mcp init
+  veto mcp doctor --json
+  veto mcp serve --config ./veto/mcp.config.yaml
   veto doctor
 `);
 }
@@ -141,6 +148,13 @@ function parseArgs(args: string[]): ParsedArgs {
     'project',
     'base-url',
     'theme',
+    'config',
+    'listen',
+    'upstream',
+    'transport',
+    'api-key',
+    'policy-server',
+    'timeout-ms',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -560,6 +574,63 @@ async function runDoctor(flags: Record<string, boolean>, values: Record<string, 
   return result.ok ? 0 : 1;
 }
 
+async function runMcpCommand(
+  positionals: string[],
+  flags: Record<string, boolean>,
+  values: Record<string, string>,
+): Promise<number> {
+  const subCommand = positionals[0] ?? 'help';
+  const asJson = flags.json ?? false;
+
+  if (subCommand === 'serve') {
+    const timeoutMs = values['timeout-ms']
+      ? Number.parseInt(values['timeout-ms'], 10)
+      : undefined;
+
+    if (values['timeout-ms'] && (!Number.isInteger(timeoutMs) || (timeoutMs ?? 0) <= 0)) {
+      throw new Error('mcp serve --timeout-ms must be a positive integer.');
+    }
+
+    await runMcpServeCommand({
+      configPath: values.config,
+      listen: values.listen,
+      upstream: values.upstream,
+      transport: values.transport as 'mcp-sse' | 'mcp-stdio' | undefined,
+      apiKey: values['api-key'],
+      policyServer: values['policy-server'],
+      timeoutMs,
+      asJson,
+    });
+    return 0;
+  }
+
+  if (subCommand === 'doctor') {
+    const result = await runMcpDoctorCommand({
+      configPath: values.config,
+    });
+    printHeadlessResult(result, asJson);
+    return result.ok ? 0 : 1;
+  }
+
+  if (subCommand === 'init') {
+    const result = runMcpInitCommand({
+      outputPath: values.output,
+    });
+    printHeadlessResult(result, asJson);
+    return result.ok ? 0 : 1;
+  }
+
+  if (subCommand === 'help') {
+    console.log('Usage:');
+    console.log('  veto mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
+    console.log('  veto mcp doctor [--config <path>] [--json]');
+    console.log('  veto mcp init [--output <path>] [--json]');
+    return 0;
+  }
+
+  throw new Error(`Unknown mcp command: ${subCommand}`);
+}
+
 async function runAgentCompatibility(
   positionals: string[],
   values: Record<string, string>
@@ -667,6 +738,8 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return await runCloudCommand(positionals, flags, values);
     case 'doctor':
       return await runDoctor(flags, values);
+    case 'mcp':
+      return await runMcpCommand(positionals, flags, values);
     case 'init': {
       const result = await init({
         force: flags.force,
