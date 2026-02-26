@@ -1,5 +1,14 @@
 # veto-cli
 
+## 1.16.2
+
+### Patch Changes
+
+- [#146](https://github.com/VulnZap/veto/pull/146) [`69af93e`](https://github.com/VulnZap/veto/commit/69af93e47886394a92f6000a1ab4585b00d0fd94) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add MCP gateway CLI commands (`veto mcp serve`, `veto mcp doctor`, `veto mcp init`) and harden transport, URL, and API key validation for safer defaults.
+
+- Updated dependencies [[`69af93e`](https://github.com/VulnZap/veto/commit/69af93e47886394a92f6000a1ab4585b00d0fd94)]:
+  - veto-sdk@1.17.0
+
 ## 1.16.1
 
 ### Patch Changes
