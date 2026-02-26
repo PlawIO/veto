@@ -82,6 +82,19 @@ export {
   type HeadlessResult,
 } from './headless.js';
 export {
+  loadMcpConfig,
+  createDefaultMcpConfigTemplate,
+  runMcpInitCommand,
+  runMcpDoctorCommand,
+  runMcpServeCommand,
+  resolveMcpConfigForTesting,
+  type McpConfig,
+  type McpServeOptions,
+  type McpDoctorOptions,
+  type McpInitOptions,
+  type McpDoctorReport,
+} from './mcp.js';
+export {
   createInitialStudioState,
   discoverWorkspaceCandidates,
   loadStudioPreferences,
