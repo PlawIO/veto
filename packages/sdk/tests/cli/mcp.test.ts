@@ -73,6 +73,23 @@ describe('mcp cli commands', () => {
     expect(resolved.config.upstreams[0]?.timeoutMs).toBe(1234);
   });
 
+  it('rejects invalid explicit transport values in quick serve mode', () => {
+    expect(() => resolveMcpConfigForTesting({
+      configPath: join(TMP_ROOT, 'missing-config.yaml'),
+      upstream: 'http://localhost:9000/mcp',
+      apiKey: 'veto_test_key',
+      transport: 'invalid-transport',
+    })).toThrow("Invalid --transport");
+  });
+
+  it('rejects unsupported upstream protocols in quick serve mode', () => {
+    expect(() => resolveMcpConfigForTesting({
+      configPath: join(TMP_ROOT, 'missing-config.yaml'),
+      upstream: 'mcphttp://169.254.169.254/internal',
+      apiKey: 'veto_test_key',
+    })).toThrow('Unsupported upstream URL protocol');
+  });
+
   it('passes doctor checks when policy server and upstream are reachable', async () => {
     mkdirSync(TMP_ROOT, { recursive: true });
 

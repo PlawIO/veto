@@ -84,7 +84,7 @@ export interface McpServeOptions {
   configPath?: string;
   listen?: string;
   upstream?: string;
-  transport?: McpTransport;
+  transport?: string;
   apiKey?: string;
   policyServer?: string;
   timeoutMs?: number;
@@ -148,6 +148,43 @@ function inferTransportFromUpstream(value: string): McpTransport {
     return 'mcp-stdio';
   }
   return 'mcp-sse';
+}
+
+function parseTransportFlag(value: string | undefined): McpTransport | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value === 'mcp-sse' || value === 'mcp-stdio') {
+    return value;
+  }
+
+  throw new Error(`Invalid --transport value '${value}'. Expected mcp-sse or mcp-stdio.`);
+}
+
+function resolveMcpUpstreamHttpUrl(rawUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid upstream URL '${rawUrl}'`);
+  }
+
+  if (parsed.protocol === 'mcp:' || parsed.protocol === 'mcp+sse:') {
+    parsed.protocol = 'http:';
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `Unsupported upstream URL protocol '${parsed.protocol}'. Expected mcp://, mcp+sse://, http://, or https://`,
+    );
+  }
+
+  if (!parsed.hostname) {
+    throw new Error(`Upstream URL '${rawUrl}' is missing a hostname`);
+  }
+
+  return parsed.toString();
 }
 
 function parseListenAddress(rawValue: string | undefined): { host: string; port: number } {
@@ -312,6 +349,10 @@ function parseConfigDocument(document: unknown): McpConfig {
       throw new Error(`Invalid upstream '${name}': mcp-stdio transport requires command`);
     }
 
+    if (transport === 'mcp-sse' && url) {
+      resolveMcpUpstreamHttpUrl(url);
+    }
+
     return {
       name,
       transport,
@@ -382,7 +423,7 @@ function parseQuickStdioCommand(upstreamValue: string): { command: string; args:
 
 function buildConfigFromServeOptions(options: McpServeOptions): ResolvedMcpConfig {
   const path = normalizeConfigPath(options.configPath);
-  const explicitTransport = options.transport;
+  const explicitTransport = parseTransportFlag(options.transport);
   const explicitApiKey = options.apiKey?.trim();
   const envApiKey = process.env.VETO_API_KEY?.trim();
   const policyApiKey = explicitApiKey || envApiKey;
@@ -434,6 +475,7 @@ function buildConfigFromServeOptions(options: McpServeOptions): ResolvedMcpConfi
   };
 
   if (transport === 'mcp-sse') {
+    resolveMcpUpstreamHttpUrl(options.upstream);
     upstream.url = options.upstream;
   } else {
     const parsedStdio = parseQuickStdioCommand(options.upstream);
@@ -642,7 +684,19 @@ class UpstreamRuntime {
       };
     }
 
-    const targetUrl = upstreamUrl.replace(/^mcp(\+sse)?:\/\//, 'http://');
+    let targetUrl: string;
+    try {
+      targetUrl = resolveMcpUpstreamHttpUrl(upstreamUrl);
+    } catch (error) {
+      return {
+        jsonrpc: '2.0',
+        id: message.id,
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : 'Invalid upstream URL',
+        },
+      };
+    }
 
     try {
       const response = await fetch(targetUrl, {
@@ -1078,7 +1132,7 @@ async function probeUpstream(upstream: McpUpstreamConfig): Promise<McpDoctorRepo
 
   if (upstream.transport === 'mcp-sse') {
     try {
-      const targetUrl = upstream.url!.replace(/^mcp(\+sse)?:\/\//, 'http://');
+      const targetUrl = resolveMcpUpstreamHttpUrl(upstream.url!);
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
@@ -1302,8 +1356,8 @@ async function waitForTermination(runtime: McpGatewayServer): Promise<void> {
 }
 
 function assertApiKeyFormat(apiKey: string): void {
-  if (!apiKey.startsWith('veto_')) {
-    throw new Error("policy.apiKey must start with 'veto_'");
+  if (!/^veto_[A-Za-z0-9_-]{16,}$/.test(apiKey)) {
+    throw new Error("policy.apiKey must match format 'veto_<token>' and include a sufficiently long token");
   }
 }
 

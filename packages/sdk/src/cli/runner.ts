@@ -595,7 +595,7 @@ async function runMcpCommand(
       configPath: values.config,
       listen: values.listen,
       upstream: values.upstream,
-      transport: values.transport as 'mcp-sse' | 'mcp-stdio' | undefined,
+      transport: values.transport,
       apiKey: values['api-key'],
       policyServer: values['policy-server'],
       timeoutMs,
