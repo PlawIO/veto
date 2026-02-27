@@ -95,7 +95,7 @@ jobs:
             git push origin "sdk-py@$VERSION"
             gh release create "sdk-py@$VERSION" \
               --title "veto-sdk (Python) v$VERSION" \
-              --notes "See [CHANGELOG](https://github.com/VulnZap/veto/blob/master/packages/sdk-python/CHANGELOG.md)" \
+              --notes "See [CHANGELOG](https://github.com/PlawIO/veto/blob/master/packages/sdk-python/CHANGELOG.md)" \
               --target master
           fi
         env:
