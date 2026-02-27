@@ -23,11 +23,11 @@ describe('Veto.fromCloud', () => {
   it('loads policies from cloud during initialization', async () => {
     const veto = await Veto.fromCloud({
       apiKey: 'veto_test_key',
-      endpoint: 'https://api.runveto.com',
+      endpoint: 'https://api.veto.so',
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.runveto.com/v1/policies',
+      'https://api.veto.so/v1/policies',
       expect.objectContaining({ method: 'GET' })
     );
 
@@ -38,7 +38,7 @@ describe('Veto.fromCloud', () => {
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
     const veto = await Veto.fromCloud({
       apiKey: 'veto_test_key',
-      endpoint: 'https://api.runveto.com',
+      endpoint: 'https://api.veto.so',
       refreshIntervalMs: 5000,
     });
 

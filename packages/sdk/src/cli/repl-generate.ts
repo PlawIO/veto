@@ -113,7 +113,7 @@ interface OpenAICompletionResponse {
   choices?: OpenAICompletionChoice[];
 }
 
-const DEFAULT_CLOUD_BASE_URL = 'https://api.runveto.com';
+const DEFAULT_CLOUD_BASE_URL = 'https://api.veto.so';
 const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_SELF_HOSTED_MODEL = 'gpt-4o';
 const DEFAULT_KERNEL_BASE_URL = 'http://localhost:11434/v1';

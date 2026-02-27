@@ -5,7 +5,7 @@ Repository-native skills for coding agents.
 ## Install (skills.sh)
 
 ```bash
-npx skills add VulnZap/veto
+npx skills add PlawIO/veto
 ```
 
 ## Available Skills

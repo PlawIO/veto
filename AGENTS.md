@@ -9,7 +9,6 @@
 | [`packages/sdk`](./packages/sdk)               | TypeScript SDK for agentic apps    | [TS SDK AGENTS.md](./packages/sdk/AGENTS.md)            |
 | [`packages/sdk-python`](./packages/sdk-python) | Python SDK for agentic apps        | [Python SDK AGENTS.md](./packages/sdk-python/AGENTS.md) |
 | [`packages/cli`](./packages/cli)               | CLI + TUI for AI coding assistants | [CLI AGENTS.md](./packages/cli/AGENTS.md)               |
-| [`apps/web`](./apps/web)                       | Landing page (veto.run)            | [Web AGENTS.md](./apps/web/AGENTS.md)                   |
 
 ## Quick Commands
 
@@ -20,7 +19,6 @@ pnpm test             # Test all packages (turbo-cached)
 pnpm typecheck        # Typecheck all packages
 pnpm dev:sdk          # Watch SDK
 pnpm dev:cli          # Watch CLI
-pnpm dev:web          # Start landing page dev server
 pnpm changeset        # Add a changeset for releases
 ```
 
@@ -57,8 +55,8 @@ pnpm changeset        # Add a changeset for releases
 
 ## Links
 
-- **Repo**: https://github.com/VulnZap/veto
+- **Repo**: https://github.com/PlawIO/veto
 - **npm SDK**: https://npmjs.com/package/veto-sdk
 - **npm CLI**: https://npmjs.com/package/veto-cli
 - **PyPI SDK**: https://pypi.org/project/veto-sdk
-- **Landing**: https://veto.run
+- **Landing**: https://veto.so

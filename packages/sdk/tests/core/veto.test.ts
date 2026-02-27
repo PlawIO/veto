@@ -166,7 +166,7 @@ rules:
       await wrapped[0].handler({ query: 'test' });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('https://api.runveto.com/v1/tools/validate'),
+        expect.stringContaining('https://api.veto.so/v1/tools/validate'),
         expect.any(Object)
       );
       expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Veto running in cloud mode'));

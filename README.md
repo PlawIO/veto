@@ -29,7 +29,7 @@ npm install -g veto-cli
 
 Veto ships a dedicated skill for coding agents that need safe, non-destructive policy operations.
 
-- Install all Veto skills: `npx skills add VulnZap/veto`
+- Install all Veto skills: `npx skills add PlawIO/veto`
 - Skill name: `veto-policy-runtime`
 - Path: [`skills/veto-policy-runtime/SKILL.md`](./skills/veto-policy-runtime/SKILL.md)
 - Goal: create/apply/check policies with deterministic-first behavior

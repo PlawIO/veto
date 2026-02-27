@@ -5,7 +5,7 @@ Thanks for your interest in contributing! This guide will get you up and running
 ## Quick Start
 
 ```bash
-git clone https://github.com/VulnZap/veto.git
+git clone https://github.com/PlawIO/veto.git
 cd veto
 pnpm install
 pnpm build
@@ -20,8 +20,6 @@ veto/
 │   ├── sdk/           # TypeScript SDK (npm: veto-sdk)
 │   ├── sdk-python/    # Python SDK (pip: veto-sdk)
 │   └── cli/           # CLI + TUI (npm: veto-cli)
-├── apps/
-│   └── web/           # Landing page (veto.run)
 └── .changeset/        # Version management
 ```
 
@@ -155,8 +153,8 @@ gh workflow run release.yml -f force=true
 
 ## Getting Help
 
-- [GitHub Issues](https://github.com/VulnZap/veto/issues) - Bug reports, feature requests
-- [GitHub Discussions](https://github.com/VulnZap/veto/discussions) - Questions, ideas
+- [GitHub Issues](https://github.com/PlawIO/veto/issues) - Bug reports, feature requests
+- [GitHub Discussions](https://github.com/PlawIO/veto/discussions) - Questions, ideas
 
 ## License
 

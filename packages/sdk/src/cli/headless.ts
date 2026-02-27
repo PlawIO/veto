@@ -11,7 +11,7 @@ import {
 import { createReplSessionContext } from './repl-context.js';
 import { evaluateToolCallHybrid } from './repl.js';
 
-const DEFAULT_CLOUD_BASE_URL = 'https://api.runveto.com';
+const DEFAULT_CLOUD_BASE_URL = 'https://api.veto.so';
 const DEVICE_POLL_INTERVAL_SECONDS = 5;
 const DEVICE_POLL_TIMEOUT_SECONDS = 300;
 
