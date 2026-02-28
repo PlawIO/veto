@@ -9,6 +9,7 @@ Stop agents from deleting files, leaking secrets, or pushing to prod — without
 [![npm](https://img.shields.io/npm/v/veto-sdk?label=veto-sdk&color=000000)](https://www.npmjs.com/package/veto-sdk)
 [![npm](https://img.shields.io/npm/v/veto-cli?label=veto-cli&color=000000)](https://www.npmjs.com/package/veto-cli)
 [![PyPI](https://img.shields.io/pypi/v/veto?label=veto&color=000000)](https://pypi.org/project/veto)
+[![npm downloads](https://img.shields.io/npm/dt/veto-sdk?label=installs&color=000000)](https://www.npmjs.com/package/veto-sdk)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/PlawIO/veto/actions/workflows/ci.yml/badge.svg)](https://github.com/PlawIO/veto/actions/workflows/ci.yml)
 
