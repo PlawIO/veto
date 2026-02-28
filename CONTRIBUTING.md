@@ -2,6 +2,18 @@
 
 Thanks for your interest in contributing! This guide will get you up and running quickly.
 
+## Contributor License Agreement
+
+Before your first PR can be merged, you must sign the [Contributor License Agreement](CLA.md).
+
+The CLA bot will post a comment on your PR with instructions. To sign, reply with:
+
+```
+I have read the CLA Document and I hereby sign the CLA
+```
+
+You only need to sign once. After that, all future PRs are automatically unblocked.
+
 ## Quick Start
 
 ```bash
@@ -80,7 +92,7 @@ pnpm typecheck  # Type check (if available)
 
 - Use conventional title: `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`
 - Reference issues: `Fixes #123`
-- Ensure CI passes
+- Ensure CI passes and CLA is signed
 
 ### 6. Changeset requirement for package changes
 
@@ -125,6 +137,7 @@ Releases are fully automated:
 For contributor safety and maintainability, Veto uses these workflows:
 
 - `CI` - build, typecheck, and test packages on PRs and pushes to `master`
+- `CLA Assistant` - blocks merge until the contributor signs the CLA
 - `Dependency Review` - blocks high-severity vulnerable dependencies in PRs
 - `PR Title` - enforces conventional PR title format
 - `Changeset Required` - ensures package changes include a changeset unless exempt
@@ -158,4 +171,4 @@ gh workflow run release.yml -f force=true
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache-2.0 License.
+Veto SDK is Apache-2.0. By contributing, you assign copyright and patent rights to Plaw, Inc. per the [CLA](CLA.md).
