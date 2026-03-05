@@ -4,7 +4,7 @@
   "description": "The permission layer for AI agents",
   "repository": {
     "type": "git",
-    "url": "https://github.com/VulnZap/veto"
+    "url": "https://github.com/PlawIO/veto"
   },
   "scripts": {
     "build": "turbo build --filter='./packages/*'",

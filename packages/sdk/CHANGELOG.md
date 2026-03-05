@@ -1,5 +1,77 @@
 # veto-sdk
 
+## 1.17.0
+
+### Minor Changes
+
+- [#146](https://github.com/VulnZap/veto/pull/146) [`69af93e`](https://github.com/VulnZap/veto/commit/69af93e47886394a92f6000a1ab4585b00d0fd94) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add MCP gateway CLI commands (`veto mcp serve`, `veto mcp doctor`, `veto mcp init`) and harden transport, URL, and API key validation for safer defaults.
+
+## 1.16.1
+
+### Patch Changes
+
+- [#144](https://github.com/VulnZap/veto/pull/144) [`1f4eca1`](https://github.com/VulnZap/veto/commit/1f4eca107a62d7fe1a2490e149d45c1ab8a95513) Thanks [@yazcaleb](https://github.com/yazcaleb)! - fix(cli): lazy-load Studio renderers so Ink import failures fall back to ANSI instead of crashing on startup (for example on Node 22.12).
+
+## 1.16.0
+
+### Minor Changes
+
+- [#142](https://github.com/VulnZap/veto/pull/142) [`e0b1fdc`](https://github.com/VulnZap/veto/commit/e0b1fdc1a26c627cf8736b79ca8d83a60dfdead0) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Launch unified CLI foundations with a new canonical `veto-cli` package, Ink-first Studio runtime on Node, and first-class headless commands.
+
+  Highlights:
+
+  - add shared CLI runner used by both `veto-cli` and `veto-sdk` compatibility path
+  - make Studio default for `veto`, `veto studio`, `veto repl`, with `--legacy` support
+  - add headless command suite (`policy generate|apply`, `guard check`, `cloud *`, `doctor`)
+  - add renderer preference support for `ink` and improved fallback behavior
+  - tighten generation behavior (no silent template fallback by default)
+
+## 1.15.1
+
+### Patch Changes
+
+- [#140](https://github.com/VulnZap/veto/pull/140) [`d9e05b5`](https://github.com/VulnZap/veto/commit/d9e05b516eaedb902c6d20c9071bc41a874e4ed5) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix Studio runtime behavior by shipping `@opentui/core` as a runtime dependency and correcting CLI version detection under `npx`.
+
+## 1.15.0
+
+### Minor Changes
+
+- [#138](https://github.com/VulnZap/veto/pull/138) [`489c4e8`](https://github.com/VulnZap/veto/commit/489c4e8bd07b1e9ee1aeb5033e7c085042183cb5) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Launch Veto Studio as the default interactive experience for `veto repl` and `veto --repl`, while preserving legacy line REPL compatibility behind `--legacy`.
+
+  ### Added
+
+  - New full-screen Studio workflow with keyboard-first navigation, command palette, policy wizard, simulation, and review/save flow.
+  - Renderer selection with `--renderer <auto|opentui|ansi>` and automatic OpenTUI -> ANSI runtime fallback.
+  - Workspace and scan scope controls:
+    - `--directory <path>`
+    - `--include-examples`
+    - `--include-tests`
+  - Studio configuration support in `veto.config.yaml` under `studio.workspace`, `studio.generation`, and `studio.renderer`.
+  - Generation connectivity checks and explicit fallback gate (`--demo-template` / `studio.generation.allowTemplateFallback`).
+
+  ### Changed
+
+  - `veto repl` and `veto --repl` now default to Studio.
+  - `veto scan` now correctly honors `--directory` and include/exclude scope flags.
+  - Natural-language intent handling for negated approval prompts now defaults to `block` (e.g. `"do not approve invoices above 50"`).
+  - CLI version banner/help now use runtime package version (no hardcoded `0.1.0`).
+
+## 1.14.0
+
+### Minor Changes
+
+- [#135](https://github.com/VulnZap/veto/pull/135) [`d48c9dd`](https://github.com/VulnZap/veto/commit/d48c9dd2fb156192fa794dfc4fa4cc7a42a34e65) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix the CLI agent init typings and add the missing `picocolors` dependency for the new CLI color utilities.
+
+## 1.13.0
+
+### Minor Changes
+
+- [#131](https://github.com/VulnZap/veto/pull/131) [`40b7552`](https://github.com/VulnZap/veto/commit/40b7552935d1a72894114b098a1630181b016257) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a new `npx veto scan` CLI command to audit discovered tool coverage against loaded rules, with optional CI fail gating (`--fail-uncovered`), inline YAML suggestions (`--suggest`), and `text|json` output formats.
+
+- [#134](https://github.com/VulnZap/veto/pull/134) [`b499d76`](https://github.com/VulnZap/veto/commit/b499d763697e4839eac534352d0df1a843aeb321) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add an interactive REPL for `npx veto` with natural-language policy generation, local `/test` and simulation flows, rule explain/export/load/clear commands, and persistent shell history.
+
+- [#133](https://github.com/VulnZap/veto/pull/133) [`eb23217`](https://github.com/VulnZap/veto/commit/eb23217fd1e99efbe0fbd4acdcf667cbea10c204) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add `npx veto diff` for structural policy diffs and deterministic replay impact analysis from JSONL call logs.
+
 ## 1.12.0
 
 ### Minor Changes

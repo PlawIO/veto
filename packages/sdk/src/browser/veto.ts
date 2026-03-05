@@ -136,7 +136,7 @@ function createInlineCloudClient(
   endpoint: string | undefined,
   logger: Logger
 ): BrowserCloudClient {
-  const baseUrl = (endpoint ?? 'https://api.runveto.com').replace(/\/$/, '');
+  const baseUrl = (endpoint ?? 'https://api.veto.so').replace(/\/$/, '');
   const headers = {
     'Content-Type': 'application/json',
     'X-Veto-API-Key': apiKey,

@@ -1,102 +1,164 @@
+<div align="center">
+
 # Veto
 
-**The permission layer for AI agents.**
+**sudo for AI agents.**
 
-Veto gives you control over what AI agents can and cannot do. Whether you're building agentic applications or using AI coding assistants, Veto ensures they operate within boundaries you define.
+Stop agents from deleting files, leaking secrets, or pushing to prod — without slowing anyone down.
+
+[![npm](https://img.shields.io/npm/v/veto-sdk?label=veto-sdk&color=000000)](https://www.npmjs.com/package/veto-sdk)
+[![npm](https://img.shields.io/npm/v/veto-cli?label=veto-cli&color=000000)](https://www.npmjs.com/package/veto-cli)
+[![PyPI](https://img.shields.io/pypi/v/veto?label=veto&color=000000)](https://pypi.org/project/veto)
+[![npm downloads](https://img.shields.io/npm/dt/veto-sdk?label=installs&color=000000)](https://www.npmjs.com/package/veto-sdk)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/PlawIO/veto/actions/workflows/ci.yml/badge.svg)](https://github.com/PlawIO/veto/actions/workflows/ci.yml)
+
+[**docs.veto.so**](https://docs.veto.so) · [veto.so](https://veto.so) · [npm](https://www.npmjs.com/package/veto-sdk) · [PyPI](https://pypi.org/project/veto)
+
+</div>
+
+---
+
+AI agents can execute code, call APIs, and modify production systems. Veto is the permission layer that sits between every agent action and execution — validating, blocking, or routing to human approval before anything runs.
+
+```typescript
+const veto = await Veto.init();           // loads ./veto/veto.config.yaml + rules
+const guarded = veto.wrap(tools);         // inject guardrails — types preserved
+// pass guarded to your agent. done.
+```
+
+The agent is unaware it's being governed. Your tools are unchanged. No behavior change for the AI.
+
+## How it works
+
+```
+┌───────────┐         ┌────────────┐         ┌──────────────┐
+│ AI Agent  │────────▶│    Veto    │────────▶│  Your Tools  │
+│  (LLM)    │         │  (Guard)   │         │  (Handlers)  │
+└───────────┘         └────────────┘         └──────────────┘
+                            │
+                      ┌─────┴──────┐
+                      │ YAML Rules │  block · allow · ask
+                      └────────────┘
+```
+
+1. Agent calls a tool
+2. Veto intercepts and validates (deterministic conditions first, optional LLM for semantic rules)
+3. **allow** → executes normally · **block** → denied with reason · **ask** → human approval queue
 
 ## Packages
 
-| Package                       | Language   | Description                           | Documentation                                        |
-| ----------------------------- | ---------- | ------------------------------------- | ---------------------------------------------------- |
-| [veto-sdk](./packages/sdk)    | TypeScript | SDK for building guarded agentic apps | [**Read the docs**](./packages/sdk/README.md)        |
-| [veto](./packages/sdk-python) | Python     | SDK for building guarded agentic apps | [**Read the docs**](./packages/sdk-python/README.md) |
-| [veto-cli](./packages/cli)    | TypeScript | CLI for AI coding assistants          | [**Read the docs**](./packages/cli/README.md)        |
+| Package | Language | Install | Description |
+|---------|----------|---------|-------------|
+| [`veto-sdk`](./packages/sdk) | TypeScript | `npm install veto-sdk` | SDK for guarded agentic apps |
+| [`veto`](./packages/sdk-python) | Python | `pip install veto` | Same API, all major LLM providers |
+| [`veto-cli`](./packages/cli) | TypeScript | `npm install -g veto-cli` | Interactive studio + headless automation |
 
-## Install
+## Quick start
+
+### TypeScript
 
 ```bash
-# TypeScript SDK
 npm install veto-sdk
-
-# Python SDK
-pip install veto
-
-# CLI for AI coding assistants
-npm install -g veto-cli
+npx veto init       # creates ./veto/veto.config.yaml + default rules
 ```
 
-## How It Works
+```typescript
+import { Veto } from 'veto-sdk';
 
-```
-┌─────────────┐     ┌─────────┐     ┌──────────────┐
-│  AI Agent   │────▶│  Veto   │────▶│  Your Tools  │
-│  (LLM)      │     │ (Guard) │     │  (Handlers)  │
-└─────────────┘     └─────────┘     └──────────────┘
-                         │
-                         ▼
-                    ┌─────────┐
-                    │  Rules  │
-                    │  (YAML) │
-                    └─────────┘
+const veto = await Veto.init();
+const guarded = veto.wrap(myTools);  // LangChain, Vercel AI SDK, or any custom tools
 ```
 
-1. AI agent requests a tool call
-2. Veto intercepts and validates against your rules
-3. Allowed → execute. Blocked → deny. Ask → prompt user.
-4. Result returned to agent (unaware of guardrail)
-
-## Guides
-
-- [Human-in-the-loop approval guide (bank transfer escalation)](./docs/hitl-guide.md)
-
-## Why Veto?
-
-- **Zero-config defaults** — Sensible security rules out of the box
-- **Multi-language** — TypeScript and Python SDKs
-- **Provider agnostic** — OpenAI, Anthropic, Google, LangChain
-- **Local-first** — No cloud required, optional custom LLM validation
-- **Real-time monitoring** — TUI dashboard for coding assistants
-
-## Contributor Workflow
-
-Veto is set up for external contributions with explicit CI guardrails.
-
-### Required PR checks
-
-- `Build & Test` (TypeScript packages)
-- `Python SDK` (ruff + mypy + pytest)
-- `Dependency Review` (blocks high-severity dependency risk)
-- `Changeset Required` (for package changes unless maintainer-exempt)
-- `PR Title` (conventional title format)
-
-### Auto-management workflows
-
-- `Auto Label` labels PRs by changed paths (`area:sdk`, `area:python`, etc.)
-- `Sync Labels` keeps repository labels aligned with `.github/labels.yml`
-- `Actionlint` validates all workflow files
-- `First Interaction` welcomes first-time contributors on issues and PRs
-
-## Release and Publishing
-
-Releases are automated from `master` via `.github/workflows/release.yml`:
-
-1. Changesets create/maintain a Version Packages PR
-2. Merge the release PR to publish to npm
-3. Python package is built and uploaded to PyPI
-4. GitHub releases/tags are created
-
-For package-impacting PRs, run:
+### Python
 
 ```bash
-pnpm changeset
+pip install veto
+veto init
 ```
 
-Maintainers can exempt non-release PRs with the `release-exempt` or `no-changeset` label.
+```python
+from veto import Veto
+
+veto = await Veto.init()
+guarded = veto.wrap(my_tools)
+```
+
+### Rules
+
+Rules are YAML files in `./veto/rules/`. Static conditions run locally with no API call. LLM validation is opt-in for semantic rules.
+
+```yaml
+rules:
+  - id: block-large-transfers
+    name: Block transfers over $1,000
+    action: block
+    tools: [transfer_funds]
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 1000
+
+  - id: require-approval-for-push
+    name: Require human approval before pushing to main
+    action: ask
+    tools: [git_push]
+    description: "Intercept any push targeting the main branch."
+```
+
+Actions: `block` · `allow` · `warn` · `log` · `ask` (human-in-the-loop)
+
+→ [Full TypeScript SDK docs](./packages/sdk/README.md) · [Python SDK docs](./packages/sdk-python/README.md)
+
+## CLI + Studio
+
+```bash
+npx veto-cli@latest                        # launch interactive Veto Studio (TUI)
+npx veto-cli@latest policy generate \
+  --tool transfer_funds \
+  --prompt "block over $500 to unverified recipients"
+npx veto-cli@latest guard check \
+  --tool transfer_funds --args '{"amount": 600}' --json
+npx veto-cli@latest scan --fail-uncovered  # CI gate: exit 1 on unguarded tools
+```
+
+→ [Full CLI reference](./packages/cli/README.md)
+
+## Why Veto
+
+- **Deterministic-first** — Static conditions run locally, zero latency, no API call. LLM validation only when you need semantic reasoning.
+- **Provider agnostic** — Works with OpenAI, Anthropic, Google, LangChain, Vercel AI SDK, and any custom tool-calling setup.
+- **Human-in-the-loop** — `ask` action routes sensitive decisions to an approval queue instead of auto-blocking.
+- **Audit trail** — Every decision logged with tool name, arguments, rule matched, and outcome. Exportable as JSON or CSV.
+- **Local-first** — No cloud required. Fully offline. Optional [Veto Cloud](https://veto.so) for team sync and dashboard.
+- **Zero-config defaults** — `veto init` generates sensible baseline rules. Production-hardened in under 10 minutes.
+
+## skills.sh skill (coding agents)
+
+```bash
+npx skills add PlawIO/veto
+```
+
+Installs `veto-policy-runtime` — gives Claude Code, Cursor, and Windsurf safe, non-destructive policy operations without any SDK integration. Ideal for teams that want guardrails at the coding-agent level.
+
+## Veto Cloud
+
+The OSS SDK runs entirely local. [Veto Cloud](https://veto.so) adds:
+
+- Natural language → policy YAML (no manual YAML writing)
+- Central policy sync across all team repos
+- Dashboard: decisions, blocked calls, pending approvals
+- Approval workflows for human-in-the-loop at scale
+- SSO, audit export, compliance reporting
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch naming, local development, and release rules.
+See [CONTRIBUTING.md](./CONTRIBUTING.md). On your first PR, a bot will ask you to sign the [CLA](./CLA.md) — takes 30 seconds, one comment.
+
+## Security
+
+Report vulnerabilities to [security@plaw.io](mailto:security@plaw.io). See [SECURITY.md](./SECURITY.md) for the full disclosure policy.
 
 ## License
 
-Apache-2.0
+Apache-2.0 © [Plaw, Inc.](https://plaw.io)

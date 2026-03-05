@@ -28,7 +28,7 @@ validation:
 # Cloud configuration (for mode: "cloud")
 # cloud:
 #   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
-#   # baseUrl: "https://api.runveto.com"  # Set to your endpoint for self-hosted
+#   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
 #   timeout: 30000
 #   retries: 2
 #   retryDelay: 1000
@@ -67,6 +67,19 @@ logging:
 rules:
   directory: "./rules"
   recursive: true
+
+# Veto Studio configuration
+# studio:
+#   workspace:
+#     # Persisted startup workspace (absolute or relative path)
+#     defaultDirectory: "."
+#     includeExamples: false
+#     includeTests: false
+#   generation:
+#     # If false, Studio blocks generation when no endpoint is configured
+#     allowTemplateFallback: false
+#   renderer:
+#     preferred: "auto" # auto | ink | opentui | ansi
 `;
 
 /**

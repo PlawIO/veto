@@ -424,7 +424,7 @@ describe('browser entry', () => {
     const veto = Veto.fromRules({
       rules: [createNavigateBlockRule()],
       apiKey: 'veto_test_key',
-      endpoint: 'https://api.runveto.com',
+      endpoint: 'https://api.veto.so',
       logLevel: 'silent',
     });
 

@@ -1,20 +1,23 @@
-# Veto
+# veto
 
-A guardrail system for AI agent tool calls. Veto intercepts and validates tool calls made by AI models before execution.
+[![PyPI](https://img.shields.io/pypi/v/veto?color=000000)](https://pypi.org/project/veto)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
-## How It Works
+A guardrail system for AI agent tool calls. Veto intercepts and validates tool calls made by AI models before execution — blocking, allowing, or routing to human approval.
 
-1. **Initialize** Veto.
-2. **Wrap** your tools using `veto.wrap()`.
-3. **Pass** the wrapped tools to your AI agent/model.
+## How it works
 
-When the AI model calls a tool, Veto automatically:
+1. **Initialize** Veto (loads your YAML rules).
+2. **Wrap** your tools with `veto.wrap()`.
+3. **Pass** the wrapped tools to your agent — interface unchanged.
+
+When the AI calls a tool, Veto automatically:
 
 1. Intercepts the call.
-2. Validates arguments against your rules (via YAML & LLM).
-3. Blocks or Allows execution based on the result.
+2. Validates arguments against your rules (deterministic conditions first, optional LLM for semantic rules).
+3. **allow** → executes · **block** → denied with reason · **ask** → approval queue.
 
-The AI model remains unaware of the guardrail - the tool interface is preserved.
+The agent is unaware of the guardrail.
 
 ## Installation
 
@@ -22,56 +25,45 @@ The AI model remains unaware of the guardrail - the tool interface is preserved.
 pip install veto
 ```
 
-For a complete bank transfer escalation example, see the [HITL guide](../../docs/hitl-guide.md).
-
-For LLM provider support:
+With LLM provider support:
 
 ```bash
-pip install veto[openai]      # OpenAI support
-pip install veto[anthropic]   # Anthropic support
-pip install veto[gemini]      # Google Gemini support
+pip install veto[openai]      # OpenAI
+pip install veto[anthropic]   # Anthropic
+pip install veto[gemini]      # Google Gemini
 pip install veto[all]         # All providers
 ```
 
-## Quick Start
+For a complete human-in-the-loop example, see the [HITL guide](../../docs/hitl-guide.md).
+
+## Quick start
 
 ### 1. Initialize Veto
-
-Run the CLI to create configuration:
 
 ```bash
 veto init
 ```
 
-This creates a `veto/` directory with `veto.config.yaml` and default rules.
+Creates `./veto/veto.config.yaml` and default rules.
 
-### 2. Wrap Your Tools
+### 2. Wrap your tools
 
 ```python
 from veto import Veto
 
-# 1. Define your tools normally
 my_tools = [
-    {"name": "my_tool", "handler": my_handler, ...},
-    # ...
+    {"name": "my_tool", "handler": my_handler},
 ]
 
-# 2. Initialize Veto
 veto = await Veto.init()
-
-# 3. Wrap tools (Validation logic is injected)
 wrapped_tools = veto.wrap(my_tools)
 
-# 4. Pass to your Agent/LLM
-agent = create_agent(
-    tools=wrapped_tools,
-    # ...
-)
+agent = create_agent(tools=wrapped_tools)
 ```
 
-### 3. Configure Rules
+### 3. Configure rules
 
-Edit `veto/rules/financial.yaml` (example):
+Edit `veto/rules/financial.yaml`:
 
 ```yaml
 rules:
@@ -93,29 +85,24 @@ rules:
 ```yaml
 version: "1.0"
 
-# Operating mode
-mode: "strict" # "strict" blocks calls, "log" only logs them
+mode: "strict"   # "strict" blocks calls, "log" only logs them
 
-# Validation Backend
 validation:
-  mode: "custom" # "api" or "custom"
+  mode: "custom"   # "api" or "custom"
 
-# Custom Provider (if mode is custom)
 custom:
-  provider: "gemini" # or openai, anthropic
+  provider: "gemini"   # openai | anthropic | gemini
   model: "gemini-3-flash-preview"
 
-# Logging
 logging:
   level: "info"
 
-# Rules
 rules:
   directory: "./rules"
   recursive: true
 ```
 
-## API Reference
+## API reference
 
 ### `Veto.init(options?)`
 
@@ -127,7 +114,7 @@ veto = await Veto.init()
 
 ### `veto.wrap(tools)`
 
-Wraps an array of tools. The returned tools have Veto validation injected into their execution handler.
+Wrap a list of tools. Injects Veto validation into each tool's execution handler.
 
 ```python
 wrapped_tools = veto.wrap(my_tools)
@@ -135,7 +122,7 @@ wrapped_tools = veto.wrap(my_tools)
 
 ### `veto.wrap_tool(tool)`
 
-Wraps a single tool instance.
+Wrap a single tool.
 
 ```python
 safe_tool = veto.wrap_tool(my_tool)
@@ -143,38 +130,43 @@ safe_tool = veto.wrap_tool(my_tool)
 
 ### `veto.get_history_stats()`
 
-Returns statistics about allowed vs blocked calls.
+Statistics on allowed vs blocked calls.
 
 ```python
 stats = veto.get_history_stats()
-print(stats)
 # {"total_calls": 5, "allowed_calls": 4, "denied_calls": 1, ...}
 ```
 
 ### `veto.clear_history()`
 
-Resets the history statistics.
-
-```python
-veto.clear_history()
-```
+Reset history statistics.
 
 ### `veto.export_decisions(format)`
 
-Exports decision history as JSON or CSV.
+Export decision history as JSON or CSV.
 
 ```python
 json_audit = veto.export_decisions("json")
-csv_audit = veto.export_decisions("csv")
+csv_audit  = veto.export_decisions("csv")
 ```
 
-## CLI Commands
+## Rule YAML format
 
-| Command        | Description                          |
-| -------------- | ------------------------------------ |
-| `veto init`    | Initialize Veto in current directory |
-| `veto version` | Show version                         |
+Same schema as the TypeScript SDK. See [full rule reference](../sdk/README.md#rule-yaml-format).
+
+```yaml
+rules:
+  - id: unique-rule-id
+    name: Human readable name
+    action: block           # block | warn | log | allow | ask
+    tools: [make_payment]
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 1000
+    description: "Semantic description for LLM validation (optional)."
+```
 
 ## License
 
-MIT
+Apache-2.0 © [Plaw, Inc.](https://plaw.io)

@@ -349,7 +349,7 @@ export type VetoCloudInitOptions = SharedVetoFromCloudOptions;
  * ```
  */
 export class Veto {
-  private static readonly DEFAULT_CLOUD_BASE_URL = 'https://api.runveto.com';
+  private static readonly DEFAULT_CLOUD_BASE_URL = 'https://api.veto.so';
 
   private readonly logger: Logger;
   private readonly validationEngine: ValidationEngine;
