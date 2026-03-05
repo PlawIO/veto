@@ -85,6 +85,19 @@ export interface InterceptionResult {
 }
 
 /**
+ * Structured denial details from the server.
+ */
+export interface DenialDetails {
+  policyId?: string;
+  policyName?: string;
+  severity?: 'deny' | 'require_approval';
+  matchedCondition?: string;
+  suggestedFixes?: string[];
+  docsUrl?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
  * Error thrown when a tool call is denied.
  */
 export class ToolCallDeniedError extends Error {
@@ -92,19 +105,73 @@ export class ToolCallDeniedError extends Error {
   readonly callId: string;
   readonly reason: string;
   readonly validationResult: ValidationResult;
+  readonly policyId?: string;
+  readonly policyName?: string;
+  readonly severity?: 'deny' | 'require_approval';
+  readonly matchedCondition?: string;
+  readonly suggestedFixes: string[];
+  readonly docsUrl?: string;
 
   constructor(
     toolName: string,
     callId: string,
-    validationResult: ValidationResult
+    validationResult: ValidationResult,
+    denial?: DenialDetails
   ) {
     const reason = validationResult.reason ?? 'Tool call denied';
-    super(`Tool call denied: ${toolName} - ${reason}`);
+    super(ToolCallDeniedError.formatMessage(toolName, reason, denial));
     this.name = 'ToolCallDeniedError';
     this.toolName = toolName;
     this.callId = callId;
     this.reason = reason;
     this.validationResult = validationResult;
+    this.policyId = denial?.policyId;
+    this.policyName = denial?.policyName;
+    this.severity = denial?.severity;
+    this.matchedCondition = denial?.matchedCondition;
+    this.suggestedFixes = denial?.suggestedFixes ?? [];
+    this.docsUrl = denial?.docsUrl;
+  }
+
+  private static formatMessage(
+    toolName: string,
+    reason: string,
+    denial?: DenialDetails
+  ): string {
+    if (!denial) {
+      return `Tool call denied: ${toolName} - ${reason}`;
+    }
+
+    const lines: string[] = [];
+    lines.push(`Veto denied ${toolName}`);
+    lines.push('');
+
+    if (denial.policyName) {
+      lines.push(`Policy:   ${denial.policyName}`);
+    }
+    lines.push(`Reason:   ${reason}`);
+    if (denial.matchedCondition) {
+      lines.push(`Rule:     ${denial.matchedCondition}`);
+    }
+    if (denial.input && Object.keys(denial.input).length > 0) {
+      const inputStr = JSON.stringify(denial.input);
+      lines.push(`Input:    ${inputStr.length > 120 ? inputStr.slice(0, 117) + '...' : inputStr}`);
+    }
+
+    if (denial.suggestedFixes && denial.suggestedFixes.length > 0) {
+      lines.push('');
+      lines.push('To resolve:');
+      for (const fix of denial.suggestedFixes) {
+        lines.push(`  - ${fix}`);
+      }
+    }
+
+    if (denial.docsUrl) {
+      lines.push('');
+      lines.push(denial.docsUrl);
+    }
+
+    return lines.join('\n');
   }
 }
 
@@ -303,10 +370,12 @@ export class Interceptor {
     const result = await this.intercept(call);
 
     if (!result.allowed) {
+      const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
       throw new ToolCallDeniedError(
         call.name,
         call.id || 'unknown',
-        result.validationResult
+        result.validationResult,
+        denial
       );
     }
 

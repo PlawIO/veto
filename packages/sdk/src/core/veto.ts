@@ -25,7 +25,7 @@ import { generateId, generateToolCallId } from '../utils/id.js';
 import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
 import { BudgetTracker, BudgetExceededError, type BudgetStatus } from './budget.js';
-import { Interceptor, ToolCallDeniedError, type InterceptionResult } from './interceptor.js';
+import { Interceptor, ToolCallDeniedError, type InterceptionResult, type DenialDetails } from './interceptor.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
@@ -2142,6 +2142,9 @@ export class Veto {
       // Handle require_approval decision
       if (response.decision === 'require_approval') {
         const approvalReason = response.reason ?? 'Approval required';
+        if (response.denial) {
+          metadata.denial = response.denial;
+        }
         const metadataWithApproval = response.approval_id
           ? { ...metadata, approvalId: response.approval_id }
           : metadata;
@@ -2237,6 +2240,9 @@ export class Veto {
         tool: context.toolName,
         reason: response.reason,
       });
+      if (response.denial) {
+        metadata.denial = response.denial;
+      }
       return {
         decision: 'deny',
         reason: response.reason,
@@ -2905,10 +2911,12 @@ export class Veto {
         });
 
         if (!result.allowed) {
+          const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
           throw new ToolCallDeniedError(
             toolName,
             result.originalCall.id || '',
-            result.validationResult
+            result.validationResult,
+            denial
           );
         }
 
@@ -2933,10 +2941,12 @@ export class Veto {
           });
 
           if (!result.allowed) {
+            const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
             throw new ToolCallDeniedError(
               toolName,
               result.originalCall.id || '',
-              result.validationResult
+              result.validationResult,
+              denial
             );
           }
 
@@ -2976,10 +2986,12 @@ export class Veto {
           });
 
           if (!result.allowed) {
+            const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
             throw new ToolCallDeniedError(
               toolName,
               result.originalCall.id || '',
-              result.validationResult
+              result.validationResult,
+              denial
             );
           }
 
@@ -3077,10 +3089,12 @@ export class Veto {
       });
 
       if (!result.allowed) {
+        const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
         throw new ToolCallDeniedError(
           args.name,
           result.originalCall.id || '',
-          result.validationResult
+          result.validationResult,
+          denial
         );
       }
 

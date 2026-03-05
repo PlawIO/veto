@@ -19,6 +19,7 @@ from veto.cloud.types import (
     ToolRegistrationResponse,
     ValidationResponse,
     FailedConstraint,
+    CloudDenialDetails,
     ApprovalData,
     ApprovalPollOptions,
 )
@@ -304,12 +305,26 @@ class VetoCloudClient:
                         {"tool": tool_name, "decision": decision},
                     )
 
+                    denial = None
+                    raw_denial = data.get("denial")
+                    if isinstance(raw_denial, dict):
+                        denial = CloudDenialDetails(
+                            severity=raw_denial.get("severity", "deny"),
+                            suggested_fixes=raw_denial.get("suggestedFixes", []),
+                            policy_id=raw_denial.get("policyId"),
+                            policy_name=raw_denial.get("policyName"),
+                            matched_condition=raw_denial.get("matchedCondition"),
+                            docs_url=raw_denial.get("docsUrl"),
+                            input=raw_denial.get("input"),
+                        )
+
                     return ValidationResponse(
                         decision=decision,
                         reason=data.get("reason"),
                         failed_constraints=failed_constraints,
                         metadata=data.get("metadata"),
                         approval_id=data.get("approval_id"),
+                        denial=denial,
                     )
 
             except Exception as error:

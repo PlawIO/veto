@@ -67,6 +67,19 @@ class FailedConstraint:
 
 
 @dataclass
+class CloudDenialDetails:
+    """Structured denial details returned by the server on deny/require_approval."""
+
+    severity: Literal["deny", "require_approval"]
+    suggested_fixes: list[str] = field(default_factory=list)
+    policy_id: Optional[str] = None
+    policy_name: Optional[str] = None
+    matched_condition: Optional[str] = None
+    docs_url: Optional[str] = None
+    input: Optional[dict[str, Any]] = None
+
+
+@dataclass
 class ValidationResponse:
     """Response from tool call validation."""
 
@@ -76,6 +89,7 @@ class ValidationResponse:
     # Metadata from cloud (can include LLM reasoning if exceptions were evaluated)
     metadata: Optional[dict[str, Any]] = None
     approval_id: Optional[str] = None
+    denial: Optional[CloudDenialDetails] = None
 
 
 @dataclass
