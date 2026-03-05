@@ -1810,6 +1810,7 @@ class Veto:
                                 tool_name,
                                 result.original_call.id or "",
                                 result.validation_result,
+                                self._extract_denial(result),
                             )
 
                         # Call original ainvoke with the original input format
@@ -1846,6 +1847,7 @@ class Veto:
                                     tool_name,
                                     result.original_call.id or "",
                                     result.validation_result,
+                                    self._extract_denial(result),
                                 )
 
                             return result.final_arguments or input_data
@@ -1918,6 +1920,7 @@ class Veto:
                                 tool_name,
                                 result.original_call.id or "",
                                 result.validation_result,
+                                self._extract_denial(result),
                             )
 
                         final_args = result.final_arguments or call_args
