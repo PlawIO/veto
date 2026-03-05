@@ -33,6 +33,7 @@ from veto.core.interceptor import (
     Interceptor,
     InterceptorOptions,
     InterceptionResult,
+    DenialDetails,
 )
 from veto.core.output_validator import (
     OutputValidator,
@@ -77,6 +78,7 @@ __all__ = [
     "Interceptor",
     "InterceptorOptions",
     "InterceptionResult",
+    "DenialDetails",
     # Output validator
     "OutputValidator",
     "OutputValidatorOptions",

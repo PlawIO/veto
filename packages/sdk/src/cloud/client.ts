@@ -208,12 +208,17 @@ export class VetoCloudClient {
           decision,
         });
 
+        const denial = data.denial && typeof data.denial === 'object'
+          ? data.denial as CloudValidationResponse['denial']
+          : undefined;
+
         return {
           decision: decision as CloudValidationResponse['decision'],
           reason: data.reason as string | undefined,
           failed_constraints: failedConstraints,
           metadata: data.metadata as Record<string, unknown> | undefined,
           approval_id: data.approval_id as string | undefined,
+          denial,
         };
       } catch (error) {
         lastError =

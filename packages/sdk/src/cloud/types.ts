@@ -78,6 +78,19 @@ export interface FailedConstraint {
 }
 
 /**
+ * Structured denial details returned by the server on deny/require_approval.
+ */
+export interface CloudDenialDetails {
+  policyId?: string;
+  policyName?: string;
+  severity: 'deny' | 'require_approval';
+  matchedCondition?: string;
+  suggestedFixes: string[];
+  docsUrl?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
  * Response from cloud tool call validation.
  */
 export interface CloudValidationResponse {
@@ -86,6 +99,7 @@ export interface CloudValidationResponse {
   failed_constraints?: FailedConstraint[];
   metadata?: Record<string, unknown>;
   approval_id?: string;
+  denial?: CloudDenialDetails;
 }
 
 /**

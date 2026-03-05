@@ -2142,6 +2142,9 @@ export class Veto {
       // Handle require_approval decision
       if (response.decision === 'require_approval') {
         const approvalReason = response.reason ?? 'Approval required';
+        if (response.denial) {
+          metadata.denial = response.denial;
+        }
         const metadataWithApproval = response.approval_id
           ? { ...metadata, approvalId: response.approval_id }
           : metadata;
@@ -2237,6 +2240,9 @@ export class Veto {
         tool: context.toolName,
         reason: response.reason,
       });
+      if (response.denial) {
+        metadata.denial = response.denial;
+      }
       return {
         decision: 'deny',
         reason: response.reason,
