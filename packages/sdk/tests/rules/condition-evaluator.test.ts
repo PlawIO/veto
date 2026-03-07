@@ -46,4 +46,8 @@ describe('condition evaluator', () => {
     expect(createSafeRegex('(?uv)acme')).toBeNull();
     expect(createSafeRegex('(?vu)acme')).toBeNull();
   });
+
+  it('rejects sticky regex flags explicitly', () => {
+    expect(createSafeRegex('(?y)acme')).toBeNull();
+  });
 });

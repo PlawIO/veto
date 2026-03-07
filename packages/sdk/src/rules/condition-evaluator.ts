@@ -117,7 +117,7 @@ function parseInlineRegexFlags(
   }
 
   const inlineFlags = match[1].toLowerCase();
-  const supportedFlags = new Set(['d', 'i', 'm', 's', 'u', 'v', 'y']);
+  const supportedFlags = new Set(['d', 'i', 'm', 's', 'u', 'v']);
   for (const flag of inlineFlags) {
     if (!supportedFlags.has(flag)) {
       return null;

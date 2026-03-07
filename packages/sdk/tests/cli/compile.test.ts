@@ -451,5 +451,36 @@ describe('compile', () => {
         delete process.env.OPENAI_API_KEY;
       }
     });
+
+    it('should report output rule counts in compile summary', async () => {
+      const mockCreate = vi.fn().mockResolvedValue({
+        choices: [{ message: { content: OUTPUT_RULE_RESPONSE } }],
+      });
+
+      vi.doMock('openai', () => ({
+        default: class {
+          chat = { completions: { create: mockCreate } };
+        },
+      }));
+
+      const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      process.env.OPENAI_API_KEY = 'test-key';
+
+      try {
+        const result = await compile({
+          input: 'Hide Acme data in spreadsheet results',
+          output: join(TEST_DIR, 'output-rules.yaml'),
+          provider: 'openai',
+        });
+
+        expect(result.success).toBe(true);
+        expect(consoleLog.mock.calls.map(([message]) => message)).toContain(
+          '  Generated 0 input rule(s), 1 output rule(s)'
+        );
+      } finally {
+        vi.doUnmock('openai');
+        delete process.env.OPENAI_API_KEY;
+      }
+    });
   });
 });

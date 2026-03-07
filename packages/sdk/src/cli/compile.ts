@@ -515,7 +515,11 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
   result.outputPath = finalPath;
   result.success = true;
 
-  log(`  Generated ${output.rules.length} rule(s)`, quiet);
+  const outputRuleCount = output.output_rules?.length ?? 0;
+  const generatedSummary = outputRuleCount > 0
+    ? `  Generated ${output.rules.length} input rule(s), ${outputRuleCount} output rule(s)`
+    : `  Generated ${output.rules.length} rule(s)`;
+  log(generatedSummary, quiet);
   log(`  Output: ${finalPath}`, quiet);
 
   if (output.notes) {

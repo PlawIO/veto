@@ -7,12 +7,12 @@ const TEST_DIR = `/tmp/veto-output-validation-test-${Date.now()}`;
 const VETO_DIR = join(TEST_DIR, 'veto');
 const RULES_DIR = join(VETO_DIR, 'rules');
 
-function writeConfig(): void {
+function writeConfig(mode: 'strict' | 'log' | 'shadow' = 'strict'): void {
   writeFileSync(
     join(VETO_DIR, 'veto.config.yaml'),
     `
 version: "1.0"
-mode: "strict"
+mode: "${mode}"
 validation:
   mode: "local"
 logging:
@@ -272,7 +272,7 @@ output_rules:
     const wrapped = veto.wrap([{
       name: 'get_profile',
       inputSchema: { type: 'object' },
-      handler: async () => ({ email: 'alice@example.com' }),
+      handler: async (_input: Record<string, unknown>) => ({ email: 'alice@example.com' }),
     }]);
 
     const result = await wrapped[0].handler({});
@@ -302,9 +302,77 @@ output_rules:
     const wrapped = veto.wrap([{
       name: 'get_secret',
       inputSchema: { type: 'object' },
-      handler: async () => ({ secret: 'api-token-123' }),
+      handler: async (_input: Record<string, unknown>) => ({ secret: 'api-token-123' }),
     }]);
 
     await expect(wrapped[0].handler({})).rejects.toThrow('Output blocked by policy');
+  });
+
+  it.each(['log', 'shadow'] as const)(
+    'does not block wrapped tool output in %s mode',
+    async (mode) => {
+      writeConfig(mode);
+      writePolicy(
+        `
+version: "1.0"
+rules: []
+output_rules:
+  - id: wrap-block
+    name: Wrap blocking
+    enabled: true
+    action: block
+    tools: [get_secret]
+    description: Output blocked by policy
+    output_conditions:
+      - field: output.secret
+        operator: contains
+        value: token
+`
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{
+        name: 'get_secret',
+        inputSchema: { type: 'object' },
+        handler: async (_input: Record<string, unknown>) => ({ secret: 'api-token-123' }),
+      }]);
+
+      await expect(wrapped[0].handler({})).resolves.toEqual({ secret: 'api-token-123' });
+    }
+  );
+
+  it('does not mutate the caller output when cloning fails', async () => {
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: redact-secret
+    name: Redact secret
+    enabled: true
+    action: redact
+    tools: [report_tool]
+    output_conditions:
+      - field: output.note
+        operator: matches
+        value: SECRET
+    redact_with: "[REDACTED]"
+`
+    );
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const output: Record<string, unknown> & { self?: unknown; fn?: () => string } = {
+      note: 'contains SECRET value',
+    };
+    output.self = output;
+    output.fn = () => 'noop';
+
+    const result = veto.validateOutput('report_tool', output);
+
+    expect(result.decision).toBe('allow');
+    expect(result.redactions).toBe(0);
+    expect(result.trace).toEqual([]);
+    expect(result.output).toBe(output);
+    expect(output.note).toBe('contains SECRET value');
   });
 });

@@ -171,7 +171,12 @@ export class OutputValidator {
 
     const ensureClone = (): unknown => {
       if (!cloned) {
-        mutableOutput = this.cloneOutput(output);
+        const clonedOutput = this.cloneOutput(output);
+        if (clonedOutput === null) {
+          return null;
+        }
+
+        mutableOutput = clonedOutput;
         cloned = true;
       }
       return mutableOutput;
@@ -195,6 +200,13 @@ export class OutputValidator {
       }
 
       const clonedOutput = ensureClone();
+      if (clonedOutput === null) {
+        this.logger.warn('Skipping output redaction because output could not be cloned', {
+          ruleId: rule.id,
+        });
+        return { output, redactions: 0, trace: [] };
+      }
+
       const result = this.redactAtPath(clonedOutput, path, regex, redactWith);
       mutableOutput = result.output;
       totalRedactions += result.redactions;
@@ -367,14 +379,14 @@ export class OutputValidator {
     };
   }
 
-  private cloneOutput(output: unknown): unknown {
+  private cloneOutput(output: unknown): unknown | null {
     try {
       return structuredClone(output);
     } catch {
       try {
         return JSON.parse(JSON.stringify(output)) as unknown;
       } catch {
-        return output;
+        return null;
       }
     }
   }

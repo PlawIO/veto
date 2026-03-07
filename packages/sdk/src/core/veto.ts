@@ -2885,6 +2885,19 @@ export class Veto {
     const outputResult = this.validateOutput(toolName, output);
     this.logOutputValidation(toolName, args, outputResult);
     if (outputResult.decision === 'block') {
+      if (this.mode === 'log' || this.mode === 'shadow') {
+        this.logger.warn(
+          this.mode === 'shadow'
+            ? '[shadow] Tool output would be blocked'
+            : 'Tool output would be blocked (log mode)',
+          {
+            tool: toolName,
+            reason: outputResult.reason,
+          }
+        );
+        return output;
+      }
+
       throw new Error(outputResult.reason ?? `Tool output blocked for ${toolName}`);
     }
     return outputResult.output;
