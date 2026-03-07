@@ -2852,7 +2852,8 @@ export class Veto {
   private logOutputValidation(
     toolName: string,
     args: Record<string, unknown>,
-    outputResult: OutputValidationResult
+    outputResult: OutputValidationResult,
+    latencyMs: number
   ): void {
     if (!this.cloudClient) {
       return;
@@ -2868,7 +2869,7 @@ export class Veto {
       decision: outputResult.decision === 'block' ? 'deny' : 'allow',
       reason: outputResult.reason,
       mode: 'deterministic',
-      latency_ms: 0,
+      latency_ms: latencyMs,
       source: 'client',
       context: {
         output_validation: true,
@@ -2882,8 +2883,10 @@ export class Veto {
     args: Record<string, unknown>,
     output: unknown
   ): unknown {
+    const startedAt = Date.now();
     const outputResult = this.validateOutput(toolName, output);
-    this.logOutputValidation(toolName, args, outputResult);
+    const latencyMs = Date.now() - startedAt;
+    this.logOutputValidation(toolName, args, outputResult, latencyMs);
     if (outputResult.decision === 'block') {
       if (this.mode === 'log' || this.mode === 'shadow') {
         this.logger.warn(

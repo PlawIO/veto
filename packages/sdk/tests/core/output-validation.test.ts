@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Veto } from '../../src/core/veto.js';
@@ -38,6 +38,7 @@ describe('Veto output validation', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
@@ -374,5 +375,51 @@ output_rules:
     expect(result.trace).toEqual([]);
     expect(result.output).toBe(output);
     expect(output.note).toBe('contains SECRET value');
+  });
+
+  it('records real output validation latency in cloud decision logs', () => {
+    const logDecision = vi.fn();
+    const veto = Veto.fromRules({
+      rules: [],
+      outputRules: [
+        {
+          id: 'redact-secret',
+          name: 'Redact secret',
+          enabled: true,
+          severity: 'medium',
+          action: 'redact',
+          tools: ['report_tool'],
+          output_conditions: [
+            {
+              field: 'output.note',
+              operator: 'matches',
+              value: 'SECRET',
+            },
+          ],
+          redact_with: '[REDACTED]',
+        },
+      ],
+      cloudClient: {
+        logDecision,
+      } as any,
+    });
+
+    const originalDateNow = Date.now;
+    let callCount = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) return 100;
+      if (callCount === 2) return 107;
+      return originalDateNow();
+    });
+
+    (veto as any).validateOutputOrThrow('report_tool', {}, { note: 'contains SECRET value' });
+
+    expect(logDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latency_ms: 7,
+        decision: 'allow',
+      })
+    );
   });
 });
