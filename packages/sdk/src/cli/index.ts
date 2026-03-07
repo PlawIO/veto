@@ -147,7 +147,25 @@ export {
   type DiffReport,
   type StructuralDiff,
   type ImpactReport,
-  type ReplayCall,
-  type ReplayDecision,
   type RuleChange,
 } from './diff.js';
+export {
+  replay,
+  type ReplayOptions,
+  type ReplayResult,
+  type ReplayReport,
+  type ReplayChangedCall,
+  type ReplayDeniedGroup,
+} from './replay.js';
+export {
+  parseReplayLog,
+  parseReplayLogContent,
+  replayCalls,
+  countDecisions,
+  loadPolicySnapshot,
+  type ReplayCall,
+  type ReplayDecision,
+  type PolicySnapshot,
+  type DecisionCounts,
+  type ParsedReplayLog,
+} from './replay-engine.js';
