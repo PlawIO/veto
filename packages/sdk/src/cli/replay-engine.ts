@@ -201,7 +201,10 @@ export function parseReplayLogContent(content: string, sourceName = 'inline'): P
   }
 
   if (calls.length === 0) {
-    throw new Error(`No valid replay calls found in: ${sourceName}`);
+    const detail = invalidLineNumbers.length > 0
+      ? ` (${invalidLineNumbers.length} invalid line${invalidLineNumbers.length > 1 ? 's' : ''}: ${invalidLineNumbers.slice(0, 10).join(', ')}${invalidLineNumbers.length > 10 ? ', ...' : ''} — missing required 'toolName'/'tool' and 'arguments'/'args' fields)`
+      : '';
+    throw new Error(`No valid replay calls found in: ${sourceName}${detail}`);
   }
 
   return {
@@ -340,6 +343,9 @@ function matchesSequenceConstraints(
     !hasMatchingHistoryEntry(constraint, history, now, expressionCache)
   );
 
+  // OR semantics: the rule fires if ANY blocking history exists OR ANY
+  // required prior call is missing. Each constraint type independently
+  // triggers the rule — they are not combined with AND.
   return blockedByMatched || missingRequirement;
 }
 
@@ -408,6 +414,10 @@ export function decideReplayCall(
     return { decision: 'allow' };
   }
 
+  // Collect all matching rules, then return the most restrictive outcome.
+  // Priority: block > require_approval > allow (prevents approval from shadowing denial).
+  let denyRule: Rule | null = null;
+  let approvalRule: Rule | null = null;
   let firstAllowRule: Rule | null = null;
 
   for (const rule of rules) {
@@ -415,29 +425,31 @@ export function decideReplayCall(
       continue;
     }
 
-    const reason = rule.description ?? `Matched rule: ${rule.name}`;
-
-    if (rule.action === 'require_approval') {
-      return {
-        decision: 'require_approval',
-        ruleId: rule.id,
-        ruleName: rule.name,
-        reason,
-      };
-    }
-
-    if (rule.action === 'block') {
-      return {
-        decision: 'deny',
-        ruleId: rule.id,
-        ruleName: rule.name,
-        reason,
-      };
-    }
-
-    if (rule.action === 'allow' && !firstAllowRule) {
+    if (rule.action === 'block' && !denyRule) {
+      denyRule = rule;
+    } else if (rule.action === 'require_approval' && !approvalRule) {
+      approvalRule = rule;
+    } else if (rule.action === 'allow' && !firstAllowRule) {
       firstAllowRule = rule;
     }
+  }
+
+  if (denyRule) {
+    return {
+      decision: 'deny',
+      ruleId: denyRule.id,
+      ruleName: denyRule.name,
+      reason: denyRule.description ?? `Matched rule: ${denyRule.name}`,
+    };
+  }
+
+  if (approvalRule) {
+    return {
+      decision: 'require_approval',
+      ruleId: approvalRule.id,
+      ruleName: approvalRule.name,
+      reason: approvalRule.description ?? `Matched rule: ${approvalRule.name}`,
+    };
   }
 
   if (firstAllowRule) {

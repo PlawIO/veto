@@ -143,10 +143,6 @@ export interface DiffResult {
   errors: string[];
 }
 
-function loadPolicySnapshotFromFileOrDirectory(inputPath: string): PolicySnapshot {
-  return loadPolicySnapshotFromEngine(inputPath);
-}
-
 function toPosixPath(pathValue: string): string {
   return pathValue.split(sep).join('/');
 }
@@ -784,8 +780,8 @@ function resolveSources(
       throw new Error('Explicit diff mode requires both paths to be files or both directories.');
     }
 
-    const oldSnapshot = loadPolicySnapshotFromFileOrDirectory(oldPath);
-    const newSnapshot = loadPolicySnapshotFromFileOrDirectory(newPath);
+    const oldSnapshot = loadPolicySnapshotFromEngine(oldPath);
+    const newSnapshot = loadPolicySnapshotFromEngine(newPath);
 
     return {
       oldSnapshot,
@@ -810,7 +806,7 @@ function resolveSources(
   }
 
   const oldSnapshot = loadPolicySnapshotFromGitHead(resolvedPolicyPath, projectDir);
-  const newSnapshot = loadPolicySnapshotFromFileOrDirectory(resolvedPolicyPath);
+  const newSnapshot = loadPolicySnapshotFromEngine(resolvedPolicyPath);
 
   return {
     oldSnapshot,
