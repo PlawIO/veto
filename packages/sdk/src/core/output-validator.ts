@@ -129,7 +129,8 @@ export class OutputValidator {
     return evaluateConditionCollections(
       rule.output_conditions,
       rule.output_condition_groups,
-      context
+      context,
+      { allowNestedObjectStringSearch: true }
     );
   }
 

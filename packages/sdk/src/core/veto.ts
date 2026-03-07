@@ -1083,11 +1083,7 @@ export class Veto {
   }
 
   private cacheRemoteOutputRules(toolName: string, outputRules: OutputRule[] | undefined): void {
-    if (!outputRules) {
-      return;
-    }
-
-    if (outputRules.length === 0) {
+    if (!outputRules || outputRules.length === 0) {
       this.remoteOutputRulesByTool.delete(toolName);
       return;
     }
@@ -2858,7 +2854,7 @@ export class Veto {
     args: Record<string, unknown>,
     outputResult: OutputValidationResult
   ): void {
-    if (this.validationMode !== 'cloud' && !this.cloudClient) {
+    if (!this.cloudClient) {
       return;
     }
 

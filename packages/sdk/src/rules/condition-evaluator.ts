@@ -7,6 +7,7 @@ import type {
 
 export interface ConditionEvaluationOptions {
   evaluateExpression?: (expression: string, context: Record<string, unknown>) => boolean;
+  allowNestedObjectStringSearch?: boolean;
   now?: Date;
 }
 
@@ -121,6 +122,10 @@ function parseInlineRegexFlags(
     if (!supportedFlags.has(flag)) {
       return null;
     }
+  }
+
+  if (inlineFlags.includes('u') && inlineFlags.includes('v')) {
+    return null;
   }
 
   return {
@@ -418,8 +423,11 @@ function collectNestedStrings(
 export function evaluateLegacyCondition(
   fieldValue: unknown,
   operator: ConditionOperator,
-  expected: unknown
+  expected: unknown,
+  options: Pick<ConditionEvaluationOptions, 'allowNestedObjectStringSearch'> = {}
 ): boolean {
+  const allowNestedObjectStringSearch = options.allowNestedObjectStringSearch === true;
+
   switch (operator) {
     case 'equals':
       return fieldValue === expected;
@@ -432,7 +440,7 @@ export function evaluateLegacyCondition(
       if (Array.isArray(fieldValue)) {
         return fieldValue.includes(expected);
       }
-      if (typeof expected === 'string') {
+      if (allowNestedObjectStringSearch && typeof expected === 'string') {
         return collectNestedStrings(fieldValue)
           .some((value) => value.includes(expected));
       }
@@ -444,7 +452,7 @@ export function evaluateLegacyCondition(
       if (Array.isArray(fieldValue)) {
         return !fieldValue.includes(expected);
       }
-      if (typeof expected === 'string') {
+      if (allowNestedObjectStringSearch && typeof expected === 'string') {
         return collectNestedStrings(fieldValue)
           .every((value) => !value.includes(expected));
       }
@@ -461,6 +469,10 @@ export function evaluateLegacyCondition(
       }
       if (typeof fieldValue === 'string') {
         return createSafeRegex(expected)?.test(fieldValue) ?? false;
+      }
+
+      if (!allowNestedObjectStringSearch) {
+        return false;
       }
 
       const regex = createSafeRegex(expected);
@@ -523,7 +535,9 @@ export function evaluateCondition(
 
   if (condition.field && condition.operator) {
     const fieldValue = resolveFieldPath(condition.field, context, builtInContext);
-    return evaluateLegacyCondition(fieldValue, condition.operator, condition.value);
+    return evaluateLegacyCondition(fieldValue, condition.operator, condition.value, {
+      allowNestedObjectStringSearch: options.allowNestedObjectStringSearch,
+    });
   }
 
   return true;
