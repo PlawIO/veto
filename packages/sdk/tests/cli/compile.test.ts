@@ -72,6 +72,27 @@ const MULTI_RULE_RESPONSE = JSON.stringify({
   notes: 'Currency conversion policies may need LLM-based evaluation.',
 });
 
+const OUTPUT_RULE_RESPONSE = JSON.stringify({
+  rules: [],
+  output_rules: [
+    {
+      id: 'redact-acme',
+      name: 'Hide Acme data',
+      action: 'redact',
+      tools: ['google_sheets_read'],
+      output_conditions: [
+        {
+          field: 'output',
+          operator: 'matches',
+          value: '(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?',
+        },
+      ],
+      redact_with: '[REDACTED]',
+    },
+  ],
+  notes: '',
+});
+
 describe('compile', () => {
   beforeEach(() => {
     if (existsSync(TEST_DIR)) {
@@ -172,6 +193,51 @@ describe('compile', () => {
       });
       expect(() => parseAndValidateLLMOutput(bad)).toThrow('invalid operator');
     });
+
+    it('should parse output rules alongside regular rules', () => {
+      const output = parseAndValidateLLMOutput(OUTPUT_RULE_RESPONSE);
+
+      expect(output.rules).toHaveLength(0);
+      expect(output.output_rules).toHaveLength(1);
+      expect(output.output_rules?.[0]).toMatchObject({
+        id: 'redact-acme',
+        action: 'redact',
+        redact_with: '[REDACTED]',
+      });
+    });
+
+    it('should reject output rules with invalid action', () => {
+      const bad = JSON.stringify({
+        rules: [],
+        output_rules: [{ id: 'bad', name: 'bad', action: 'warn' }],
+        notes: '',
+      });
+
+      expect(() => parseAndValidateLLMOutput(bad)).toThrow('invalid output action');
+    });
+
+    it('should reject output rules with unsafe regex', () => {
+      const bad = JSON.stringify({
+        rules: [],
+        output_rules: [
+          {
+            id: 'unsafe',
+            name: 'unsafe',
+            action: 'redact',
+            output_conditions: [
+              {
+                field: 'output',
+                operator: 'matches',
+                value: '(a+)+',
+              },
+            ],
+          },
+        ],
+        notes: '',
+      });
+
+      expect(() => parseAndValidateLLMOutput(bad)).toThrow('unsafe regex');
+    });
   });
 
   describe('toYaml', () => {
@@ -194,6 +260,19 @@ describe('compile', () => {
 
       expect(parsed.description.length).toBeLessThan(200);
       expect(parsed.description).toContain('...');
+    });
+
+    it('should include output_rules in YAML when present', () => {
+      const output = parseAndValidateLLMOutput(OUTPUT_RULE_RESPONSE);
+      const yaml = toYaml(output, 'Do not show Acme data in Google Sheets');
+      const parsed = parseYaml(yaml);
+
+      expect(parsed.output_rules).toHaveLength(1);
+      expect(parsed.output_rules[0]).toMatchObject({
+        id: 'redact-acme',
+        action: 'redact',
+        redact_with: '[REDACTED]',
+      });
     });
   });
 

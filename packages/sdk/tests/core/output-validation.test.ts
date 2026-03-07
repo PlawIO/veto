@@ -76,6 +76,62 @@ output_rules:
     expect(result.decision).toBe('allow');
     expect((result.output as any).user.contact.email).toBe('[EMAIL]');
     expect(result.redactions).toBe(1);
+    expect(result.trace).toEqual([
+      {
+        ruleId: 'redact-email',
+        ruleName: 'Redact email',
+        field: 'output.user.contact.email',
+        pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}',
+        redactedCount: 1,
+        replacement: '[EMAIL]',
+      },
+    ]);
+  });
+
+  it('redacts matching strings anywhere in structured output when field is output', async () => {
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: redact-acme
+    name: Redact Acme everywhere
+    enabled: true
+    action: redact
+    tools: [google_sheets_read]
+    output_conditions:
+      - field: output
+        operator: matches
+        value: "(?i)\\\\bacme\\\\b(?:\\\\s+(?:inc|corp|llc))?\\\\.?"
+    redact_with: "[REDACTED]"
+`
+    );
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const result = veto.validateOutput('google_sheets_read', {
+      sheet: 'Q1 Pipeline',
+      rows: [
+        { company: 'Acme Inc.', owner: 'alice@example.com' },
+        { company: 'Globex', notes: 'Met with ACME corp yesterday' },
+      ],
+      summary: 'Top customer is acme llc',
+    });
+
+    expect(result.decision).toBe('allow');
+    expect((result.output as any).rows[0].company).toBe('[REDACTED]');
+    expect((result.output as any).rows[1].notes).toBe('Met with [REDACTED] yesterday');
+    expect((result.output as any).summary).toBe('Top customer is [REDACTED]');
+    expect(result.redactions).toBe(3);
+    expect(result.trace).toEqual([
+      {
+        ruleId: 'redact-acme',
+        ruleName: 'Redact Acme everywhere',
+        field: 'output',
+        pattern: '(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?',
+        redactedCount: 3,
+        replacement: '[REDACTED]',
+      },
+    ]);
   });
 
   it('blocks output when a block output rule matches', async () => {

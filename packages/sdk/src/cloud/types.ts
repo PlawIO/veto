@@ -5,6 +5,7 @@
  */
 
 import type { ArgumentConstraint } from '../deterministic/types.js';
+import type { RedactionTrace } from '../core/output-validator.js';
 import type { Rule, OutputRule } from '../rules/types.js';
 
 /**
@@ -100,6 +101,7 @@ export interface CloudValidationResponse {
   metadata?: Record<string, unknown>;
   approval_id?: string;
   denial?: CloudDenialDetails;
+  outputRules?: OutputRule[];
 }
 
 /**
@@ -155,4 +157,5 @@ export interface LogDecisionRequest {
   latency_ms: number;
   source: 'client';
   context?: Record<string, unknown>;
+  redactions?: RedactionTrace[];
 }

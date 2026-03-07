@@ -1112,6 +1112,67 @@ logging:
       expect(result).toBe('ok');
     });
 
+    it('should cache output rules from cloud validation and redact tool output', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "cloud"
+cloud:
+  baseUrl: "http://localhost:3001"
+  apiKey: "test-key"
+  retries: 0
+logging:
+  level: "silent"
+`,
+        'utf-8'
+      );
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed',
+            outputRules: [
+              {
+                id: 'redact-acme',
+                name: 'Hide Acme',
+                enabled: true,
+                severity: 'high',
+                action: 'redact',
+                tools: ['google_sheets_read'],
+                output_conditions: [
+                  {
+                    field: 'output.company',
+                    operator: 'matches',
+                    value: '(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?',
+                  },
+                ],
+                redact_with: '[REDACTED]',
+              },
+            ],
+          }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        });
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const handler = vi.fn().mockResolvedValue({ company: 'Acme Inc.' });
+      const tools = [{ name: 'google_sheets_read', handler, inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      const result = await wrapped[0].handler({ sheet: 'pipeline' });
+
+      expect(result).toEqual({ company: '[REDACTED]' });
+    });
+
     it('should deny tool call when cloud returns deny', async () => {
       writeFileSync(
         join(VETO_DIR, 'veto.config.yaml'),
