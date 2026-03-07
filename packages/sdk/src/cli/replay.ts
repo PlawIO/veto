@@ -83,23 +83,25 @@ function groupByToolAndReason(
   decisions: readonly ReplayDecision[],
   targetDecision: 'deny' | 'require_approval'
 ): ReplayDeniedGroup[] {
-  const groups = new Map<string, { count: number; reason?: string }>();
+  const groups = new Map<string, { tool: string; count: number; reason?: string }>();
 
   for (let i = 0; i < calls.length; i++) {
     if (decisions[i].decision !== targetDecision) continue;
 
-    const key = `${calls[i].tool}::${decisions[i].reason ?? ''}`;
+    const tool = calls[i].tool;
+    const reason = decisions[i].reason ?? '';
+    const key = `${tool}\0${reason}`;
     const existing = groups.get(key);
     if (existing) {
       existing.count += 1;
     } else {
-      groups.set(key, { count: 1, reason: decisions[i].reason });
+      groups.set(key, { tool, count: 1, reason: decisions[i].reason });
     }
   }
 
-  return [...groups.entries()]
-    .map(([key, { count, reason }]) => ({
-      tool: key.split('::')[0],
+  return [...groups.values()]
+    .map(({ tool, count, reason }) => ({
+      tool,
       count,
       reason: reason || undefined,
     }))
@@ -138,7 +140,8 @@ function buildReport(
   snapshot: PolicySnapshot,
   logPath: string,
   calls: readonly ReplayCall[],
-  decisions: readonly ReplayDecision[]
+  decisions: readonly ReplayDecision[],
+  invalidLines: number
 ): ReplayReport {
   const counts = countDecisions(decisions);
   const hasOriginalDecisions = calls.some((c) => c.decision !== undefined);
@@ -149,7 +152,7 @@ function buildReport(
     policySource: snapshot.source,
     logSource: resolve(logPath),
     totalCalls: calls.length,
-    invalidLines: 0,
+    invalidLines,
     decisions: counts,
     topDenied: groupByToolAndReason(calls, decisions, 'deny'),
     topRequireApproval: groupByToolAndReason(calls, decisions, 'require_approval'),
@@ -176,7 +179,7 @@ function truncateArgs(args: Record<string, unknown>, maxLen = 60): string {
   return str.slice(0, maxLen - 1) + '\u2026';
 }
 
-function formatTextReport(report: ReplayReport, diffOnly: boolean): string {
+function formatTextReport(report: ReplayReport): string {
   const lines: string[] = [];
   const { totalCalls, decisions } = report;
 
@@ -187,7 +190,7 @@ function formatTextReport(report: ReplayReport, diffOnly: boolean): string {
   lines.push(`  ${decisions.deny.toLocaleString().padStart(6)} denied (${pct(decisions.deny, totalCalls)}%)`);
   lines.push(`  ${decisions.require_approval.toLocaleString().padStart(6)} require approval (${pct(decisions.require_approval, totalCalls)}%)`);
 
-  if (report.topDenied.length > 0 && !diffOnly) {
+  if (report.topDenied.length > 0) {
     lines.push('');
     lines.push('Top denied:');
     for (const group of report.topDenied.slice(0, 10)) {
@@ -196,7 +199,7 @@ function formatTextReport(report: ReplayReport, diffOnly: boolean): string {
     }
   }
 
-  if (report.topRequireApproval.length > 0 && !diffOnly) {
+  if (report.topRequireApproval.length > 0) {
     lines.push('');
     lines.push('Top require approval:');
     for (const group of report.topRequireApproval.slice(0, 10)) {
@@ -212,12 +215,12 @@ function formatTextReport(report: ReplayReport, diffOnly: boolean): string {
       const ruleInfo = call.ruleName ? ` (rule: ${call.ruleName})` : '';
       lines.push(`  CHANGED: ${call.tool}(${truncateArgs(call.arguments)}) ${call.originalDecision} \u2192 ${call.replayedDecision}${ruleInfo}`);
     }
-  } else if (report.hasOriginalDecisions && report.changed.total === 0 && !diffOnly) {
+  } else if (report.hasOriginalDecisions && report.changed.total === 0) {
     lines.push('');
     lines.push('No decision changes \u2014 policy matches all historical decisions.');
   }
 
-  if (!report.hasOriginalDecisions && !diffOnly) {
+  if (!report.hasOriginalDecisions) {
     lines.push('');
     lines.push('Tip: Include "decision" in your log entries to see what changed.');
   }
@@ -281,8 +284,7 @@ export async function replay(options: ReplayOptions): Promise<ReplayResult> {
   }
 
   const decisions = replayCalls(snapshot, parsedLog.calls);
-  const report = buildReport(snapshot, options.log, parsedLog.calls, decisions);
-  report.invalidLines = parsedLog.invalidLines;
+  const report = buildReport(snapshot, options.log, parsedLog.calls, decisions, parsedLog.invalidLines);
 
   const format = options.format === 'json' ? 'json' : 'text';
 
@@ -292,7 +294,7 @@ export async function replay(options: ReplayOptions): Promise<ReplayResult> {
     } else if (options.diff) {
       process.stdout.write(formatDiffOnlyText(report));
     } else {
-      process.stdout.write(formatTextReport(report, false));
+      process.stdout.write(formatTextReport(report));
     }
   }
 
