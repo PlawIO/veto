@@ -398,6 +398,7 @@ export class Veto {
 
   // Client-side deterministic validation cache
   private readonly policyCache: PolicyCache | null = null;
+  private readonly remoteOutputRulesByTool = new Map<string, OutputRule[]>();
 
   // Loaded rules
   private rulesState: LoadedRulesState;
@@ -1076,7 +1077,18 @@ export class Veto {
 
   private getOutputRulesForTool(toolName: string): OutputRule[] {
     const toolSpecific = this.rulesState.outputRulesByTool.get(toolName) ?? [];
-    return [...this.rulesState.globalOutputRules, ...toolSpecific];
+    const remote = this.remoteOutputRulesByTool.get(toolName) ?? [];
+    return [...this.rulesState.globalOutputRules, ...toolSpecific, ...remote]
+      .filter((rule) => rule.enabled !== false);
+  }
+
+  private cacheRemoteOutputRules(toolName: string, outputRules: OutputRule[] | undefined): void {
+    if (!outputRules || outputRules.length === 0) {
+      this.remoteOutputRulesByTool.delete(toolName);
+      return;
+    }
+
+    this.remoteOutputRulesByTool.set(toolName, outputRules);
   }
 
   private isGuardEvaluation(context: ValidationContext): boolean {
@@ -2130,6 +2142,7 @@ export class Veto {
         context.arguments,
         apiContext
       );
+      this.cacheRemoteOutputRules(context.toolName, response.outputRules);
 
       const metadata: Record<string, unknown> = {};
       if (response.failed_constraints) {
@@ -2836,9 +2849,58 @@ export class Veto {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private validateOutputOrThrow(toolName: string, output: unknown): unknown {
+  private logOutputValidation(
+    toolName: string,
+    args: Record<string, unknown>,
+    outputResult: OutputValidationResult,
+    latencyMs: number
+  ): void {
+    if (!this.cloudClient) {
+      return;
+    }
+
+    if (outputResult.decision !== 'block' && outputResult.trace.length === 0) {
+      return;
+    }
+
+    this.getCloudClient().logDecision({
+      tool_name: toolName,
+      arguments: args,
+      decision: outputResult.decision === 'block' ? 'deny' : 'allow',
+      reason: outputResult.reason,
+      mode: 'deterministic',
+      latency_ms: latencyMs,
+      source: 'client',
+      context: {
+        output_validation: true,
+      },
+      redactions: outputResult.trace,
+    });
+  }
+
+  private validateOutputOrThrow(
+    toolName: string,
+    args: Record<string, unknown>,
+    output: unknown
+  ): unknown {
+    const startedAt = Date.now();
     const outputResult = this.validateOutput(toolName, output);
+    const latencyMs = Date.now() - startedAt;
+    this.logOutputValidation(toolName, args, outputResult, latencyMs);
     if (outputResult.decision === 'block') {
+      if (this.mode === 'log' || this.mode === 'shadow') {
+        this.logger.warn(
+          this.mode === 'shadow'
+            ? '[shadow] Tool output would be blocked'
+            : 'Tool output would be blocked (log mode)',
+          {
+            tool: toolName,
+            reason: outputResult.reason,
+          }
+        );
+        return output;
+      }
+
       throw new Error(outputResult.reason ?? `Tool output blocked for ${toolName}`);
     }
     return outputResult.output;
@@ -2923,7 +2985,7 @@ export class Veto {
         // Execute the original function with potentially modified arguments
         const finalArgs = result.finalArguments ?? input;
         const executionResult = await originalFunc.call(tool, finalArgs);
-        return veto.validateOutputOrThrow(toolName, executionResult);
+        return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
       };
 
       // Replace func
@@ -2953,7 +3015,7 @@ export class Veto {
           // Call original invoke with potentially modified arguments
           const finalArgs = result.finalArguments ?? input;
           const executionResult = await originalInvoke.call(tool, finalArgs, ...rest);
-          return veto.validateOutputOrThrow(toolName, executionResult);
+          return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
         };
       }
 
@@ -2998,10 +3060,10 @@ export class Veto {
           const finalArgs = result.finalArguments ?? callArgs;
           if (args.length === 1 && typeof args[0] === 'object') {
             const executionResult = await originalFunc.call(tool, finalArgs);
-            return veto.validateOutputOrThrow(toolName, executionResult);
+            return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
           }
           const executionResult = await originalFunc.apply(tool, args);
-          return veto.validateOutputOrThrow(toolName, executionResult);
+          return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
         };
 
         wrapped[key] = wrappedFunc;
@@ -3100,7 +3162,7 @@ export class Veto {
 
       const finalArgs = result.finalArguments ?? callArgs;
       const executionResult = await serverClient.callTool({ name: args.name, arguments: finalArgs });
-      return veto.validateOutputOrThrow(args.name, executionResult) as MCPToolResult;
+      return veto.validateOutputOrThrow(args.name, finalArgs, executionResult) as MCPToolResult;
     };
 
     this.logger.debug('MCP tools wrapped', { count: tools.length });

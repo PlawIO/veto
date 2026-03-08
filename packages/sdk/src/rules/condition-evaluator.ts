@@ -7,6 +7,7 @@ import type {
 
 export interface ConditionEvaluationOptions {
   evaluateExpression?: (expression: string, context: Record<string, unknown>) => boolean;
+  allowNestedObjectStringSearch?: boolean;
   now?: Date;
 }
 
@@ -91,15 +92,58 @@ export function createSafeRegex(
   pattern: string,
   flags?: string
 ): RegExp | null {
-  if (pattern.length > 256 || !isSafePattern(pattern)) {
+  const parsed = parseInlineRegexFlags(pattern);
+  if (!parsed) {
+    return null;
+  }
+
+  if (parsed.source.length > 256 || !isSafePattern(parsed.source)) {
     return null;
   }
 
   try {
-    return new RegExp(pattern, flags);
+    return new RegExp(parsed.source, mergeRegexFlags(parsed.flags, flags));
   } catch {
     return null;
   }
+}
+
+function parseInlineRegexFlags(
+  pattern: string
+): { source: string; flags: string } | null {
+  const match = /^\(\?([a-z]+)\)/i.exec(pattern);
+  if (!match) {
+    return { source: pattern, flags: '' };
+  }
+
+  const inlineFlags = match[1].toLowerCase();
+  const supportedFlags = new Set(['d', 'i', 'm', 's', 'u', 'v']);
+  for (const flag of inlineFlags) {
+    if (!supportedFlags.has(flag)) {
+      return null;
+    }
+  }
+
+  if (inlineFlags.includes('u') && inlineFlags.includes('v')) {
+    return null;
+  }
+
+  return {
+    source: pattern.slice(match[0].length),
+    flags: inlineFlags,
+  };
+}
+
+function mergeRegexFlags(...flagSets: Array<string | undefined>): string {
+  const merged = new Set<string>();
+  for (const flagSet of flagSets) {
+    if (!flagSet) continue;
+    for (const flag of flagSet) {
+      merged.add(flag);
+    }
+  }
+
+  return [...merged].join('');
 }
 
 function parseClockToMinutes(value: string): number | null {
@@ -347,14 +391,43 @@ function getLengthComparableValue(value: unknown): number | null {
   return null;
 }
 
+function collectNestedStrings(
+  value: unknown,
+  seen: Set<object> = new Set()
+): string[] {
+  if (typeof value === 'string') {
+    return [value];
+  }
+
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  if (seen.has(value)) {
+    return [];
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectNestedStrings(entry, seen));
+  }
+
+  return Object.values(value as Record<string, unknown>)
+    .flatMap((entry) => collectNestedStrings(entry, seen));
+}
+
 /**
  * Evaluate a single legacy field/operator/value condition.
  */
 export function evaluateLegacyCondition(
   fieldValue: unknown,
   operator: ConditionOperator,
-  expected: unknown
+  expected: unknown,
+  options: Pick<ConditionEvaluationOptions, 'allowNestedObjectStringSearch'> = {}
 ): boolean {
+  const allowNestedObjectStringSearch = options.allowNestedObjectStringSearch === true;
+
   switch (operator) {
     case 'equals':
       return fieldValue === expected;
@@ -367,6 +440,10 @@ export function evaluateLegacyCondition(
       if (Array.isArray(fieldValue)) {
         return fieldValue.includes(expected);
       }
+      if (allowNestedObjectStringSearch && typeof expected === 'string') {
+        return collectNestedStrings(fieldValue)
+          .some((value) => value.includes(expected));
+      }
       return false;
     case 'not_contains':
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
@@ -375,6 +452,10 @@ export function evaluateLegacyCondition(
       if (Array.isArray(fieldValue)) {
         return !fieldValue.includes(expected);
       }
+      if (allowNestedObjectStringSearch && typeof expected === 'string') {
+        return collectNestedStrings(fieldValue)
+          .every((value) => !value.includes(expected));
+      }
       return true;
     case 'starts_with':
       return typeof fieldValue === 'string' && typeof expected === 'string'
@@ -382,11 +463,26 @@ export function evaluateLegacyCondition(
     case 'ends_with':
       return typeof fieldValue === 'string' && typeof expected === 'string'
         && fieldValue.endsWith(expected);
-    case 'matches':
-      if (typeof fieldValue !== 'string' || typeof expected !== 'string') {
+    case 'matches': {
+      if (typeof expected !== 'string') {
         return false;
       }
-      return createSafeRegex(expected)?.test(fieldValue) ?? false;
+      if (typeof fieldValue === 'string') {
+        return createSafeRegex(expected)?.test(fieldValue) ?? false;
+      }
+
+      if (!allowNestedObjectStringSearch) {
+        return false;
+      }
+
+      const regex = createSafeRegex(expected);
+      if (!regex) {
+        return false;
+      }
+
+      return collectNestedStrings(fieldValue)
+        .some((value) => regex.test(value));
+    }
     case 'greater_than':
       return Number(fieldValue) > Number(expected);
     case 'less_than':
@@ -439,7 +535,9 @@ export function evaluateCondition(
 
   if (condition.field && condition.operator) {
     const fieldValue = resolveFieldPath(condition.field, context, builtInContext);
-    return evaluateLegacyCondition(fieldValue, condition.operator, condition.value);
+    return evaluateLegacyCondition(fieldValue, condition.operator, condition.value, {
+      allowNestedObjectStringSearch: options.allowNestedObjectStringSearch,
+    });
   }
 
   return true;

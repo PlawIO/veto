@@ -1112,6 +1112,173 @@ logging:
       expect(result).toBe('ok');
     });
 
+    it('should cache output rules from cloud validation and redact tool output', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "cloud"
+cloud:
+  baseUrl: "http://localhost:3001"
+  apiKey: "test-key"
+  retries: 0
+logging:
+  level: "silent"
+`,
+        'utf-8'
+      );
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed',
+            outputRules: [
+              {
+                id: 'redact-acme',
+                name: 'Hide Acme',
+                enabled: true,
+                severity: 'high',
+                action: 'redact',
+                tools: ['google_sheets_read'],
+                output_conditions: [
+                  {
+                    field: 'output.company',
+                    operator: 'matches',
+                    value: '(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?',
+                  },
+                ],
+                redact_with: '[REDACTED]',
+              },
+            ],
+          }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        });
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const handler = vi.fn().mockResolvedValue({ company: 'Acme Inc.' });
+      const tools = [{ name: 'google_sheets_read', handler, inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      const result = await wrapped[0].handler({ sheet: 'pipeline' });
+
+      expect(result).toEqual({ company: '[REDACTED]' });
+    });
+
+    it('clears cached remote output rules when a later cloud response omits outputRules', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "cloud"
+cloud:
+  baseUrl: "http://localhost:3001"
+  apiKey: "test-key"
+  retries: 0
+logging:
+  level: "silent"
+`,
+        'utf-8'
+      );
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed',
+            outputRules: [
+              {
+                id: 'redact-acme',
+                name: 'Hide Acme',
+                enabled: true,
+                severity: 'high',
+                action: 'redact',
+                tools: ['google_sheets_read'],
+                output_conditions: [
+                  {
+                    field: 'output.company',
+                    operator: 'matches',
+                    value: '(?i)\\bacme\\b',
+                  },
+                ],
+                redact_with: '[REDACTED]',
+              },
+            ],
+          }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed again',
+          }),
+          text: async () => '',
+        });
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const handler = vi.fn()
+        .mockResolvedValueOnce({ company: 'Acme Inc.' })
+        .mockResolvedValueOnce({ company: 'Acme Inc.' });
+      const tools = [{ name: 'google_sheets_read', handler, inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      const firstResult = await wrapped[0].handler({ sheet: 'pipeline' });
+      const secondResult = await wrapped[0].handler({ sheet: 'pipeline' });
+
+      expect(firstResult).toEqual({ company: '[REDACTED] Inc.' });
+      expect(secondResult).toEqual({ company: 'Acme Inc.' });
+    });
+
+    it('does not try to create a cloud client while logging output validation without one', async () => {
+      writeLocalConfig();
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const getCloudClientSpy = vi
+        .spyOn(veto as any, 'getCloudClient')
+        .mockImplementation(() => {
+          throw new Error('getCloudClient should not be called');
+        });
+
+      (veto as any).validationMode = 'cloud';
+      (veto as any).cloudClient = undefined;
+
+      expect(() => (veto as any).logOutputValidation('report_tool', {}, {
+        decision: 'allow',
+        output: { value: 'redacted' },
+        matchedRuleIds: ['rule-1'],
+        redactions: 1,
+        trace: [
+          {
+            ruleId: 'rule-1',
+            ruleName: 'Hide secret',
+            field: 'output',
+            pattern: '(?i)secret',
+            redactedCount: 1,
+            replacement: '[REDACTED]',
+          },
+        ],
+      })).not.toThrow();
+
+      expect(getCloudClientSpy).not.toHaveBeenCalled();
+    });
+
     it('should deny tool call when cloud returns deny', async () => {
       writeFileSync(
         join(VETO_DIR, 'veto.config.yaml'),

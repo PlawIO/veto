@@ -7,6 +7,7 @@ import {
   PROVIDER_BASE_URLS,
   CustomError,
 } from '../custom/types.js';
+import { createSafeRegex } from '../rules/condition-evaluator.js';
 
 export interface CompileOptions {
   input?: string;
@@ -33,10 +34,11 @@ interface CompileProviderConfig {
 
 const COMPILE_SYSTEM_PROMPT = `You are a policy compiler for Veto, an AI agent tool-call guardrail system.
 
-Your task: convert a natural language policy description into deterministic YAML constraint rules.
+Your task: convert a natural language policy description into deterministic YAML rules.
 
-The output MUST be a valid JSON object with two fields:
-- "rules": an array of rule objects (the compiled rules)
+The output MUST be a valid JSON object with three fields:
+- "rules": an array of input rule objects (the compiled rules)
+- "output_rules": an optional array of output visibility rules
 - "notes": a string with any caveats or suggestions (empty string if none)
 
 Each rule object MUST have these fields:
@@ -61,9 +63,38 @@ Common patterns:
 - Time windows: use "outside_hours" or "within_hours" on "context.time" with value:
   {"start":"HH:MM","end":"HH:MM","timezone":"IANA/Zone","days":["mon","tue","wed","thu","fri"]}
 
+If the policy is about HIDING, REDACTING, FILTERING, or NOT SHOWING data in tool outputs, generate output_rules.
+
+Each output rule object MUST have these fields:
+- "id": kebab-case unique identifier
+- "name": short human-readable name
+- "action": one of "block", "redact", "log"
+- "tools": array of tool name strings this applies to
+- "output_conditions": array of condition objects using:
+  - "field": usually "output" or an output subfield like "output.rows"
+  - "operator": one of ${Array.from(new Set(['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'matches', 'greater_than', 'less_than', 'length_greater_than', 'in', 'not_in', 'outside_hours', 'within_hours'])).map((operator) => `"${operator}"`).join(', ')}
+  - "value": the value to compare against
+- "redact_with": replacement string when action is "redact"
+
+Output rule guidance:
+- Use output_rules for phrases like "do not show", "hide", "redact", "don't reveal", "mask"
+- Expand named entities into safe, case-insensitive regex patterns when appropriate
+- Example: "Acme Inc." -> "(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?"
+- When both input restrictions and output visibility restrictions apply, generate both "rules" and "output_rules"
+
 If the policy CANNOT be fully expressed as deterministic rules, include an explanation in the "notes" field describing what aspects require LLM-based evaluation.
 
 Respond with ONLY a JSON object. No markdown, no explanation outside the JSON.`;
+
+const VALID_OPERATORS = new Set([
+  'equals', 'not_equals', 'contains', 'not_contains',
+  'starts_with', 'ends_with', 'matches',
+  'greater_than', 'less_than', 'length_greater_than', 'in', 'not_in',
+  'outside_hours', 'within_hours',
+]);
+const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow', 'require_approval']);
+const VALID_OUTPUT_ACTIONS = new Set(['block', 'redact', 'log']);
+const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low', 'info']);
 
 function buildUserPrompt(policyText: string): string {
   return `Convert this natural language policy into deterministic YAML rules:\n\n${policyText}`;
@@ -202,9 +233,91 @@ interface CompiledRule {
   }>;
 }
 
+interface CompiledOutputRule {
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  severity?: string;
+  action: string;
+  tools?: string[];
+  output_conditions?: Array<{
+    field: string;
+    operator: string;
+    value: unknown;
+  }>;
+  output_condition_groups?: Array<Array<{
+    field: string;
+    operator: string;
+    value: unknown;
+  }>>;
+  redact_with?: string;
+}
+
 interface LLMOutput {
   rules: CompiledRule[];
+  output_rules?: CompiledOutputRule[];
   notes: string;
+}
+
+function validateConditionCollection(
+  ruleId: string,
+  conditions: unknown,
+  label: 'condition' | 'output condition'
+): void {
+  if (!Array.isArray(conditions)) {
+    return;
+  }
+
+  for (const condition of conditions) {
+    validateCondition(ruleId, condition, label);
+  }
+}
+
+function validateConditionGroups(
+  ruleId: string,
+  groups: unknown,
+  label: 'condition' | 'output condition'
+): void {
+  if (!Array.isArray(groups)) {
+    return;
+  }
+
+  for (const group of groups) {
+    if (!Array.isArray(group)) {
+      throw new CompileError(`Rule "${ruleId}" has invalid ${label} group`);
+    }
+
+    for (const condition of group) {
+      validateCondition(ruleId, condition, label);
+    }
+  }
+}
+
+function validateCondition(
+  ruleId: string,
+  condition: unknown,
+  label: 'condition' | 'output condition'
+): void {
+  if (!condition || typeof condition !== 'object') {
+    throw new CompileError(`Rule "${ruleId}" has invalid ${label}`);
+  }
+
+  const parsedCondition = condition as Record<string, unknown>;
+  if (
+    typeof parsedCondition.operator !== 'string'
+    || !VALID_OPERATORS.has(parsedCondition.operator)
+  ) {
+    throw new CompileError(
+      `Rule "${ruleId}" has invalid operator: ${parsedCondition.operator}`
+    );
+  }
+
+  if (parsedCondition.operator === 'matches') {
+    if (typeof parsedCondition.value !== 'string' || !createSafeRegex(parsedCondition.value)) {
+      throw new CompileError(`Rule "${ruleId}" has unsafe regex: ${parsedCondition.value}`);
+    }
+  }
 }
 
 function extractJSON(raw: string): string {
@@ -241,15 +354,6 @@ function parseAndValidateLLMOutput(raw: string): LLMOutput {
     throw new CompileError('LLM response missing "rules" array');
   }
 
-  const VALID_OPERATORS = new Set([
-    'equals', 'not_equals', 'contains', 'not_contains',
-    'starts_with', 'ends_with', 'matches',
-    'greater_than', 'less_than', 'length_greater_than', 'in', 'not_in',
-    'outside_hours', 'within_hours',
-  ]);
-  const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow', 'require_approval']);
-  const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low', 'info']);
-
   for (const rule of obj.rules) {
     if (!rule || typeof rule !== 'object') {
       throw new CompileError('Invalid rule in LLM output');
@@ -267,21 +371,38 @@ function parseAndValidateLLMOutput(raw: string): LLMOutput {
     if (r.severity && !VALID_SEVERITIES.has(r.severity as string)) {
       throw new CompileError(`Rule "${r.id}" has invalid severity: ${r.severity}`);
     }
-    if (Array.isArray(r.conditions)) {
-      for (const cond of r.conditions) {
-        if (!cond || typeof cond !== 'object') {
-          throw new CompileError(`Rule "${r.id}" has invalid condition`);
-        }
-        const c = cond as Record<string, unknown>;
-        if (typeof c.operator !== 'string' || !VALID_OPERATORS.has(c.operator)) {
-          throw new CompileError(`Rule "${r.id}" has invalid operator: ${c.operator}`);
-        }
+    validateConditionCollection(r.id, r.conditions, 'condition');
+    validateConditionGroups(r.id, r.condition_groups, 'condition');
+  }
+
+  if (Array.isArray(obj.output_rules)) {
+    for (const outputRule of obj.output_rules) {
+      if (!outputRule || typeof outputRule !== 'object') {
+        throw new CompileError('Invalid output rule in LLM output');
       }
+      const r = outputRule as Record<string, unknown>;
+      if (typeof r.id !== 'string' || !r.id) {
+        throw new CompileError('Output rule missing "id" field');
+      }
+      if (typeof r.name !== 'string' || !r.name) {
+        throw new CompileError(`Output rule "${r.id}" missing "name" field`);
+      }
+      if (typeof r.action !== 'string' || !VALID_OUTPUT_ACTIONS.has(r.action)) {
+        throw new CompileError(`Output rule "${r.id}" has invalid output action: ${r.action}`);
+      }
+      if (r.severity && !VALID_SEVERITIES.has(r.severity as string)) {
+        throw new CompileError(`Output rule "${r.id}" has invalid severity: ${r.severity}`);
+      }
+      validateConditionCollection(r.id, r.output_conditions, 'output condition');
+      validateConditionGroups(r.id, r.output_condition_groups, 'output condition');
     }
   }
 
   return {
     rules: obj.rules as CompiledRule[],
+    output_rules: Array.isArray(obj.output_rules)
+      ? obj.output_rules as CompiledOutputRule[]
+      : undefined,
     notes: typeof obj.notes === 'string' ? obj.notes : '',
   };
 }
@@ -292,6 +413,7 @@ function toYaml(output: LLMOutput, policyText: string): string {
     name: 'compiled-rules',
     description: `Compiled from: ${policyText.slice(0, 100)}${policyText.length > 100 ? '...' : ''}`,
     rules: output.rules,
+    ...(output.output_rules ? { output_rules: output.output_rules } : {}),
   };
   return stringify(ruleSet, { lineWidth: 120 });
 }
@@ -393,7 +515,11 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
   result.outputPath = finalPath;
   result.success = true;
 
-  log(`  Generated ${output.rules.length} rule(s)`, quiet);
+  const outputRuleCount = output.output_rules?.length ?? 0;
+  const generatedSummary = outputRuleCount > 0
+    ? `  Generated ${output.rules.length} input rule(s), ${outputRuleCount} output rule(s)`
+    : `  Generated ${output.rules.length} rule(s)`;
+  log(generatedSummary, quiet);
   log(`  Output: ${finalPath}`, quiet);
 
   if (output.notes) {
