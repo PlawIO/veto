@@ -7,12 +7,22 @@ import type { OutputRule, RuleCondition } from '../rules/types.js';
 
 const DEFAULT_REDACT_WITH = '[REDACTED]';
 
+export interface RedactionTrace {
+  ruleId: string;
+  ruleName: string;
+  field: string;
+  pattern: string;
+  redactedCount: number;
+  replacement: string;
+}
+
 export interface OutputValidationResult {
   decision: 'allow' | 'block';
   output: unknown;
   reason?: string;
   matchedRuleIds: string[];
   redactions: number;
+  trace: RedactionTrace[];
 }
 
 export interface OutputValidatorOptions {
@@ -37,6 +47,7 @@ export class OutputValidator {
         output,
         matchedRuleIds: [],
         redactions: 0,
+        trace: [],
       };
     }
 
@@ -49,6 +60,7 @@ export class OutputValidator {
         output,
         matchedRuleIds: [],
         redactions: 0,
+        trace: [],
       };
     }
 
@@ -67,11 +79,13 @@ export class OutputValidator {
         reason,
         matchedRuleIds,
         redactions: 0,
+        trace: [],
       };
     }
 
     let transformedOutput = output;
     let redactions = 0;
+    const trace: RedactionTrace[] = [];
 
     for (const rule of matchedRules) {
       if (rule.action === 'log') {
@@ -87,6 +101,7 @@ export class OutputValidator {
         const redactResult = this.applyRedaction(rule, transformedOutput);
         transformedOutput = redactResult.output;
         redactions += redactResult.redactions;
+        trace.push(...redactResult.trace);
 
         if (redactResult.redactions > 0) {
           this.logger.info('Tool output redacted by output rule', {
@@ -103,6 +118,7 @@ export class OutputValidator {
       output: transformedOutput,
       matchedRuleIds,
       redactions,
+      trace,
     };
   }
 
@@ -113,7 +129,8 @@ export class OutputValidator {
     return evaluateConditionCollections(
       rule.output_conditions,
       rule.output_condition_groups,
-      context
+      context,
+      { allowNestedObjectStringSearch: true }
     );
   }
 
@@ -140,20 +157,26 @@ export class OutputValidator {
   private applyRedaction(
     rule: OutputRule,
     output: unknown
-  ): { output: unknown; redactions: number } {
+  ): { output: unknown; redactions: number; trace: RedactionTrace[] } {
     const redactWith = rule.redact_with ?? DEFAULT_REDACT_WITH;
     const candidateConditions = this.collectRedactionConditions(rule);
     if (candidateConditions.length === 0) {
-      return { output, redactions: 0 };
+      return { output, redactions: 0, trace: [] };
     }
 
     let mutableOutput = output;
     let cloned = false;
     let totalRedactions = 0;
+    const trace: RedactionTrace[] = [];
 
     const ensureClone = (): unknown => {
       if (!cloned) {
-        mutableOutput = this.cloneOutput(output);
+        const clonedOutput = this.cloneOutput(output);
+        if (clonedOutput === null) {
+          return null;
+        }
+
+        mutableOutput = clonedOutput;
         cloned = true;
       }
       return mutableOutput;
@@ -177,16 +200,34 @@ export class OutputValidator {
       }
 
       const clonedOutput = ensureClone();
+      if (clonedOutput === null) {
+        this.logger.warn('Skipping output redaction because output could not be cloned', {
+          ruleId: rule.id,
+        });
+        return { output, redactions: 0, trace: [] };
+      }
+
       const result = this.redactAtPath(clonedOutput, path, regex, redactWith);
       mutableOutput = result.output;
       totalRedactions += result.redactions;
+
+      if (result.redactions > 0) {
+        trace.push({
+          ruleId: rule.id,
+          ruleName: rule.name,
+          field,
+          pattern,
+          redactedCount: result.redactions,
+          replacement: redactWith,
+        });
+      }
     }
 
     if (!cloned) {
-      return { output, redactions: 0 };
+      return { output, redactions: 0, trace: [] };
     }
 
-    return { output: mutableOutput, redactions: totalRedactions };
+    return { output: mutableOutput, redactions: totalRedactions, trace };
   }
 
   private collectRedactionConditions(rule: OutputRule): RuleCondition[] {
@@ -216,16 +257,18 @@ export class OutputValidator {
     replacement: string
   ): { output: unknown; redactions: number } {
     if (path === '') {
-      if (typeof output !== 'string') {
+      if (typeof output === 'string') {
+        return this.redactStringValue(output, regex, replacement);
+      }
+
+      if (!output || typeof output !== 'object') {
         return { output, redactions: 0 };
       }
 
-      let redactions = 0;
-      const redacted = output.replace(regex, () => {
-        redactions += 1;
-        return replacement;
-      });
-      return { output: redacted, redactions };
+      return {
+        output,
+        redactions: this.redactNestedStrings(output, regex, replacement),
+      };
     }
 
     const parentAndKey = this.resolveMutableParent(output, path);
@@ -235,17 +278,82 @@ export class OutputValidator {
 
     const { parent, key } = parentAndKey;
     const current = parent[key];
-    if (typeof current !== 'string') {
+    if (typeof current === 'string') {
+      const result = this.redactStringValue(current, regex, replacement);
+      parent[key] = result.output;
+      return { output, redactions: result.redactions };
+    }
+
+    if (!current || typeof current !== 'object') {
       return { output, redactions: 0 };
     }
 
+    return {
+      output,
+      redactions: this.redactNestedStrings(current, regex, replacement),
+    };
+  }
+
+  private redactStringValue(
+    value: string,
+    regex: RegExp,
+    replacement: string
+  ): { output: string; redactions: number } {
     let redactions = 0;
-    parent[key] = current.replace(regex, () => {
+    const output = value.replace(regex, () => {
       redactions += 1;
       return replacement;
     });
 
     return { output, redactions };
+  }
+
+  private redactNestedStrings(
+    value: unknown,
+    regex: RegExp,
+    replacement: string,
+    seen: Set<object> = new Set()
+  ): number {
+    if (!value || typeof value !== 'object') {
+      return 0;
+    }
+
+    if (seen.has(value)) {
+      return 0;
+    }
+
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      let total = 0;
+      for (let index = 0; index < value.length; index += 1) {
+        const current = value[index];
+        if (typeof current === 'string') {
+          const result = this.redactStringValue(current, regex, replacement);
+          value[index] = result.output;
+          total += result.redactions;
+          continue;
+        }
+
+        total += this.redactNestedStrings(current, regex, replacement, seen);
+      }
+
+      return total;
+    }
+
+    let total = 0;
+    for (const [key, current] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof current === 'string') {
+        const result = this.redactStringValue(current, regex, replacement);
+        (value as Record<string, unknown>)[key] = result.output;
+        total += result.redactions;
+        continue;
+      }
+
+      total += this.redactNestedStrings(current, regex, replacement, seen);
+    }
+
+    return total;
   }
 
   private resolveMutableParent(
@@ -271,14 +379,14 @@ export class OutputValidator {
     };
   }
 
-  private cloneOutput(output: unknown): unknown {
+  private cloneOutput(output: unknown): unknown | null {
     try {
       return structuredClone(output);
     } catch {
       try {
         return JSON.parse(JSON.stringify(output)) as unknown;
       } catch {
-        return output;
+        return null;
       }
     }
   }

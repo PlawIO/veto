@@ -219,6 +219,10 @@ export class VetoCloudClient {
           metadata: data.metadata as Record<string, unknown> | undefined,
           approval_id: data.approval_id as string | undefined,
           denial,
+          outputRules: this.extractArray<OutputRule>(
+            data.outputRules,
+            data.output_rules
+          ),
         };
       } catch (error) {
         lastError =
