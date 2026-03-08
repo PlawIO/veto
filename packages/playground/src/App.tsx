@@ -71,17 +71,17 @@ export function App() {
   function shareUrl() {
     const hash = encodeState({ policy, toolName, args });
     const url = `${window.location.origin}${window.location.pathname}#${hash}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied('link');
-      setTimeout(() => setCopied(null), 2000);
-    });
+    navigator.clipboard.writeText(url).then(
+      () => { setCopied('link'); setTimeout(() => setCopied(null), 2000); },
+      () => { setCopied('error'); setTimeout(() => setCopied(null), 2000); },
+    );
   }
 
   function copyPolicy() {
-    navigator.clipboard.writeText(policy).then(() => {
-      setCopied('policy');
-      setTimeout(() => setCopied(null), 2000);
-    });
+    navigator.clipboard.writeText(policy).then(
+      () => { setCopied('policy'); setTimeout(() => setCopied(null), 2000); },
+      () => { setCopied('error'); setTimeout(() => setCopied(null), 2000); },
+    );
   }
 
   return (
@@ -101,13 +101,13 @@ export function App() {
             onClick={copyPolicy}
             className="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition"
           >
-            {copied === 'policy' ? 'Copied!' : 'Copy YAML'}
+            {copied === 'policy' ? 'Copied!' : copied === 'error' ? 'Failed' : 'Copy YAML'}
           </button>
           <button
             onClick={shareUrl}
             className="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition"
           >
-            {copied === 'link' ? 'Copied!' : 'Share'}
+            {copied === 'link' ? 'Copied!' : copied === 'error' ? 'Failed' : 'Share'}
           </button>
         </div>
       </header>
