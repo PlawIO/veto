@@ -41,6 +41,48 @@ describe('VetoCloudClient', () => {
       expect(result.reason).toBe('Allowed');
     });
 
+    it('should parse outputRules from validation responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          decision: 'allow',
+          reason: 'Allowed',
+          outputRules: [
+            {
+              id: 'redact-acme',
+              name: 'Hide Acme',
+              enabled: true,
+              severity: 'high',
+              action: 'redact',
+              tools: ['google_sheets_read'],
+              output_conditions: [
+                {
+                  field: 'output',
+                  operator: 'matches',
+                  value: '(?i)\\bacme\\b',
+                },
+              ],
+              redact_with: '[REDACTED]',
+            },
+          ],
+        }),
+        text: async () => '',
+      });
+
+      const client = new VetoCloudClient({
+        config: { apiKey: 'test-key', baseUrl: 'http://localhost:3001', retries: 0 },
+        logger,
+      });
+
+      const result = await client.validate('google_sheets_read', {});
+
+      expect(result.outputRules).toHaveLength(1);
+      expect(result.outputRules?.[0]).toMatchObject({
+        id: 'redact-acme',
+        action: 'redact',
+      });
+    });
+
     it('should return deny decision', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -281,6 +323,67 @@ describe('VetoCloudClient', () => {
       expect(result.success).toBe(true);
       expect(result.registered_tools).toEqual([]);
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logDecision', () => {
+    it('should include redaction trace payloads', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+        text: async () => '',
+      });
+
+      const client = new VetoCloudClient({
+        config: { apiKey: 'test-key', baseUrl: 'http://localhost:3001', retries: 0 },
+        logger,
+      });
+
+      client.logDecision({
+        tool_name: 'google_sheets_read',
+        arguments: { spreadsheetId: 'sheet-1' },
+        decision: 'allow',
+        mode: 'deterministic',
+        latency_ms: 12,
+        source: 'client',
+        redactions: [
+          {
+            ruleId: 'redact-acme',
+            ruleName: 'Hide Acme',
+            field: 'output',
+            pattern: '(?i)\\bacme\\b',
+            redactedCount: 2,
+            replacement: '[REDACTED]',
+          },
+        ],
+      });
+
+      await Promise.resolve();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3001/v1/decisions',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            tool_name: 'google_sheets_read',
+            arguments: { spreadsheetId: 'sheet-1' },
+            decision: 'allow',
+            mode: 'deterministic',
+            latency_ms: 12,
+            source: 'client',
+            redactions: [
+              {
+                ruleId: 'redact-acme',
+                ruleName: 'Hide Acme',
+                field: 'output',
+                pattern: '(?i)\\bacme\\b',
+                redactedCount: 2,
+                replacement: '[REDACTED]',
+              },
+            ],
+          }),
+        })
+      );
     });
   });
 });
