@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.cm-editor .cm-scroller {
+  overflow: auto;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.decision-allow { color: #22c55e; }
+.decision-deny { color: #ef4444; }
+.decision-require_approval { color: #f59e0b; }
