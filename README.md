@@ -141,6 +141,12 @@ npx skills add PlawIO/veto
 
 Installs `veto-policy-runtime` — gives Claude Code, Cursor, and Windsurf safe, non-destructive policy operations without any SDK integration. Ideal for teams that want guardrails at the coding-agent level.
 
+## Real-world example: guarded MCP trading agent
+
+Veto also fits agent runtimes outside coding workflows. One practical pattern is a Polymarket MCP server where market reads stay open, mutating tools are policy-gated, and larger actions route to approval before execution.
+
+See the [Guarded Polymarket MCP guide](./docs/polymarket-mcp-guide.md) for the architecture and YAML rules, or the full reference implementation in [PlawIO/polymarket-cli-veto](https://github.com/PlawIO/polymarket-cli-veto).
+
 ## Veto Cloud
 
 The OSS SDK runs entirely local. [Veto Cloud](https://veto.so) adds:
