@@ -103,6 +103,10 @@ export interface GuardContext {
   agentId?: string;
   userId?: string;
   role?: string;
+  custom?: Record<string, unknown>;
+  market?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
+  portfolio?: Record<string, unknown>;
 }
 
 /**
@@ -117,6 +121,8 @@ export interface GuardResult {
   shadow?: boolean;
   shadowDecision?: string;
 }
+
+const RESERVED_LOCAL_CONTEXT_KEYS = new Set(['market', 'budget', 'portfolio']);
 
 /**
  * Parsed veto.config.yaml structure.
@@ -202,6 +208,17 @@ interface LoadedRulesState {
   outputRulesByTool: Map<string, OutputRule[]>;
   globalRules: Rule[];
   globalOutputRules: OutputRule[];
+}
+
+interface LoadedLocalRules {
+  state: LoadedRulesState;
+  sourceFiles: string[];
+}
+
+interface LocalRulesSource {
+  dir: string;
+  recursive: boolean;
+  sourceFiles: string[];
 }
 
 interface LocalApprovalConfig {
@@ -402,6 +419,9 @@ export class Veto {
 
   // Loaded rules
   private rulesState: LoadedRulesState;
+  private localSourceFiles: string[] = [];
+  private readonly localRulesDir?: string;
+  private readonly localRulesRecursive: boolean;
   private readonly browserMode: boolean;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
   private refreshIntervalId: ReturnType<typeof setInterval> | null = null;
@@ -411,11 +431,15 @@ export class Veto {
     config: VetoConfigFile,
     rules: LoadedRulesState,
     logger: Logger,
-    browserMode = false
+    browserMode = false,
+    localRulesSource?: LocalRulesSource
   ) {
     this.logger = logger;
     this.configDir = options.configDir ?? './veto';
     this.rulesState = rules;
+    this.localSourceFiles = localRulesSource?.sourceFiles ?? [];
+    this.localRulesDir = localRulesSource?.dir;
+    this.localRulesRecursive = localRulesSource?.recursive ?? true;
     this.browserMode = browserMode;
 
     const envMode = this.browserMode
@@ -745,7 +769,18 @@ export class Veto {
       parseYaml
     );
 
-    return new Veto(options, config, rules, logger);
+    return new Veto(
+      { ...options, configDir },
+      config,
+      rules.state,
+      logger,
+      false,
+      {
+        dir: rulesDir,
+        recursive,
+        sourceFiles: rules.sourceFiles,
+      }
+    );
   }
 
   static fromRules(options: VetoBrowserOptions): Veto {
@@ -946,12 +981,15 @@ export class Veto {
     fsModule: NodeFsModule,
     pathModule: NodePathModule,
     parseYaml: ParseYaml
-  ): Promise<LoadedRulesState> {
+  ): Promise<LoadedLocalRules> {
     const state = Veto.createEmptyRulesState();
 
     if (!fsModule.existsSync(rulesDir)) {
       logger.debug('Rules directory not found', { path: rulesDir });
-      return state;
+      return {
+        state,
+        sourceFiles: [],
+      };
     }
 
     const yamlFiles = Veto.findYamlFiles(rulesDir, recursive, fsModule, pathModule);
@@ -1030,7 +1068,10 @@ export class Veto {
       outputToolSpecific: state.outputRulesByTool.size,
     });
 
-    return state;
+    return {
+      state,
+      sourceFiles: yamlFiles,
+    };
   }
 
   /**
@@ -1419,111 +1460,135 @@ export class Veto {
 
     const localContext = this.buildLocalEvaluationContext(context);
     let firstAllowRule: Rule | null = null;
+    let firstApprovalRule: Rule | null = null;
+    let firstBlockRule: Rule | null = null;
+    let firstNonBlockingRule: Rule | null = null;
 
     for (const rule of rules) {
       if (!this.matchesLocalRule(rule, context, localContext)) {
         continue;
       }
 
-      const reason = rule.description ?? `Matched rule: ${rule.name}`;
-      const metadata = this.toLocalRuleMetadata(rule);
-
-      if (rule.action === 'require_approval') {
-        if (this.shouldApplyLogModeOverride(context)) {
-          if (this.mode === 'shadow') {
-            return this.applyShadowModeOverride(
-              context,
-              'require_approval',
-              reason,
-              metadata,
-              rule.id
-            );
-          }
-
-          this.logger.warn('Tool call would require approval locally (log mode)', {
-            tool: context.toolName,
-            ruleId: rule.id,
-            reason,
-          });
-
-          return {
-            decision: 'allow',
-            reason: `[LOG MODE] Would require approval: ${reason}`,
-            metadata: {
-              blocked_in_strict_mode: true,
-              ...metadata,
-            },
-          };
-        }
-
-        if (this.isGuardEvaluation(context)) {
-          return {
-            decision: 'require_approval',
-            reason,
-            metadata,
-          };
-        }
-
-        return this.handleLocalApprovalFlow(context, rule, reason);
+      if (rule.action === 'block' && !firstBlockRule) {
+        firstBlockRule = rule;
+        continue;
       }
 
-      if (rule.action === 'block') {
-        if (this.shouldApplyLogModeOverride(context)) {
-          if (this.mode === 'shadow') {
-            return this.applyShadowModeOverride(
-              context,
-              'deny',
-              reason,
-              metadata,
-              rule.id
-            );
-          }
+      if (rule.action === 'require_approval' && !firstApprovalRule) {
+        firstApprovalRule = rule;
+        continue;
+      }
 
-          this.logger.warn('Tool call would be blocked locally (log mode)', {
-            tool: context.toolName,
-            ruleId: rule.id,
+      if (rule.action === 'allow' && !firstAllowRule) {
+        firstAllowRule = rule;
+        continue;
+      }
+
+      if ((rule.action === 'warn' || rule.action === 'log') && !firstNonBlockingRule) {
+        firstNonBlockingRule = rule;
+      }
+    }
+
+    const decisiveRule = firstBlockRule ?? firstApprovalRule ?? firstAllowRule;
+
+    if (!decisiveRule) {
+      if (firstNonBlockingRule) {
+        this.logger.warn('Local rule matched with non-blocking action', {
+          tool: context.toolName,
+          action: firstNonBlockingRule.action,
+          ruleId: firstNonBlockingRule.id,
+        });
+      }
+
+      return { decision: 'allow' };
+    }
+
+    const reason = decisiveRule.description ?? `Matched rule: ${decisiveRule.name}`;
+    const metadata = this.toLocalRuleMetadata(decisiveRule);
+
+    if (decisiveRule.action === 'require_approval') {
+      if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'require_approval',
             reason,
-          });
-          return {
-            decision: 'allow',
-            reason: `[LOG MODE] Would block: ${reason}`,
-            metadata: {
-              blocked_in_strict_mode: true,
-              ...metadata,
-            },
-          };
+            metadata,
+            decisiveRule.id
+          );
         }
 
-        this.logger.warn('Tool call blocked by local rule', {
+        this.logger.warn('Tool call would require approval locally (log mode)', {
           tool: context.toolName,
-          ruleId: rule.id,
+          ruleId: decisiveRule.id,
           reason,
         });
+
         return {
-          decision: 'deny',
+          decision: 'allow',
+          reason: `[LOG MODE] Would require approval: ${reason}`,
+          metadata: {
+            blocked_in_strict_mode: true,
+            ...metadata,
+          },
+        };
+      }
+
+      if (this.isGuardEvaluation(context)) {
+        return {
+          decision: 'require_approval',
           reason,
           metadata,
         };
       }
 
-      if (rule.action === 'allow' && !firstAllowRule) {
-        firstAllowRule = rule;
-      }
-
-      if (rule.action === 'warn' || rule.action === 'log') {
-        this.logger.warn('Local rule matched with non-blocking action', {
-          tool: context.toolName,
-          action: rule.action,
-          ruleId: rule.id,
-        });
-      }
+      return this.handleLocalApprovalFlow(context, decisiveRule, reason);
     }
 
-    if (firstAllowRule) {
+    if (decisiveRule.action === 'block') {
+      if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            reason,
+            metadata,
+            decisiveRule.id
+          );
+        }
+
+        this.logger.warn('Tool call would be blocked locally (log mode)', {
+          tool: context.toolName,
+          ruleId: decisiveRule.id,
+          reason,
+        });
+        return {
+          decision: 'allow',
+          reason: `[LOG MODE] Would block: ${reason}`,
+          metadata: {
+            blocked_in_strict_mode: true,
+            ...metadata,
+          },
+        };
+      }
+
+      this.logger.warn('Tool call blocked by local rule', {
+        tool: context.toolName,
+        ruleId: decisiveRule.id,
+        reason,
+      });
+      return {
+        decision: 'deny',
+        reason,
+        metadata,
+      };
+    }
+
+    if (decisiveRule.action === 'allow') {
       return {
         decision: 'allow',
-        reason: firstAllowRule.description ?? `Allowed by rule: ${firstAllowRule.name}`,
-        metadata: this.toLocalRuleMetadata(firstAllowRule),
+        reason: decisiveRule.description ?? `Allowed by rule: ${decisiveRule.name}`,
+        metadata,
       };
     }
 
@@ -1531,15 +1596,32 @@ export class Veto {
   }
 
   private buildLocalEvaluationContext(context: ValidationContext): Record<string, unknown> {
+    const customContext = context.custom ?? {};
+    const localArguments = Object.fromEntries(
+      Object.entries(context.arguments).filter(([key]) => !RESERVED_LOCAL_CONTEXT_KEYS.has(key))
+    );
+    const marketContext = customContext.market && typeof customContext.market === 'object' && !Array.isArray(customContext.market)
+      ? customContext.market as Record<string, unknown>
+      : undefined;
+    const budgetContext = customContext.budget && typeof customContext.budget === 'object' && !Array.isArray(customContext.budget)
+      ? customContext.budget as Record<string, unknown>
+      : undefined;
+    const portfolioContext = customContext.portfolio && typeof customContext.portfolio === 'object' && !Array.isArray(customContext.portfolio)
+      ? customContext.portfolio as Record<string, unknown>
+      : undefined;
+
     return {
-      ...context.arguments,
+      ...localArguments,
       tool_name: context.toolName,
       arguments: context.arguments,
       session_id: this.resolveSessionId(context),
       agent_id: this.resolveAgentId(context),
       user_id: this.resolveUserId(context),
       role: this.resolveRole(context),
-      custom: context.custom,
+      ...(marketContext ? { market: marketContext } : {}),
+      ...(budgetContext ? { budget: budgetContext } : {}),
+      ...(portfolioContext ? { portfolio: portfolioContext } : {}),
+      custom: customContext,
     };
   }
 
@@ -3217,6 +3299,29 @@ export class Veto {
     args: Record<string, unknown>,
     context: GuardContext = {}
   ): Promise<GuardResult> {
+    const customContext: Record<string, unknown> = {
+      ...(context.custom ?? {}),
+    };
+
+    if (context.market) {
+      if (customContext.market !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'market' });
+      }
+      customContext.market = context.market;
+    }
+    if (context.budget) {
+      if (customContext.budget !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'budget' });
+      }
+      customContext.budget = context.budget;
+    }
+    if (context.portfolio) {
+      if (customContext.portfolio !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'portfolio' });
+      }
+      customContext.portfolio = context.portfolio;
+    }
+
     const validationContext: ValidationContext = {
       toolName,
       arguments: args,
@@ -3227,6 +3332,7 @@ export class Veto {
       agentId: context.agentId ?? this.agentId,
       userId: context.userId ?? this.userId,
       role: context.role ?? this.role,
+      custom: Object.keys(customContext).length > 0 ? customContext : undefined,
       source: 'guard',
     };
 
@@ -3322,6 +3428,37 @@ export class Veto {
     this.logger.info('Cloud rules refreshed', {
       rulesLoaded: this.rulesState.allRules.length,
       outputRulesLoaded: this.rulesState.allOutputRules.length,
+    });
+  }
+
+  async reloadLocalRules(): Promise<void> {
+    if (this.validationMode !== 'local' || !this.localRulesDir) {
+      throw new Error('No local rules configured');
+    }
+
+    const [fsModule, pathModule, parseYaml] = await Promise.all([
+      Veto.loadNodeFsModule(),
+      Veto.loadNodePathModule(),
+      Veto.loadYamlParser(),
+    ]);
+
+    const rules = await Veto.loadRules(
+      this.localRulesDir,
+      this.localRulesRecursive,
+      this.logger,
+      fsModule,
+      pathModule,
+      parseYaml
+    );
+
+    this.rulesState = rules.state;
+    this.localSourceFiles = rules.sourceFiles;
+    this.compiledExpressionCache.clear();
+
+    this.logger.info('Local rules reloaded', {
+      rulesLoaded: this.rulesState.allRules.length,
+      outputRulesLoaded: this.rulesState.allOutputRules.length,
+      sourceFiles: this.localSourceFiles.length,
     });
   }
 

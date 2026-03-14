@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { dirname, join } from 'node:path';
 import {
   createReplSessionContext,
@@ -14,6 +15,7 @@ import {
   generateTemplatePolicy,
   loadHistoryFile,
   persistHistoryFile,
+  type DiscoveredTool,
   validateGeneratedYaml,
 } from '../../src/cli/index.js';
 
@@ -237,6 +239,158 @@ rules:
     const parsed = validateGeneratedYaml(generated.yaml);
     const rules = parsed.rules as Array<Record<string, unknown>>;
     expect(rules).toHaveLength(2);
+  });
+
+  it('generates dynamic trading constraints from a Polymarket-style prompt in template mode', () => {
+    const generated = generateTemplatePolicy(
+      'never put more than 15% of my remaining budget into one position, skip markets under $50k volume, block buys above 85 cents, and require approval before opening a fourth position',
+      [
+        {
+          name: 'order_create_limit',
+          parameters: ['token', 'side', 'price', 'size'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.operator === 'percent_of' && condition.reference === 'budget.remaining');
+    })).toBe(true);
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'market.volume' && condition.operator === 'less_than' && condition.value === 50000);
+    })).toBe(true);
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return rule.action === 'require_approval'
+        && conditions.some((condition) => condition.field === 'portfolio.open_count' && condition.operator === 'greater_than' && condition.value === 3);
+    })).toBe(true);
+  });
+
+  it('treats bare whole-number buy price caps as cents in template mode', () => {
+    const generated = generateTemplatePolicy(
+      'block buys above 85',
+      [
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'arguments.price' && condition.operator === 'greater_than' && condition.value === 0.85);
+    })).toBe(true);
+  });
+
+  it('warns when a buy price cap prompt falls outside supported Polymarket values', () => {
+    const generated = generateTemplatePolicy(
+      'block buys above $2',
+      [
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'arguments.price');
+    })).toBe(false);
+    expect(generated.warnings.some((warning) => warning.includes('buy price cap'))).toBe(true);
+  });
+
+  it('warns when an explicit cents buy price cap exceeds 100 cents', () => {
+    const generated = generateTemplatePolicy(
+      'block buys above 150 cents',
+      [
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'arguments.price');
+    })).toBe(false);
+    expect(generated.warnings.some((warning) => warning.includes('buy price cap'))).toBe(true);
+  });
+
+  it('avoids regex backtracking traps in trading prompt template parsing', () => {
+    const tool: DiscoveredTool = {
+      name: 'order_market',
+      parameters: ['token', 'side', 'amount'],
+      locations: ['src/tools.ts'],
+      sources: ['source-ts'],
+      covered: false,
+      coverageReason: 'none',
+      matchedRuleIds: [],
+    };
+    const prompts = [
+      `never put more than ${'0'.repeat(20_000)}x of my remaining budget into one position`,
+      `skip markets under${'\t'.repeat(20_000)}x volume`,
+      `block ${'buy'.repeat(20_000)} above 85 cents`,
+      `block ${'buy'.repeat(20_000)} above 0.85`,
+    ];
+
+    const start = performance.now();
+
+    for (const prompt of prompts) {
+      generateTemplatePolicy(prompt, [tool], []);
+    }
+
+    expect(performance.now() - start).toBeLessThan(200);
   });
 
   it('maps negated approval prompts to block action in template mode', () => {
