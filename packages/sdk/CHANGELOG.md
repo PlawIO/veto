@@ -1,5 +1,19 @@
 # veto-sdk
 
+## 2.0.0
+
+### Major Changes
+
+- [#157](https://github.com/PlawIO/veto/pull/157) [`0a2873e`](https://github.com/PlawIO/veto/commit/0a2873e4e89c9ca3bd910341dd50657154fedaa3) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add local runtime policy reload support, richer local guard evaluation context,
+  more-restrictive local rule precedence, and `percent_of` budget conditions for
+  generated trading policies.
+
+### Minor Changes
+
+- [#152](https://github.com/PlawIO/veto/pull/152) [`d2f4c12`](https://github.com/PlawIO/veto/commit/d2f4c121ebd8e1839087f05464f7ce9972fbd577) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add deterministic output redaction policies, including compiled `output_rules`,
+  cloud-delivered output rule enforcement, and redaction trace logging for tool
+  results.
+
 ## 1.17.0
 
 ### Minor Changes
