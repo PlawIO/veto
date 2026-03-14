@@ -122,6 +122,8 @@ export interface GuardResult {
   shadowDecision?: string;
 }
 
+const RESERVED_LOCAL_CONTEXT_KEYS = new Set(['market', 'budget', 'portfolio']);
+
 /**
  * Parsed veto.config.yaml structure.
  */
@@ -1595,6 +1597,9 @@ export class Veto {
 
   private buildLocalEvaluationContext(context: ValidationContext): Record<string, unknown> {
     const customContext = context.custom ?? {};
+    const localArguments = Object.fromEntries(
+      Object.entries(context.arguments).filter(([key]) => !RESERVED_LOCAL_CONTEXT_KEYS.has(key))
+    );
     const marketContext = customContext.market && typeof customContext.market === 'object' && !Array.isArray(customContext.market)
       ? customContext.market as Record<string, unknown>
       : undefined;
@@ -1606,7 +1611,7 @@ export class Veto {
       : undefined;
 
     return {
-      ...context.arguments,
+      ...localArguments,
       tool_name: context.toolName,
       arguments: context.arguments,
       session_id: this.resolveSessionId(context),
@@ -3299,12 +3304,21 @@ export class Veto {
     };
 
     if (context.market) {
+      if (customContext.market !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'market' });
+      }
       customContext.market = context.market;
     }
     if (context.budget) {
+      if (customContext.budget !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'budget' });
+      }
       customContext.budget = context.budget;
     }
     if (context.portfolio) {
+      if (customContext.portfolio !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'portfolio' });
+      }
       customContext.portfolio = context.portfolio;
     }
 

@@ -180,6 +180,71 @@ rules:
       expect(result.ruleId).toBe('budget-block');
     });
 
+    it('preserves reserved runtime context keys under arguments while keeping top-level market data namespaced', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'reserved-runtime-context.yaml'),
+        `
+version: "1.0"
+name: reserved-runtime-context
+rules:
+  - id: reserved-runtime-context-block
+    name: Reserved runtime context block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.market
+        operator: equals
+        value: BTC-USD
+      - field: market.category
+        operator: equals
+        value: sports
+      - field: budget.remaining
+        operator: less_than
+        value: 100
+      - field: portfolio.positionCount
+        operator: greater_than
+        value: 0
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { market: 'BTC-USD' }, {
+        market: { category: 'sports' },
+        budget: { remaining: 50 },
+        portfolio: { positionCount: 1 },
+      });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('reserved-runtime-context-block');
+    });
+
+    it('logs when explicit runtime context overrides custom nested context keys', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+      const veto = await Veto.init({ configDir: VETO_DIR, logLevel: 'debug' });
+      await veto.guard('trade', {}, {
+        custom: {
+          market: { category: 'legacy' },
+        },
+        market: { category: 'sports' },
+      });
+
+      expect(debugSpy.mock.calls.some(([message]) =>
+        String(message).includes('Guard context override applied')
+        && String(message).includes('"key":"market"')
+      )).toBe(true);
+
+      debugSpy.mockRestore();
+    });
+
     it('prevents custom guard context from overriding raw local argument fields', async () => {
       rmSync(join(VETO_DIR, 'veto.config.yaml'));
       writeLocalConfig();

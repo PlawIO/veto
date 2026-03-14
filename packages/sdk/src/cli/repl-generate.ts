@@ -688,9 +688,13 @@ function skipWhitespace(input: string, index: number): number {
   return cursor;
 }
 
-function parseNumberAt(input: string, startIndex: number): { value: number; nextIndex: number } | null {
+function parseNumberAt(
+  input: string,
+  startIndex: number
+): { value: number; nextIndex: number; hadCurrencySymbol: boolean; hadDecimal: boolean } | null {
   let cursor = skipWhitespace(input, startIndex);
-  if (input[cursor] === '$') {
+  const hadCurrencySymbol = input[cursor] === '$';
+  if (hadCurrencySymbol) {
     cursor += 1;
     cursor = skipWhitespace(input, cursor);
   }
@@ -738,7 +742,12 @@ function parseNumberAt(input: string, startIndex: number): { value: number; next
     nextIndex = suffixIndex + 1;
   }
 
-  return { value, nextIndex };
+  return {
+    value,
+    nextIndex,
+    hadCurrencySymbol,
+    hadDecimal: sawDot,
+  };
 }
 
 function findKeyword(
@@ -905,10 +914,32 @@ function extractBuyPriceCap(prompt: string): number | null {
 
   const unitIndex = skipWhitespace(normalized, parsed.nextIndex);
   if (hasKeywordAt(normalized, unitIndex, 'cents') || hasKeywordAt(normalized, unitIndex, 'cent')) {
+    const normalizedCents = parsed.value / 100;
+    return normalizedCents <= 1 ? normalizedCents : null;
+  }
+
+  if (!parsed.hadCurrencySymbol && !parsed.hadDecimal && parsed.value > 1 && parsed.value <= 100) {
     return parsed.value / 100;
   }
 
+  // Bare decimal caps are treated as Polymarket-style probabilities, so values above 1 are ignored.
   return parsed.value <= 1 ? parsed.value : null;
+}
+
+function hasUnsupportedBuyPriceCap(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  const buyVerb = findKeyword(normalized, ['buying', 'buys', 'buy']);
+  if (!buyVerb) {
+    return false;
+  }
+
+  const comparator = findKeyword(normalized, ['above', 'over'], buyVerb.index + buyVerb.keyword.length);
+  if (!comparator) {
+    return false;
+  }
+
+  return parseNumberAt(normalized, comparator.index + comparator.keyword.length) !== null
+    && extractBuyPriceCap(prompt) === null;
 }
 
 function parseOrdinalValue(rawValue: string): number | null {
@@ -1127,6 +1158,10 @@ function buildTemplateRules(prompt: string, tools: readonly DiscoveredTool[], ex
 
   if (tradingRules.length > 0) {
     return tradingRules;
+  }
+
+  if (hasUnsupportedBuyPriceCap(prompt)) {
+    return [];
   }
 
   const action = detectAction(prompt);
@@ -1502,13 +1537,21 @@ export function generateTemplatePolicy(
   const yaml = toPolicyYaml(rules, prompt);
   validateGeneratedYaml(yaml);
 
+  const warnings = [
+    'No API key or kernel config configured. Using template fallback generation.',
+    'Set VETO_API_KEY or enable kernel mode in veto.config.yaml for LLM generation.',
+  ];
+
+  if (hasUnsupportedBuyPriceCap(prompt)) {
+    warnings.push(
+      'Template fallback could not infer the buy price cap. Use cents (e.g. "85 cents") or a probability between 0 and 1.'
+    );
+  }
+
   return {
     mode: 'template',
     yaml,
-    warnings: [
-      'No API key or kernel config configured. Using template fallback generation.',
-      'Set VETO_API_KEY or enable kernel mode in veto.config.yaml for LLM generation.',
-    ],
+    warnings,
   };
 }
 

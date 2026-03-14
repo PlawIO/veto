@@ -260,6 +260,48 @@ describe('Policy IR v1 Schema Validator', () => {
       })).toThrow(PolicySchemaError);
     });
 
+    it('should reject non-positive percent_of values', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'zero-dynamic-budget-cap',
+            name: 'Zero dynamic budget cap',
+            action: 'block',
+            tools: ['trade'],
+            conditions: [
+              {
+                field: 'arguments.amount_usd',
+                operator: 'percent_of',
+                value: 0,
+                reference: 'budget.remaining',
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'negative-dynamic-budget-cap',
+            name: 'Negative dynamic budget cap',
+            action: 'block',
+            tools: ['trade'],
+            conditions: [
+              {
+                field: 'arguments.amount_usd',
+                operator: 'percent_of',
+                value: -5,
+                reference: 'budget.remaining',
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
     it('should reject rule missing id', () => {
       const data = loadFixture('invalid-rule-missing-id.yaml');
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);

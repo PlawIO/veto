@@ -228,6 +228,12 @@ export const POLICY_IR_V1_SCHEMA = {
           },
           then: {
             required: ['reference'],
+            properties: {
+              value: {
+                type: 'number',
+                exclusiveMinimum: 0,
+              },
+            },
           },
         },
       ],

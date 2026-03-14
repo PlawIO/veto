@@ -287,6 +287,86 @@ rules:
     })).toBe(true);
   });
 
+  it('treats bare whole-number buy price caps as cents in template mode', () => {
+    const generated = generateTemplatePolicy(
+      'block buys above 85',
+      [
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'arguments.price' && condition.operator === 'greater_than' && condition.value === 0.85);
+    })).toBe(true);
+  });
+
+  it('warns when a buy price cap prompt falls outside supported Polymarket values', () => {
+    const generated = generateTemplatePolicy(
+      'block buys above $2',
+      [
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'arguments.price');
+    })).toBe(false);
+    expect(generated.warnings.some((warning) => warning.includes('buy price cap'))).toBe(true);
+  });
+
+  it('warns when an explicit cents buy price cap exceeds 100 cents', () => {
+    const generated = generateTemplatePolicy(
+      'block buys above 150 cents',
+      [
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'arguments.price');
+    })).toBe(false);
+    expect(generated.warnings.some((warning) => warning.includes('buy price cap'))).toBe(true);
+  });
+
   it('avoids regex backtracking traps in trading prompt template parsing', () => {
     const tool: DiscoveredTool = {
       name: 'order_market',
