@@ -665,6 +665,122 @@ function extractNumericAmount(prompt: string): number | null {
   return value;
 }
 
+function isAsciiDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= '0' && char <= '9';
+}
+
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined
+    && ((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || isAsciiDigit(char) || char === '_');
+}
+
+function skipWhitespace(input: string, index: number): number {
+  let cursor = index;
+
+  while (cursor < input.length) {
+    const char = input[cursor];
+    if (char !== ' ' && char !== '\t' && char !== '\n' && char !== '\r') {
+      break;
+    }
+    cursor += 1;
+  }
+
+  return cursor;
+}
+
+function parseNumberAt(input: string, startIndex: number): { value: number; nextIndex: number } | null {
+  let cursor = skipWhitespace(input, startIndex);
+  if (input[cursor] === '$') {
+    cursor += 1;
+    cursor = skipWhitespace(input, cursor);
+  }
+
+  const rawStart = cursor;
+  let sawDigit = false;
+  let sawDot = false;
+
+  while (cursor < input.length) {
+    const char = input[cursor];
+    if (isAsciiDigit(char)) {
+      sawDigit = true;
+      cursor += 1;
+      continue;
+    }
+    if (char === ',') {
+      cursor += 1;
+      continue;
+    }
+    if (char === '.' && !sawDot) {
+      sawDot = true;
+      cursor += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (!sawDigit) {
+    return null;
+  }
+
+  let value = Number(input.slice(rawStart, cursor).replaceAll(',', ''));
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  let nextIndex = cursor;
+  const suffixIndex = skipWhitespace(input, cursor);
+  const suffix = input[suffixIndex]?.toLowerCase();
+  if (suffix === 'k') {
+    value *= 1_000;
+    nextIndex = suffixIndex + 1;
+  } else if (suffix === 'm') {
+    value *= 1_000_000;
+    nextIndex = suffixIndex + 1;
+  }
+
+  return { value, nextIndex };
+}
+
+function findKeyword(
+  input: string,
+  keywords: readonly string[],
+  fromIndex = 0
+): { index: number; keyword: string } | null {
+  let bestMatch: { index: number; keyword: string } | null = null;
+
+  for (const keyword of keywords) {
+    let searchFrom = fromIndex;
+
+    while (searchFrom < input.length) {
+      const matchIndex = input.indexOf(keyword, searchFrom);
+      if (matchIndex === -1) {
+        break;
+      }
+
+      const before = matchIndex === 0 ? undefined : input[matchIndex - 1];
+      const afterIndex = matchIndex + keyword.length;
+      const after = afterIndex >= input.length ? undefined : input[afterIndex];
+      if (!isWordChar(before) && !isWordChar(after)) {
+        if (!bestMatch || matchIndex < bestMatch.index) {
+          bestMatch = { index: matchIndex, keyword };
+        }
+        break;
+      }
+
+      searchFrom = matchIndex + 1;
+    }
+  }
+
+  return bestMatch;
+}
+
+function hasKeywordAt(input: string, index: number, keyword: string): boolean {
+  const before = index === 0 ? undefined : input[index - 1];
+  const afterIndex = index + keyword.length;
+  const after = afterIndex >= input.length ? undefined : input[afterIndex];
+  return input.startsWith(keyword, index) && !isWordChar(before) && !isWordChar(after);
+}
+
 function detectAction(prompt: string): Rule['action'] {
   const normalized = prompt.toLowerCase();
 
@@ -718,13 +834,27 @@ function detectThreshold(prompt: string): { operator: 'greater_than' | 'less_tha
 }
 
 function extractPercent(prompt: string): number | null {
-  const match = prompt.toLowerCase().match(/(\d+(?:\.\d+)?)\s*%/);
-  if (!match) {
-    return null;
+  const normalized = prompt.toLowerCase();
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    if (!isAsciiDigit(normalized[index])) {
+      continue;
+    }
+
+    const parsed = parseNumberAt(normalized, index);
+    if (!parsed) {
+      continue;
+    }
+
+    const suffixIndex = skipWhitespace(normalized, parsed.nextIndex);
+    if (normalized[suffixIndex] === '%') {
+      return parsed.value;
+    }
+
+    index = parsed.nextIndex - 1;
   }
 
-  const value = Number(match[1]);
-  return Number.isFinite(value) ? value : null;
+  return null;
 }
 
 function extractRemainingBudgetCap(prompt: string): number | null {
@@ -738,45 +868,47 @@ function extractRemainingBudgetCap(prompt: string): number | null {
 
 function extractVolumeFloor(prompt: string): number | null {
   const normalized = prompt.toLowerCase();
-  if (!/volume/.test(normalized) || !/(under|below|less than)/.test(normalized)) {
+  const comparator = findKeyword(normalized, ['under', 'below', 'less than']);
+  if (!comparator) {
     return null;
   }
 
-  const match = normalized.match(/(?:under|below|less than)\s*\$?\s*(\d[\d,]*(?:\.\d+)?)(\s*[km])?\s+volume/);
-  if (!match) {
+  if (!findKeyword(normalized, ['volume'], comparator.index + comparator.keyword.length)) {
     return null;
   }
 
-  let value = Number(match[1].replace(/,/g, ''));
-  if (!Number.isFinite(value)) {
+  const parsed = parseNumberAt(normalized, comparator.index + comparator.keyword.length);
+  if (!parsed) {
     return null;
   }
 
-  const suffix = match[2]?.trim().toLowerCase();
-  if (suffix === 'k') {
-    value *= 1_000;
-  } else if (suffix === 'm') {
-    value *= 1_000_000;
-  }
-
-  return value;
+  const unitIndex = skipWhitespace(normalized, parsed.nextIndex);
+  return hasKeywordAt(normalized, unitIndex, 'volume') ? parsed.value : null;
 }
 
 function extractBuyPriceCap(prompt: string): number | null {
   const normalized = prompt.toLowerCase();
-  const centsMatch = normalized.match(/(?:buy|buys|buying)[^\d]*(?:above|over)\s*(\d+(?:\.\d+)?)\s*cents?/);
-  if (centsMatch) {
-    const cents = Number(centsMatch[1]);
-    return Number.isFinite(cents) ? cents / 100 : null;
-  }
-
-  const decimalMatch = normalized.match(/(?:buy|buys|buying)[^\d]*(?:above|over)\s*(0?\.\d+)/);
-  if (!decimalMatch) {
+  const buyVerb = findKeyword(normalized, ['buying', 'buys', 'buy']);
+  if (!buyVerb) {
     return null;
   }
 
-  const value = Number(decimalMatch[1]);
-  return Number.isFinite(value) ? value : null;
+  const comparator = findKeyword(normalized, ['above', 'over'], buyVerb.index + buyVerb.keyword.length);
+  if (!comparator) {
+    return null;
+  }
+
+  const parsed = parseNumberAt(normalized, comparator.index + comparator.keyword.length);
+  if (!parsed) {
+    return null;
+  }
+
+  const unitIndex = skipWhitespace(normalized, parsed.nextIndex);
+  if (hasKeywordAt(normalized, unitIndex, 'cents') || hasKeywordAt(normalized, unitIndex, 'cent')) {
+    return parsed.value / 100;
+  }
+
+  return parsed.value <= 1 ? parsed.value : null;
 }
 
 function parseOrdinalValue(rawValue: string): number | null {

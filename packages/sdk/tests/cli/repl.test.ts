@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { dirname, join } from 'node:path';
 import {
   createReplSessionContext,
@@ -14,6 +15,7 @@ import {
   generateTemplatePolicy,
   loadHistoryFile,
   persistHistoryFile,
+  type DiscoveredTool,
   validateGeneratedYaml,
 } from '../../src/cli/index.js';
 
@@ -283,6 +285,32 @@ rules:
       return rule.action === 'require_approval'
         && conditions.some((condition) => condition.field === 'portfolio.open_count' && condition.operator === 'greater_than' && condition.value === 3);
     })).toBe(true);
+  });
+
+  it('avoids regex backtracking traps in trading prompt template parsing', () => {
+    const tool: DiscoveredTool = {
+      name: 'order_market',
+      parameters: ['token', 'side', 'amount'],
+      locations: ['src/tools.ts'],
+      sources: ['source-ts'],
+      covered: false,
+      coverageReason: 'none',
+      matchedRuleIds: [],
+    };
+    const prompts = [
+      `never put more than ${'0'.repeat(20_000)}x of my remaining budget into one position`,
+      `skip markets under${'\t'.repeat(20_000)}x volume`,
+      `block ${'buy'.repeat(20_000)} above 85 cents`,
+      `block ${'buy'.repeat(20_000)} above 0.85`,
+    ];
+
+    const start = performance.now();
+
+    for (const prompt of prompts) {
+      generateTemplatePolicy(prompt, [tool], []);
+    }
+
+    expect(performance.now() - start).toBeLessThan(200);
   });
 
   it('maps negated approval prompts to block action in template mode', () => {
