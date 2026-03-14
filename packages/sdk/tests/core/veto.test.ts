@@ -145,6 +145,218 @@ rules:
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it('uses custom guard context in local rule evaluation', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+
+      writeFileSync(
+        join(RULES_DIR, 'budget.yaml'),
+        `
+version: "1.0"
+name: budget-rules
+rules:
+  - id: budget-block
+    name: Budget Block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: budget.remaining
+        operator: less_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { amount_usd: 40 }, {
+        custom: {
+          budget: {
+            remaining: 80,
+          },
+        },
+      });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('budget-block');
+    });
+
+    it('prevents custom guard context from overriding raw local argument fields', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'raw-amount.yaml'),
+        `
+version: "1.0"
+name: raw-amount-rules
+rules:
+  - id: raw-amount-block
+    name: Raw Amount Block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: amount_usd
+        operator: greater_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { amount_usd: 50 }, {
+        custom: {
+          amount_usd: 500,
+        },
+      });
+
+      expect(result.decision).toBe('allow');
+    });
+
+    it('does not emit non-blocking local log side effects when a block rule is decisive', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "warn"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'mixed-actions.yaml'),
+        `
+version: "1.0"
+name: mixed-actions
+rules:
+  - id: warn-trade
+    name: Warn trade
+    enabled: true
+    action: warn
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 100
+  - id: block-trade
+    name: Block trade
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        const veto = await Veto.init({ configDir: VETO_DIR });
+        const result = await veto.guard('trade', { amount_usd: 150 });
+
+        expect(result.decision).toBe('deny');
+
+        const messages = warnSpy.mock.calls.map(([message]) => String(message));
+        expect(messages.some((message) => message.includes('Local rule matched with non-blocking action'))).toBe(false);
+        expect(messages.some((message) => message.includes('Tool call blocked by local rule'))).toBe(true);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('reloads local rules after new files are written', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const before = await veto.guard('trade', { amount_usd: 150 });
+      expect(before.decision).toBe('allow');
+
+      writeFileSync(
+        join(RULES_DIR, 'new-rule.yaml'),
+        `
+version: "1.0"
+name: dynamic-rules
+rules:
+  - id: dynamic-block
+    name: Dynamic Block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      await veto.reloadLocalRules();
+      const after = await veto.guard('trade', { amount_usd: 150 });
+
+      expect(after.decision).toBe('deny');
+      expect(after.ruleId).toBe('dynamic-block');
+    });
+
+    it('prefers the most restrictive matching local rule', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'precedence.yaml'),
+        `
+version: "1.0"
+name: precedence-rules
+rules:
+  - id: allow-small-trades
+    name: Allow small trades
+    enabled: true
+    action: allow
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 10
+  - id: require-review
+    name: Require review
+    enabled: true
+    action: require_approval
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 10
+  - id: block-trade
+    name: Block trade
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 10
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { amount_usd: 50 });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('block-trade');
+    });
+
     it('should auto-detect cloud mode when apiKey is provided', async () => {
       const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 

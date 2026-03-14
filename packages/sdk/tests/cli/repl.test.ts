@@ -239,6 +239,52 @@ rules:
     expect(rules).toHaveLength(2);
   });
 
+  it('generates dynamic trading constraints from a Polymarket-style prompt in template mode', () => {
+    const generated = generateTemplatePolicy(
+      'never put more than 15% of my remaining budget into one position, skip markets under $50k volume, block buys above 85 cents, and require approval before opening a fourth position',
+      [
+        {
+          name: 'order_create_limit',
+          parameters: ['token', 'side', 'price', 'size'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+        {
+          name: 'order_market',
+          parameters: ['token', 'side', 'amount'],
+          locations: ['src/tools.ts'],
+          sources: ['source-ts'],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ],
+      []
+    );
+
+    const parsed = validateGeneratedYaml(generated.yaml);
+    const rules = parsed.rules as Array<Record<string, unknown>>;
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.operator === 'percent_of' && condition.reference === 'budget.remaining');
+    })).toBe(true);
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return conditions.some((condition) => condition.field === 'market.volume' && condition.operator === 'less_than' && condition.value === 50000);
+    })).toBe(true);
+
+    expect(rules.some((rule) => {
+      const conditions = Array.isArray(rule.conditions) ? rule.conditions as Array<Record<string, unknown>> : [];
+      return rule.action === 'require_approval'
+        && conditions.some((condition) => condition.field === 'portfolio.open_count' && condition.operator === 'greater_than' && condition.value === 3);
+    })).toBe(true);
+  });
+
   it('maps negated approval prompts to block action in template mode', () => {
     const generated = generateTemplatePolicy(
       'do not approve invoices above 50 dollars',

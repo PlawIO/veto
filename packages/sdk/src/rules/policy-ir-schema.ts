@@ -197,6 +197,11 @@ export const POLICY_IR_V1_SCHEMA = {
         value: {
           description: 'The value to compare the field against.',
         },
+        reference: {
+          type: 'string',
+          minLength: 1,
+          description: 'Optional dot-notation reference path used by dynamic operators.',
+        },
       },
       allOf: [
         {
@@ -211,6 +216,18 @@ export const POLICY_IR_V1_SCHEMA = {
             properties: {
               value: { $ref: '#/$defs/TimeWindowValue' },
             },
+          },
+        },
+        {
+          if: {
+            properties: {
+              operator: {
+                const: 'percent_of',
+              },
+            },
+          },
+          then: {
+            required: ['reference'],
           },
         },
       ],
@@ -310,6 +327,7 @@ export const POLICY_IR_V1_SCHEMA = {
         'matches',
         'greater_than',
         'less_than',
+        'percent_of',
         'length_greater_than',
         'in',
         'not_in',

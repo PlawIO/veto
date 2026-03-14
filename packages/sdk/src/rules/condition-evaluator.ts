@@ -535,6 +535,28 @@ export function evaluateCondition(
 
   if (condition.field && condition.operator) {
     const fieldValue = resolveFieldPath(condition.field, context, builtInContext);
+
+    if (condition.operator === 'percent_of') {
+      if (typeof condition.reference !== 'string') {
+        return false;
+      }
+
+      const referenceValue = resolveFieldPath(condition.reference, context, builtInContext);
+      const resolvedFieldValue = Number(fieldValue);
+      const resolvedExpectedValue = Number(condition.value);
+      const resolvedReferenceValue = Number(referenceValue);
+
+      if (
+        Number.isNaN(resolvedFieldValue)
+        || Number.isNaN(resolvedExpectedValue)
+        || Number.isNaN(resolvedReferenceValue)
+      ) {
+        return false;
+      }
+
+      return resolvedFieldValue > (resolvedReferenceValue * resolvedExpectedValue / 100);
+    }
+
     return evaluateLegacyCondition(fieldValue, condition.operator, condition.value, {
       allowNestedObjectStringSearch: options.allowNestedObjectStringSearch,
     });

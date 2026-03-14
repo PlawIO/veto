@@ -717,6 +717,239 @@ function detectThreshold(prompt: string): { operator: 'greater_than' | 'less_tha
   };
 }
 
+function extractPercent(prompt: string): number | null {
+  const match = prompt.toLowerCase().match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractRemainingBudgetCap(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  if (!/remaining budget/.test(normalized) || !/position|trade|market/.test(normalized)) {
+    return null;
+  }
+
+  return extractPercent(normalized);
+}
+
+function extractVolumeFloor(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  if (!/volume/.test(normalized) || !/(under|below|less than)/.test(normalized)) {
+    return null;
+  }
+
+  const match = normalized.match(/(?:under|below|less than)\s*\$?\s*(\d[\d,]*(?:\.\d+)?)(\s*[km])?\s+volume/);
+  if (!match) {
+    return null;
+  }
+
+  let value = Number(match[1].replace(/,/g, ''));
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const suffix = match[2]?.trim().toLowerCase();
+  if (suffix === 'k') {
+    value *= 1_000;
+  } else if (suffix === 'm') {
+    value *= 1_000_000;
+  }
+
+  return value;
+}
+
+function extractBuyPriceCap(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  const centsMatch = normalized.match(/(?:buy|buys|buying)[^\d]*(?:above|over)\s*(\d+(?:\.\d+)?)\s*cents?/);
+  if (centsMatch) {
+    const cents = Number(centsMatch[1]);
+    return Number.isFinite(cents) ? cents / 100 : null;
+  }
+
+  const decimalMatch = normalized.match(/(?:buy|buys|buying)[^\d]*(?:above|over)\s*(0?\.\d+)/);
+  if (!decimalMatch) {
+    return null;
+  }
+
+  const value = Number(decimalMatch[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseOrdinalValue(rawValue: string): number | null {
+  const normalized = rawValue.toLowerCase();
+  const numeric = Number(normalized.replace(/(?:st|nd|rd|th)$/i, ''));
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+
+  const ordinals: Record<string, number> = {
+    first: 1,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+    tenth: 10,
+  };
+
+  return ordinals[normalized] ?? null;
+}
+
+function extractApprovalPositionThreshold(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  if (!/require approval/.test(normalized) || !/position/.test(normalized)) {
+    return null;
+  }
+
+  const match = normalized.match(/(?:opening|open)\s+(?:a\s+)?([a-z]+|\d+(?:st|nd|rd|th)?)\s+position/);
+  if (!match) {
+    return null;
+  }
+
+  const ordinal = parseOrdinalValue(match[1]);
+  if (ordinal === null) {
+    return null;
+  }
+
+  return Math.max(0, ordinal - 1);
+}
+
+function selectTemplateTools(prompt: string, tools: readonly DiscoveredTool[]): string[] {
+  const directMatches = findMatchingToolNames(prompt, tools);
+  if (directMatches.length > 0) {
+    return directMatches;
+  }
+
+  const normalized = prompt.toLowerCase();
+  if (/(budget|market|position|buy|price|volume|trade)/.test(normalized)) {
+    const tradingTools = tools
+      .filter((tool) => /order|trade|position/.test(tool.name.toLowerCase()))
+      .map((tool) => tool.name);
+    if (tradingTools.length > 0) {
+      return tradingTools;
+    }
+  }
+
+  const fallbackTool = tools[0]?.name;
+  return fallbackTool ? [fallbackTool] : ['tool_call'];
+}
+
+function nextGeneratedRuleId(baseId: string, existingIds: Set<string>): string {
+  let candidate = toSlug(baseId);
+  let attempt = 1;
+
+  while (existingIds.has(candidate)) {
+    candidate = `${toSlug(baseId)}-${attempt}`;
+    attempt += 1;
+  }
+
+  existingIds.add(candidate);
+  return candidate;
+}
+
+function buildTradingTemplateRules(
+  prompt: string,
+  selectedTools: readonly string[],
+  existingIds: Set<string>
+): Rule[] {
+  const rules: Rule[] = [];
+  const budgetCap = extractRemainingBudgetCap(prompt);
+  const volumeFloor = extractVolumeFloor(prompt);
+  const buyPriceCap = extractBuyPriceCap(prompt);
+  const approvalThreshold = extractApprovalPositionThreshold(prompt);
+
+  if (budgetCap !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('block-position-size-percent-of-budget', existingIds),
+      name: 'Block oversized position by budget',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'arguments.amount_usd',
+          operator: 'percent_of',
+          value: budgetCap,
+          reference: 'budget.remaining',
+        },
+      ],
+    });
+  }
+
+  if (volumeFloor !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('block-low-volume-markets', existingIds),
+      name: 'Block low-volume markets',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'market.volume',
+          operator: 'less_than',
+          value: volumeFloor,
+        },
+      ],
+    });
+  }
+
+  if (buyPriceCap !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('block-high-price-buys', existingIds),
+      name: 'Block high-price buys',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'arguments.side',
+          operator: 'equals',
+          value: 'buy',
+        },
+        {
+          field: 'arguments.price',
+          operator: 'greater_than',
+          value: buyPriceCap,
+        },
+      ],
+    });
+  }
+
+  if (approvalThreshold !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('require-approval-for-position-count', existingIds),
+      name: 'Require approval for additional positions',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'medium',
+      action: 'require_approval',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'portfolio.open_count',
+          operator: 'greater_than',
+          value: approvalThreshold,
+        },
+      ],
+    });
+  }
+
+  return rules;
+}
+
 function findMatchingToolNames(prompt: string, tools: readonly DiscoveredTool[]): string[] {
   const normalized = prompt.toLowerCase();
   const matches = new Set<string>();
@@ -756,24 +989,23 @@ function findMatchingToolNames(prompt: string, tools: readonly DiscoveredTool[])
 }
 
 function buildTemplateRules(prompt: string, tools: readonly DiscoveredTool[], existingRules: readonly Rule[]): Rule[] {
+  const existingIds = new Set(existingRules.map((rule) => rule.id));
+  const selectedTools = selectTemplateTools(prompt, tools);
+  const tradingRules = buildTradingTemplateRules(prompt, selectedTools, existingIds);
+
+  if (tradingRules.length > 0) {
+    return tradingRules;
+  }
+
   const action = detectAction(prompt);
   const threshold = detectThreshold(prompt);
-  const toolNames = findMatchingToolNames(prompt, tools);
-  const fallbackTool = tools[0]?.name ?? 'tool_call';
-  const selectedTools = toolNames.length > 0 ? toolNames : [fallbackTool];
-
-  const existingIds = new Set(existingRules.map((rule) => rule.id));
   const generatedRules: Rule[] = [];
 
   for (const toolName of selectedTools) {
-    const slug = toSlug(`${toolName}-${action}`);
-    let ruleId = `${slug}${threshold ? `-${threshold.value}` : ''}`;
-    let attempt = 1;
-    while (existingIds.has(ruleId)) {
-      ruleId = `${slug}-${attempt}`;
-      attempt += 1;
-    }
-    existingIds.add(ruleId);
+    const ruleId = nextGeneratedRuleId(
+      `${toolName}-${action}${threshold ? `-${threshold.value}` : ''}`,
+      existingIds
+    );
 
     const conditions = threshold
       ? [
