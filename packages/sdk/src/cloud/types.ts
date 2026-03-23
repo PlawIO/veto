@@ -4,7 +4,7 @@
  * @module cloud/types
  */
 
-import type { ArgumentConstraint } from '../deterministic/types.js';
+import type { ArgumentConstraint, SessionConstraints } from '../deterministic/types.js';
 import type { RedactionTrace } from '../core/output-validator.js';
 import type { Rule, OutputRule } from '../rules/types.js';
 
@@ -102,6 +102,22 @@ export interface CloudValidationResponse {
   approval_id?: string;
   denial?: CloudDenialDetails;
   outputRules?: OutputRule[];
+  /** Session state returned when sessionId is provided in context */
+  session?: SessionState;
+}
+
+/**
+ * Live session state returned in validation responses.
+ */
+export interface SessionState {
+  /** Declared session budget */
+  budget: number;
+  /** Cumulative spend so far */
+  spent: number;
+  /** Budget minus spent */
+  remaining: number;
+  /** Named counter values */
+  counters: Record<string, number>;
 }
 
 /**
@@ -135,7 +151,7 @@ export interface CloudPolicyResponse {
   toolName: string;
   mode: 'deterministic' | 'llm';
   constraints: ArgumentConstraint[];
-  sessionConstraints?: unknown;
+  sessionConstraints?: SessionConstraints;
   rateLimits?: unknown;
   version: number;
 }
