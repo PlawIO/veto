@@ -665,6 +665,131 @@ function extractNumericAmount(prompt: string): number | null {
   return value;
 }
 
+function isAsciiDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= '0' && char <= '9';
+}
+
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined
+    && ((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || isAsciiDigit(char) || char === '_');
+}
+
+function skipWhitespace(input: string, index: number): number {
+  let cursor = index;
+
+  while (cursor < input.length) {
+    const char = input[cursor];
+    if (char !== ' ' && char !== '\t' && char !== '\n' && char !== '\r') {
+      break;
+    }
+    cursor += 1;
+  }
+
+  return cursor;
+}
+
+function parseNumberAt(
+  input: string,
+  startIndex: number
+): { value: number; nextIndex: number; hadCurrencySymbol: boolean; hadDecimal: boolean } | null {
+  let cursor = skipWhitespace(input, startIndex);
+  const hadCurrencySymbol = input[cursor] === '$';
+  if (hadCurrencySymbol) {
+    cursor += 1;
+    cursor = skipWhitespace(input, cursor);
+  }
+
+  const rawStart = cursor;
+  let sawDigit = false;
+  let sawDot = false;
+
+  while (cursor < input.length) {
+    const char = input[cursor];
+    if (isAsciiDigit(char)) {
+      sawDigit = true;
+      cursor += 1;
+      continue;
+    }
+    if (char === ',') {
+      cursor += 1;
+      continue;
+    }
+    if (char === '.' && !sawDot) {
+      sawDot = true;
+      cursor += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (!sawDigit) {
+    return null;
+  }
+
+  let value = Number(input.slice(rawStart, cursor).replaceAll(',', ''));
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  let nextIndex = cursor;
+  const suffixIndex = skipWhitespace(input, cursor);
+  const suffix = input[suffixIndex]?.toLowerCase();
+  if (suffix === 'k') {
+    value *= 1_000;
+    nextIndex = suffixIndex + 1;
+  } else if (suffix === 'm') {
+    value *= 1_000_000;
+    nextIndex = suffixIndex + 1;
+  }
+
+  return {
+    value,
+    nextIndex,
+    hadCurrencySymbol,
+    hadDecimal: sawDot,
+  };
+}
+
+function findKeyword(
+  input: string,
+  keywords: readonly string[],
+  fromIndex = 0
+): { index: number; keyword: string } | null {
+  let bestMatch: { index: number; keyword: string } | null = null;
+
+  for (const keyword of keywords) {
+    let searchFrom = fromIndex;
+
+    while (searchFrom < input.length) {
+      const matchIndex = input.indexOf(keyword, searchFrom);
+      if (matchIndex === -1) {
+        break;
+      }
+
+      const before = matchIndex === 0 ? undefined : input[matchIndex - 1];
+      const afterIndex = matchIndex + keyword.length;
+      const after = afterIndex >= input.length ? undefined : input[afterIndex];
+      if (!isWordChar(before) && !isWordChar(after)) {
+        if (!bestMatch || matchIndex < bestMatch.index) {
+          bestMatch = { index: matchIndex, keyword };
+        }
+        break;
+      }
+
+      searchFrom = matchIndex + 1;
+    }
+  }
+
+  return bestMatch;
+}
+
+function hasKeywordAt(input: string, index: number, keyword: string): boolean {
+  const before = index === 0 ? undefined : input[index - 1];
+  const afterIndex = index + keyword.length;
+  const after = afterIndex >= input.length ? undefined : input[afterIndex];
+  return input.startsWith(keyword, index) && !isWordChar(before) && !isWordChar(after);
+}
+
 function detectAction(prompt: string): Rule['action'] {
   const normalized = prompt.toLowerCase();
 
@@ -717,6 +842,277 @@ function detectThreshold(prompt: string): { operator: 'greater_than' | 'less_tha
   };
 }
 
+function extractPercent(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    if (!isAsciiDigit(normalized[index])) {
+      continue;
+    }
+
+    const parsed = parseNumberAt(normalized, index);
+    if (!parsed) {
+      continue;
+    }
+
+    const suffixIndex = skipWhitespace(normalized, parsed.nextIndex);
+    if (normalized[suffixIndex] === '%') {
+      return parsed.value;
+    }
+
+    index = parsed.nextIndex - 1;
+  }
+
+  return null;
+}
+
+function extractRemainingBudgetCap(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  if (!/remaining budget/.test(normalized) || !/position|trade|market/.test(normalized)) {
+    return null;
+  }
+
+  return extractPercent(normalized);
+}
+
+function extractVolumeFloor(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  const comparator = findKeyword(normalized, ['under', 'below', 'less than']);
+  if (!comparator) {
+    return null;
+  }
+
+  if (!findKeyword(normalized, ['volume'], comparator.index + comparator.keyword.length)) {
+    return null;
+  }
+
+  const parsed = parseNumberAt(normalized, comparator.index + comparator.keyword.length);
+  if (!parsed) {
+    return null;
+  }
+
+  const unitIndex = skipWhitespace(normalized, parsed.nextIndex);
+  return hasKeywordAt(normalized, unitIndex, 'volume') ? parsed.value : null;
+}
+
+function extractBuyPriceCap(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  const buyVerb = findKeyword(normalized, ['buying', 'buys', 'buy']);
+  if (!buyVerb) {
+    return null;
+  }
+
+  const comparator = findKeyword(normalized, ['above', 'over'], buyVerb.index + buyVerb.keyword.length);
+  if (!comparator) {
+    return null;
+  }
+
+  const parsed = parseNumberAt(normalized, comparator.index + comparator.keyword.length);
+  if (!parsed) {
+    return null;
+  }
+
+  const unitIndex = skipWhitespace(normalized, parsed.nextIndex);
+  if (hasKeywordAt(normalized, unitIndex, 'cents') || hasKeywordAt(normalized, unitIndex, 'cent')) {
+    const normalizedCents = parsed.value / 100;
+    return normalizedCents <= 1 ? normalizedCents : null;
+  }
+
+  if (!parsed.hadCurrencySymbol && !parsed.hadDecimal && parsed.value > 1 && parsed.value <= 100) {
+    return parsed.value / 100;
+  }
+
+  // Bare decimal caps are treated as Polymarket-style probabilities, so values above 1 are ignored.
+  return parsed.value <= 1 ? parsed.value : null;
+}
+
+function hasUnsupportedBuyPriceCap(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  const buyVerb = findKeyword(normalized, ['buying', 'buys', 'buy']);
+  if (!buyVerb) {
+    return false;
+  }
+
+  const comparator = findKeyword(normalized, ['above', 'over'], buyVerb.index + buyVerb.keyword.length);
+  if (!comparator) {
+    return false;
+  }
+
+  return parseNumberAt(normalized, comparator.index + comparator.keyword.length) !== null
+    && extractBuyPriceCap(prompt) === null;
+}
+
+function parseOrdinalValue(rawValue: string): number | null {
+  const normalized = rawValue.toLowerCase();
+  const numeric = Number(normalized.replace(/(?:st|nd|rd|th)$/i, ''));
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+
+  const ordinals: Record<string, number> = {
+    first: 1,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+    tenth: 10,
+  };
+
+  return ordinals[normalized] ?? null;
+}
+
+function extractApprovalPositionThreshold(prompt: string): number | null {
+  const normalized = prompt.toLowerCase();
+  if (!/require approval/.test(normalized) || !/position/.test(normalized)) {
+    return null;
+  }
+
+  const match = normalized.match(/(?:opening|open)\s+(?:a\s+)?([a-z]+|\d+(?:st|nd|rd|th)?)\s+position/);
+  if (!match) {
+    return null;
+  }
+
+  const ordinal = parseOrdinalValue(match[1]);
+  if (ordinal === null) {
+    return null;
+  }
+
+  return Math.max(0, ordinal - 1);
+}
+
+function selectTemplateTools(prompt: string, tools: readonly DiscoveredTool[]): string[] {
+  const directMatches = findMatchingToolNames(prompt, tools);
+  if (directMatches.length > 0) {
+    return directMatches;
+  }
+
+  const normalized = prompt.toLowerCase();
+  if (/(budget|market|position|buy|price|volume|trade)/.test(normalized)) {
+    const tradingTools = tools
+      .filter((tool) => /order|trade|position/.test(tool.name.toLowerCase()))
+      .map((tool) => tool.name);
+    if (tradingTools.length > 0) {
+      return tradingTools;
+    }
+  }
+
+  const fallbackTool = tools[0]?.name;
+  return fallbackTool ? [fallbackTool] : ['tool_call'];
+}
+
+function nextGeneratedRuleId(baseId: string, existingIds: Set<string>): string {
+  let candidate = toSlug(baseId);
+  let attempt = 1;
+
+  while (existingIds.has(candidate)) {
+    candidate = `${toSlug(baseId)}-${attempt}`;
+    attempt += 1;
+  }
+
+  existingIds.add(candidate);
+  return candidate;
+}
+
+function buildTradingTemplateRules(
+  prompt: string,
+  selectedTools: readonly string[],
+  existingIds: Set<string>
+): Rule[] {
+  const rules: Rule[] = [];
+  const budgetCap = extractRemainingBudgetCap(prompt);
+  const volumeFloor = extractVolumeFloor(prompt);
+  const buyPriceCap = extractBuyPriceCap(prompt);
+  const approvalThreshold = extractApprovalPositionThreshold(prompt);
+
+  if (budgetCap !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('block-position-size-percent-of-budget', existingIds),
+      name: 'Block oversized position by budget',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'arguments.amount_usd',
+          operator: 'percent_of',
+          value: budgetCap,
+          reference: 'budget.remaining',
+        },
+      ],
+    });
+  }
+
+  if (volumeFloor !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('block-low-volume-markets', existingIds),
+      name: 'Block low-volume markets',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'market.volume',
+          operator: 'less_than',
+          value: volumeFloor,
+        },
+      ],
+    });
+  }
+
+  if (buyPriceCap !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('block-high-price-buys', existingIds),
+      name: 'Block high-price buys',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'arguments.side',
+          operator: 'equals',
+          value: 'buy',
+        },
+        {
+          field: 'arguments.price',
+          operator: 'greater_than',
+          value: buyPriceCap,
+        },
+      ],
+    });
+  }
+
+  if (approvalThreshold !== null) {
+    rules.push({
+      id: nextGeneratedRuleId('require-approval-for-position-count', existingIds),
+      name: 'Require approval for additional positions',
+      description: `Generated from prompt: ${prompt}`,
+      enabled: true,
+      severity: 'medium',
+      action: 'require_approval',
+      tools: [...selectedTools],
+      conditions: [
+        {
+          field: 'portfolio.open_count',
+          operator: 'greater_than',
+          value: approvalThreshold,
+        },
+      ],
+    });
+  }
+
+  return rules;
+}
+
 function findMatchingToolNames(prompt: string, tools: readonly DiscoveredTool[]): string[] {
   const normalized = prompt.toLowerCase();
   const matches = new Set<string>();
@@ -756,24 +1152,27 @@ function findMatchingToolNames(prompt: string, tools: readonly DiscoveredTool[])
 }
 
 function buildTemplateRules(prompt: string, tools: readonly DiscoveredTool[], existingRules: readonly Rule[]): Rule[] {
+  const existingIds = new Set(existingRules.map((rule) => rule.id));
+  const selectedTools = selectTemplateTools(prompt, tools);
+  const tradingRules = buildTradingTemplateRules(prompt, selectedTools, existingIds);
+
+  if (tradingRules.length > 0) {
+    return tradingRules;
+  }
+
+  if (hasUnsupportedBuyPriceCap(prompt)) {
+    return [];
+  }
+
   const action = detectAction(prompt);
   const threshold = detectThreshold(prompt);
-  const toolNames = findMatchingToolNames(prompt, tools);
-  const fallbackTool = tools[0]?.name ?? 'tool_call';
-  const selectedTools = toolNames.length > 0 ? toolNames : [fallbackTool];
-
-  const existingIds = new Set(existingRules.map((rule) => rule.id));
   const generatedRules: Rule[] = [];
 
   for (const toolName of selectedTools) {
-    const slug = toSlug(`${toolName}-${action}`);
-    let ruleId = `${slug}${threshold ? `-${threshold.value}` : ''}`;
-    let attempt = 1;
-    while (existingIds.has(ruleId)) {
-      ruleId = `${slug}-${attempt}`;
-      attempt += 1;
-    }
-    existingIds.add(ruleId);
+    const ruleId = nextGeneratedRuleId(
+      `${toolName}-${action}${threshold ? `-${threshold.value}` : ''}`,
+      existingIds
+    );
 
     const conditions = threshold
       ? [
@@ -1138,13 +1537,21 @@ export function generateTemplatePolicy(
   const yaml = toPolicyYaml(rules, prompt);
   validateGeneratedYaml(yaml);
 
+  const warnings = [
+    'No API key or kernel config configured. Using template fallback generation.',
+    'Set VETO_API_KEY or enable kernel mode in veto.config.yaml for LLM generation.',
+  ];
+
+  if (hasUnsupportedBuyPriceCap(prompt)) {
+    warnings.push(
+      'Template fallback could not infer the buy price cap. Use cents (e.g. "85 cents") or a probability between 0 and 1.'
+    );
+  }
+
   return {
     mode: 'template',
     yaml,
-    warnings: [
-      'No API key or kernel config configured. Using template fallback generation.',
-      'Set VETO_API_KEY or enable kernel mode in veto.config.yaml for LLM generation.',
-    ],
+    warnings,
   };
 }
 

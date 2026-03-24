@@ -50,4 +50,36 @@ describe('condition evaluator', () => {
   it('rejects sticky regex flags explicitly', () => {
     expect(createSafeRegex('(?y)acme')).toBeNull();
   });
+
+  it('supports percent_of conditions against a reference field', () => {
+    const condition: RuleCondition = {
+      field: 'arguments.amount_usd',
+      operator: 'percent_of',
+      value: 15,
+      reference: 'budget.remaining',
+    };
+
+    expect(evaluateCondition(condition, {
+      arguments: { amount_usd: 80 },
+      budget: { remaining: 500 },
+    })).toBe(true);
+
+    expect(evaluateCondition(condition, {
+      arguments: { amount_usd: 70 },
+      budget: { remaining: 500 },
+    })).toBe(false);
+  });
+
+  it('does not match percent_of conditions when the reference is missing', () => {
+    const condition: RuleCondition = {
+      field: 'arguments.amount_usd',
+      operator: 'percent_of',
+      value: 15,
+      reference: 'budget.remaining',
+    };
+
+    expect(evaluateCondition(condition, {
+      arguments: { amount_usd: 80 },
+    })).toBe(false);
+  });
 });

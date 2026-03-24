@@ -137,6 +137,28 @@ describe('Policy IR v1 Schema Validator', () => {
       })).not.toThrow();
     });
 
+    it('should accept percent_of conditions with a reference path', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'dynamic-budget-cap',
+            name: 'Dynamic budget cap',
+            action: 'block',
+            tools: ['trade'],
+            conditions: [
+              {
+                field: 'arguments.amount_usd',
+                operator: 'percent_of',
+                value: 15,
+                reference: 'budget.remaining',
+              },
+            ],
+          },
+        ],
+      })).not.toThrow();
+    });
+
     it('should accept rule agents include and exclude scopes', () => {
       expect(() => validatePolicyIR({
         version: '1.0',
@@ -215,6 +237,69 @@ describe('Policy IR v1 Schema Validator', () => {
     it('should reject extra fields on rules', () => {
       const data = loadFixture('invalid-extra-field.yaml');
       expect(() => validatePolicyIR(data)).toThrow(PolicySchemaError);
+    });
+
+    it('should reject percent_of conditions without a reference', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'invalid-dynamic-budget-cap',
+            name: 'Invalid dynamic budget cap',
+            action: 'block',
+            tools: ['trade'],
+            conditions: [
+              {
+                field: 'arguments.amount_usd',
+                operator: 'percent_of',
+                value: 15,
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+    });
+
+    it('should reject non-positive percent_of values', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'zero-dynamic-budget-cap',
+            name: 'Zero dynamic budget cap',
+            action: 'block',
+            tools: ['trade'],
+            conditions: [
+              {
+                field: 'arguments.amount_usd',
+                operator: 'percent_of',
+                value: 0,
+                reference: 'budget.remaining',
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
+
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'negative-dynamic-budget-cap',
+            name: 'Negative dynamic budget cap',
+            action: 'block',
+            tools: ['trade'],
+            conditions: [
+              {
+                field: 'arguments.amount_usd',
+                operator: 'percent_of',
+                value: -5,
+                reference: 'budget.remaining',
+              },
+            ],
+          },
+        ],
+      })).toThrow(PolicySchemaError);
     });
 
     it('should reject rule missing id', () => {
