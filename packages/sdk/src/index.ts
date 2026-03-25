@@ -103,7 +103,18 @@ export type {
   FailedConstraint,
   ApprovalData,
   ApprovalPollOptions,
+  SessionState,
 } from './cloud/types.js';
+
+// Deterministic constraint types
+export type {
+  ArgumentConstraint,
+  SessionConstraints,
+  SessionCounterConfig,
+  CumulativeLimit,
+  DeterministicPolicy,
+  LocalValidationResult,
+} from './deterministic/types.js';
 export { VetoCloudClient, ApprovalTimeoutError } from './cloud/client.js';
 
 // Interception result
