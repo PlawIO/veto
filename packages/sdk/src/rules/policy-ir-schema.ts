@@ -9,6 +9,7 @@ export const POLICY_IR_V1_SCHEMA = {
     { required: ['rules'] },
     { required: ['output_rules'] },
     { required: ['extends'] },
+    { required: ['economic'] },
   ],
   properties: {
     version: {
@@ -41,6 +42,9 @@ export const POLICY_IR_V1_SCHEMA = {
     },
     settings: {
       $ref: '#/$defs/Settings',
+    },
+    economic: {
+      $ref: '#/$defs/EconomicPolicy',
     },
   },
   additionalProperties: false,
@@ -373,6 +377,92 @@ export const POLICY_IR_V1_SCHEMA = {
           type: 'array',
           items: { type: 'string' },
           description: 'Tags applied to all rules in this set.',
+        },
+      },
+      additionalProperties: false,
+    },
+    EconomicPolicy: {
+      type: 'object',
+      description: 'Economic authorization policy for x402, MPP, and AP2 protocols.',
+      properties: {
+        budgets: {
+          type: 'array',
+          items: { $ref: '#/$defs/EconomicBudget' },
+          description: 'Budget configurations per scope.',
+        },
+        cost_extraction: {
+          type: 'object',
+          properties: {
+            default: {
+              type: 'string',
+              description: 'Default dot-notation path to extract cost from tool arguments.',
+            },
+            overrides: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+              description: 'Per-tool cost extraction path overrides.',
+            },
+          },
+          additionalProperties: false,
+        },
+        payer: {
+          type: 'object',
+          properties: {
+            required: {
+              type: 'boolean',
+              description: 'Whether a payer identity is required.',
+            },
+            approved: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Allowlist of approved payer identifiers.',
+            },
+          },
+          additionalProperties: false,
+        },
+        denial_reasons: {
+          type: 'object',
+          description: 'Custom denial message templates. Keys are denial reason codes, values are message templates with {variable} placeholders.',
+          properties: {
+            budget_exceeded: { type: 'string' },
+            approval_required: { type: 'string' },
+            payer_missing: { type: 'string' },
+            payer_unauthorized: { type: 'string' },
+            currency_mismatch: { type: 'string' },
+            connector_error: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    EconomicBudget: {
+      type: 'object',
+      required: ['scope', 'limit', 'currency', 'window'],
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['session', 'agent', 'user', 'global'],
+          description: 'Budget scope.',
+        },
+        limit: {
+          type: 'number',
+          minimum: 0,
+          description: 'Maximum spend limit.',
+        },
+        currency: {
+          type: 'string',
+          minLength: 1,
+          description: 'Currency code (e.g., "USD").',
+        },
+        approval_threshold: {
+          type: 'number',
+          minimum: 0,
+          description: 'Cost above which approval is required.',
+        },
+        window: {
+          type: 'string',
+          description: 'Budget time window (e.g., "session", "24h").',
         },
       },
       additionalProperties: false,

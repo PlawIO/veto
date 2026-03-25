@@ -135,7 +135,7 @@ export {
   resolveEventWebhookConfig,
 } from './core/events.js';
 
-// Budget
+// Budget (legacy — use economic module for new code)
 export {
   BudgetTracker,
   BudgetExceededError,
@@ -143,6 +143,34 @@ export {
   type ToolCostMap,
   type BudgetStatus,
 } from './core/budget.js';
+
+// Economic authorization (x402, MPP, AP2)
+export {
+  LocalBudgetEngine,
+  EconomicEvaluator,
+  createX402Connector,
+  createMPPConnector,
+  createAP2Connector,
+  buildX402ConnectorError,
+  buildMPPConnectorError,
+  buildAP2ConnectorError,
+} from './economic/index.js';
+export type {
+  EconomicContext,
+  EconomicDenialDetails,
+  EconomicDenialReason,
+  EconomicProtocol,
+  BudgetEngine,
+  BudgetCheckResult,
+  BudgetScope,
+  EconomicBudgetStatus,
+  EconomicPolicyConfig,
+  EconomicBudgetConfig,
+  CostExtractionConfig,
+  PayerConfig,
+  ProtocolConnector,
+  EconomicWebhookEventType,
+} from './economic/index.js';
 
 // Provider adapters (for converting to/from provider formats)
 export {
@@ -161,6 +189,7 @@ export {
   fromMCPToolCall,
   toMCPTools,
   isMCPTool,
+  extractMCPEconomicContext,
 } from './providers/adapters.js';
 
 export type {

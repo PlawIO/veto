@@ -2,7 +2,14 @@ import type { RuleSeverity } from '../rules/types.js';
 import type { ValidationDecision } from '../types/config.js';
 import type { Logger } from '../utils/logger.js';
 
-export type VetoWebhookEventType = 'deny' | 'require_approval' | 'budget_exceeded';
+export type VetoWebhookEventType =
+  | 'deny'
+  | 'require_approval'
+  | 'budget_exceeded'
+  | 'budget_warning'
+  | 'approval_triggered'
+  | 'spend_committed'
+  | 'protocol_detected';
 export type VetoWebhookFormat = 'slack' | 'pagerduty' | 'generic' | 'cef';
 
 export interface VetoWebhookEvent {
@@ -15,6 +22,16 @@ export interface VetoWebhookEvent {
   severity?: RuleSeverity;
   timestamp: string;
   shadow?: boolean;
+  /** Economic context for budget/protocol events */
+  economic?: {
+    cost?: number;
+    currency?: string;
+    protocol?: string;
+    payer?: string;
+    budget_spent?: number;
+    budget_limit?: number;
+    budget_remaining?: number;
+  };
 }
 
 export interface EventWebhookConfig {
@@ -28,6 +45,10 @@ const VALID_EVENT_TYPES: readonly VetoWebhookEventType[] = [
   'deny',
   'require_approval',
   'budget_exceeded',
+  'budget_warning',
+  'approval_triggered',
+  'spend_committed',
+  'protocol_detected',
 ];
 const VALID_FORMATS: readonly VetoWebhookFormat[] = ['slack', 'pagerduty', 'generic', 'cef'];
 const VALID_SEVERITIES: readonly RuleSeverity[] = ['critical', 'high', 'medium', 'low', 'info'];

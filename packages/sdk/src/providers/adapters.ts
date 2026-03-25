@@ -8,6 +8,7 @@
  */
 
 import type { ToolDefinition, ToolCall } from '../types/tool.js';
+import type { EconomicContext, EconomicProtocol } from '../economic/types.js';
 import type {
   Provider,
   OpenAITool,
@@ -328,6 +329,75 @@ export function isMCPTool(tool: unknown): tool is MCPTool {
   if ('function' in t) return false;
   if ('type' in t && t.type === 'function') return false;
   return true;
+}
+
+// ============================================================================
+// MCP Economic Context Extraction
+// ============================================================================
+
+/**
+ * Extract economic context from MCP tool call metadata.
+ *
+ * MCP servers can include economic metadata in tool call arguments or
+ * _meta fields. This function looks for the `economic_context` convention:
+ *
+ * ```json
+ * {
+ *   "name": "search_api",
+ *   "arguments": {
+ *     "query": "...",
+ *     "_meta": {
+ *       "economic_context": {
+ *         "cost": 0.01,
+ *         "currency": "USD",
+ *         "protocol": "mpp",
+ *         "payer": "cus_stripe_123"
+ *       }
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * Returns null if no economic context is found.
+ */
+export function extractMCPEconomicContext(
+  toolCall: MCPToolCallArgs
+): EconomicContext | null {
+  const args = toolCall.arguments;
+  if (!args) return null;
+
+  // Check _meta.economic_context (preferred convention)
+  const meta = args._meta as Record<string, unknown> | undefined;
+  if (meta?.economic_context && typeof meta.economic_context === 'object') {
+    return parseMCPEconomicContext(meta.economic_context as Record<string, unknown>);
+  }
+
+  // Check top-level economic_context (alternative)
+  if (args.economic_context && typeof args.economic_context === 'object') {
+    return parseMCPEconomicContext(args.economic_context as Record<string, unknown>);
+  }
+
+  return null;
+}
+
+function parseMCPEconomicContext(
+  data: Record<string, unknown>
+): EconomicContext | null {
+  const cost = typeof data.cost === 'number' ? data.cost : undefined;
+  if (cost === undefined || !Number.isFinite(cost) || cost < 0) return null;
+
+  const currency = typeof data.currency === 'string' ? data.currency : 'USD';
+  const VALID_PROTOCOLS = new Set<string>(['x402', 'mpp', 'ap2', 'custom']);
+  const protocol: EconomicProtocol = typeof data.protocol === 'string'
+      && VALID_PROTOCOLS.has(data.protocol)
+    ? data.protocol as EconomicProtocol
+    : 'custom';
+  const payer = typeof data.payer === 'string' ? data.payer : undefined;
+
+  const { cost: _, currency: _c, protocol: _p, payer: _py, ...rest } = data;
+  const protocol_metadata = Object.keys(rest).length > 0 ? rest : undefined;
+
+  return { cost, currency, payer, protocol, protocol_metadata };
 }
 
 // ============================================================================

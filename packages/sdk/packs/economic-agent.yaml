@@ -1,0 +1,62 @@
+version: "1.0"
+name: "@veto/economic-agent"
+description: >
+  Sensible economic authorization defaults for AI agents that spend money.
+  Covers session budgets, approval thresholds, and payer validation.
+  One line to economic auth: extends: "@veto/economic-agent"
+
+rules:
+  - id: economic-high-value-action
+    name: High-value action guard
+    description: Require approval for tool calls with cost arguments above $50
+    enabled: true
+    severity: high
+    action: require_approval
+    conditions:
+      - field: arguments.cost
+        operator: greater_than
+        value: 50
+
+  - id: economic-dangerous-tools
+    name: Block unrestricted financial tools
+    description: Block tools that can transfer funds without explicit cost
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - transfer_funds
+      - withdraw
+      - wire_transfer
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 0
+
+settings:
+  default_action: allow
+  fail_mode: closed
+
+economic:
+  budgets:
+    - scope: session
+      limit: 100.00
+      currency: USD
+      approval_threshold: 25.00
+      window: session
+
+  cost_extraction:
+    default: "arguments.cost"
+    overrides:
+      search_api: "arguments.price_usd"
+      trade: "arguments.amount"
+      purchase: "arguments.total"
+
+  payer:
+    required: true
+    approved: []
+
+  denial_reasons:
+    budget_exceeded: "Action denied: would exceed {scope} budget ({spent}/{limit} {currency})"
+    approval_required: "Action requires approval: cost {cost} exceeds threshold {threshold}"
+    payer_missing: "Action denied: no payer identified for economic action"
+    payer_unauthorized: "Action denied: payer {payer} not in approved list"
