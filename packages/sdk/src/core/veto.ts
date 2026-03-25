@@ -3382,8 +3382,9 @@ export class Veto {
     args: Record<string, unknown>,
     context: GuardContext = {}
   ): Promise<GuardResult> {
-    // Economic evaluation runs BEFORE behavioral rules.
-    // Economic deny takes priority — if the agent can't afford it, rules don't matter.
+    // Economic pre-checks: payer validation and cost validation run BEFORE
+    // behavioral rules. Budget reservation happens AFTER behavioral rules
+    // to avoid the TOCTOU double-spend (check then reserve race).
     if (this.economicEvaluator && context.economic) {
       const econResult = this.economicEvaluator.evaluate(context.economic);
       if (econResult.decision !== 'allow') {
@@ -3492,7 +3493,8 @@ export class Veto {
       aggregatedResult.totalDurationMs
     );
 
-    // If behavioral rules allow and economic context exists, reserve budget
+    // If behavioral rules allow and economic context exists, reserve budget.
+    // Skip reservation in shadow mode — shadow should never deduct real budget.
     const behavioralResult = this.toGuardResult(validationResult);
     const effectiveEconomic = context.economic ?? implicitEconomicContext;
     if (
@@ -3500,6 +3502,7 @@ export class Veto {
       && this.economicEvaluator
       && effectiveEconomic
       && effectiveEconomic.cost > 0
+      && this.mode !== 'shadow'
     ) {
       const reserveResult = this.economicEvaluator.reserveBudget(
         effectiveEconomic.cost,

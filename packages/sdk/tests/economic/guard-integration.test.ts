@@ -253,4 +253,54 @@ describe('guard() with economic policies', () => {
 
     expect(veto.getEconomicBudgetStatus()).toBeNull();
   });
+
+  it('shadow mode does not deduct budget', async () => {
+    writeFileSync(
+      join(VETO_DIR, 'veto.config.yaml'),
+      `
+version: "1.0"
+mode: "shadow"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+economic:
+  budgets:
+    - scope: "session"
+      limit: 50
+      currency: "USD"
+      window: "session"
+  cost_extraction:
+    default: "arguments.cost"
+`,
+      'utf-8',
+    );
+    const veto = await Veto.init({ configDir: VETO_DIR });
+
+    // Make several calls in shadow mode
+    for (let i = 0; i < 10; i++) {
+      await veto.guard('pay_tool', { cost: 10 }, {
+        economic: { cost: 10, currency: 'USD', protocol: 'custom' },
+      });
+    }
+
+    // Budget should NOT have been deducted in shadow mode
+    const status = veto.getEconomicBudgetStatus('session');
+    expect(status!.spent).toBe(0);
+    expect(status!.remaining).toBe(50);
+  });
+
+  it('denies NaN cost in guard() context', async () => {
+    writeConfig({ economic: ECONOMIC_50_USD });
+    const veto = await Veto.init({ configDir: VETO_DIR });
+
+    const result = await veto.guard('pay_tool', { cost: 10 }, {
+      economic: { cost: NaN, currency: 'USD', protocol: 'custom' },
+    });
+
+    expect(result.decision).toBe('deny');
+    expect(result.economicDenial).toBeDefined();
+  });
 });

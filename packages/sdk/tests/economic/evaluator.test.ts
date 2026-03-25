@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EconomicEvaluator } from '../../src/economic/evaluator.js';
 import { LocalBudgetEngine } from '../../src/economic/budget-engine.js';
-import type { EconomicContext, EconomicPolicyConfig } from '../../src/economic/types.js';
+import type { EconomicContext, EconomicPolicyConfig, BudgetScope } from '../../src/economic/types.js';
 
 const createMockLogger = () => ({
   debug: vi.fn(),
@@ -377,6 +377,109 @@ describe('EconomicEvaluator', () => {
         // No payer — should be fine since payer policy is not set
       };
       expect(noPayer.evaluate(ctx).decision).toBe('allow');
+    });
+  });
+
+  describe('NaN/invalid cost rejection', () => {
+    it('should deny NaN cost', () => {
+      const ctx: EconomicContext = {
+        cost: NaN,
+        currency: 'USD',
+        payer: 'wallet_0x123',
+        protocol: 'x402',
+      };
+      const result = evaluator.evaluate(ctx);
+      expect(result.decision).toBe('deny');
+      expect(result.denial?.message).toContain('Invalid cost');
+    });
+
+    it('should deny Infinity cost', () => {
+      const ctx: EconomicContext = {
+        cost: Infinity,
+        currency: 'USD',
+        payer: 'wallet_0x123',
+        protocol: 'x402',
+      };
+      const result = evaluator.evaluate(ctx);
+      expect(result.decision).toBe('deny');
+      expect(result.denial?.message).toContain('Invalid cost');
+    });
+
+    it('should deny negative cost', () => {
+      const ctx: EconomicContext = {
+        cost: -5,
+        currency: 'USD',
+        payer: 'wallet_0x123',
+        protocol: 'x402',
+      };
+      const result = evaluator.evaluate(ctx);
+      expect(result.decision).toBe('deny');
+      expect(result.denial?.message).toContain('Invalid cost');
+    });
+
+    it('should allow zero cost', () => {
+      const ctx: EconomicContext = {
+        cost: 0,
+        currency: 'USD',
+        payer: 'wallet_0x123',
+        protocol: 'x402',
+      };
+      const result = evaluator.evaluate(ctx);
+      expect(result.decision).toBe('allow');
+    });
+  });
+
+  describe('multi-scope reserve rollback', () => {
+    it('should rollback first scope when second scope fails', () => {
+      const multiScopePolicy: EconomicPolicyConfig = {
+        budgets: [
+          { scope: 'session', limit: 100, currency: 'USD', window: 'session' },
+          { scope: 'agent', limit: 20, currency: 'USD', window: 'session' },
+        ],
+      };
+      const engine = new LocalBudgetEngine({
+        budgets: multiScopePolicy.budgets!,
+        logger,
+      });
+      const multiEval = new EconomicEvaluator({
+        policy: multiScopePolicy,
+        budgetEngine: engine,
+        logger,
+      });
+
+      // $30 fits session (100) but not agent (20) — should deny and rollback session
+      const result = multiEval.reserveBudget(30, 'USD');
+      expect(result.decision).toBe('deny');
+
+      // Session scope should be rolled back to 0 spent
+      const sessionStatus = engine.getStatus('session');
+      expect(sessionStatus!.spent).toBe(0);
+      expect(sessionStatus!.remaining).toBe(100);
+    });
+
+    it('should keep all reservations when all scopes succeed', () => {
+      const multiScopePolicy: EconomicPolicyConfig = {
+        budgets: [
+          { scope: 'session', limit: 100, currency: 'USD', window: 'session' },
+          { scope: 'agent', limit: 50, currency: 'USD', window: 'session' },
+        ],
+      };
+      const engine = new LocalBudgetEngine({
+        budgets: multiScopePolicy.budgets!,
+        logger,
+      });
+      const multiEval = new EconomicEvaluator({
+        policy: multiScopePolicy,
+        budgetEngine: engine,
+        logger,
+      });
+
+      // $10 fits both scopes
+      const result = multiEval.reserveBudget(10, 'USD');
+      expect(result.decision).toBe('allow');
+
+      expect(engine.getStatus('session')!.spent).toBe(10);
+      expect(engine.getStatus('agent')!.spent).toBe(10);
     });
   });
 });

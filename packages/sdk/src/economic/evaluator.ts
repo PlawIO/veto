@@ -29,6 +29,7 @@
 
 import type {
   BudgetEngine,
+  BudgetScope,
   DenialReasonTemplates,
   EconomicContext,
   EconomicDenialDetails,
@@ -66,10 +67,36 @@ export class EconomicEvaluator {
   /**
    * Evaluate economic policies against the given context.
    *
-   * Checks run in order: payer → currency → budget.
+   * Checks run in order: cost validation → payer → currency → budget.
    * First failure short-circuits.
    */
   evaluate(economicContext: EconomicContext): EconomicEvaluationResult {
+    // 0. Cost validation — reject non-finite/negative costs hard
+    if (!Number.isFinite(economicContext.cost) || economicContext.cost < 0) {
+      this.logger.warn('Economic context has invalid cost', {
+        cost: economicContext.cost,
+        protocol: economicContext.protocol,
+      });
+      const firstBudget = this.policy.budgets?.[0];
+      const status = firstBudget
+        ? this.budgetEngine.getStatus(firstBudget.scope)
+        : null;
+      return {
+        decision: 'deny',
+        denial: {
+          reason: 'budget_exceeded',
+          cost: economicContext.cost,
+          currency: economicContext.currency,
+          budget_scope: firstBudget?.scope ?? 'session',
+          budget_limit: status?.limit ?? 0,
+          budget_spent: status?.spent ?? 0,
+          budget_remaining: status?.remaining ?? 0,
+          protocol: economicContext.protocol,
+          message: 'Invalid cost: must be a finite non-negative number',
+        },
+      };
+    }
+
     // 1. Payer check
     if (this.policy.payer) {
       const payerResult = this.checkPayer(economicContext, this.policy.payer);
@@ -136,14 +163,22 @@ export class EconomicEvaluator {
 
   /**
    * Reserve budget for a cost (atomic check + deduct).
+   * Rolls back previously reserved scopes if a later scope fails.
    */
   reserveBudget(cost: number, currency: string): EconomicEvaluationResult {
     const budgets = this.policy.budgets ?? [];
+    const reservedScopes: BudgetScope[] = [];
+
     for (const budgetConfig of budgets) {
       const result = this.budgetEngine.reserve(cost, currency, budgetConfig.scope);
       if (!result.allowed) {
+        // Rollback all previously reserved scopes
+        for (const scope of reservedScopes) {
+          this.budgetEngine.refund(cost, scope);
+        }
         return { decision: result.decision, denial: result.denial };
       }
+      reservedScopes.push(budgetConfig.scope);
     }
     return { decision: 'allow' };
   }
