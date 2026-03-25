@@ -63,12 +63,15 @@ function extractMandateData(obj: Record<string, unknown>): AP2MandateData | null
 
 function isMandateExpired(expiresAt: string): boolean {
   const expiry = new Date(expiresAt);
-  return !Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now();
+  // Fail-closed: treat unparseable dates as expired (payment boundary)
+  if (Number.isNaN(expiry.getTime())) return true;
+  return expiry.getTime() < Date.now();
 }
 
 function exceedsSpendingCap(cost: number, spendingCap?: number, spent?: number): boolean {
-  if (spendingCap == null || spent == null) return false;
-  return cost > (spendingCap - spent);
+  if (spendingCap == null) return false;
+  // If spent is unknown, assume 0 (fail-closed: enforce cap from scratch)
+  return cost > (spendingCap - (spent ?? 0));
 }
 
 /**

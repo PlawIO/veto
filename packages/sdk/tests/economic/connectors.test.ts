@@ -385,6 +385,15 @@ describe('AP2 Connector', () => {
       expect(connector.extract(response)).toBeNull();
     });
 
+    it('should fail closed for unparseable mandate expiry', () => {
+      const response = {
+        mandate_id: 'mdt_bad_expiry',
+        cost: 5.00,
+        expires_at: 'not-a-date',
+      };
+      expect(connector.extract(response)).toBeNull();
+    });
+
     it('should accept non-expired mandate', () => {
       const futureDate = new Date(Date.now() + 86400000).toISOString();
       const response = {
@@ -436,6 +445,15 @@ describe('AP2 Connector', () => {
       const ctx = connector.extract(response);
       expect(ctx).not.toBeNull();
       expect(ctx!.cost).toBe(15);
+    });
+
+    it('should enforce spending cap when spent is omitted', () => {
+      const response = {
+        mandate_id: 'mdt_missing_spent',
+        cost: 150,
+        spending_cap: 100,
+      };
+      expect(connector.extract(response)).toBeNull();
     });
 
     it('should allow when spending_cap is not present (no enforcement)', () => {
@@ -492,6 +510,30 @@ describe('AP2 Connector', () => {
           'x-ap2-mandate-id': 'mdt_expired',
           'x-ap2-cost': '5.00',
           'x-ap2-expires': '2020-01-01T00:00:00Z',
+        },
+      });
+      expect(connector.extract(res)).toBeNull();
+    });
+
+    it('should fail closed for unparseable x-ap2-expires header', () => {
+      const res = new Response(null, {
+        status: 200,
+        headers: {
+          'x-ap2-mandate-id': 'mdt_bad_expiry',
+          'x-ap2-cost': '5.00',
+          'x-ap2-expires': 'not-a-date',
+        },
+      });
+      expect(connector.extract(res)).toBeNull();
+    });
+
+    it('should enforce x-ap2-spending-cap when x-ap2-spent is absent', () => {
+      const res = new Response(null, {
+        status: 200,
+        headers: {
+          'x-ap2-mandate-id': 'mdt_missing_spent',
+          'x-ap2-cost': '150',
+          'x-ap2-spending-cap': '100',
         },
       });
       expect(connector.extract(res)).toBeNull();

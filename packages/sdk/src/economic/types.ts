@@ -41,6 +41,7 @@ export type EconomicDenialReason =
   | 'payer_missing'
   | 'payer_unauthorized'
   | 'currency_mismatch'
+  | 'invalid_cost'
   | 'connector_error';
 
 /**

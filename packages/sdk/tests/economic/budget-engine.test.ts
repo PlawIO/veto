@@ -189,8 +189,8 @@ describe('LocalBudgetEngine', () => {
   });
 
   describe('non-session scope warning', () => {
-    it('should warn about non-session scopes', () => {
-      const _engine = new LocalBudgetEngine({
+    it('should warn about and ignore non-session scopes', () => {
+      const scopedEngine = new LocalBudgetEngine({
         budgets: [
           { scope: 'agent', limit: 100, currency: 'USD', window: '24h' },
         ],
@@ -198,8 +198,13 @@ describe('LocalBudgetEngine', () => {
       });
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('only supports session scope'),
-        expect.any(Object),
+        expect.objectContaining({
+          scope: 'agent',
+          window: '24h',
+        }),
       );
+      expect(scopedEngine.getStatus('agent')).toBeNull();
+      expect(scopedEngine.check(10, 'USD', 'agent').decision).toBe('allow');
     });
   });
 });

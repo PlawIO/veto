@@ -84,7 +84,7 @@ export class EconomicEvaluator {
       return {
         decision: 'deny',
         denial: {
-          reason: 'budget_exceeded',
+          reason: 'invalid_cost',
           cost: economicContext.cost,
           currency: economicContext.currency,
           budget_scope: firstBudget?.scope ?? 'session',

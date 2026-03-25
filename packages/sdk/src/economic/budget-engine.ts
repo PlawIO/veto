@@ -38,10 +38,10 @@ export class LocalBudgetEngine implements BudgetEngine {
     this.logger = options.logger;
 
     for (const budget of options.budgets) {
-      if (budget.window !== 'session') {
+      if (budget.scope !== 'session') {
         this.logger.warn(
           'LocalBudgetEngine only supports session scope — ' +
-          `ignoring ${budget.scope} budget with window '${budget.window}'. ` +
+          `ignoring ${budget.scope} budget. ` +
           'Use Veto Cloud for agent/user/global scopes.',
           { scope: budget.scope, window: budget.window }
         );

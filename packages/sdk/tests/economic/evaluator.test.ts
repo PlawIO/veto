@@ -457,6 +457,7 @@ describe('EconomicEvaluator', () => {
       };
       const result = evaluator.evaluate(ctx);
       expect(result.decision).toBe('deny');
+      expect(result.denial?.reason).toBe('invalid_cost');
       expect(result.denial?.message).toContain('Invalid cost');
     });
 
@@ -497,6 +498,35 @@ describe('EconomicEvaluator', () => {
   });
 
   describe('multi-scope reserve rollback', () => {
+    // Multi-scope tests use a test engine that supports all scopes
+    // (LocalBudgetEngine correctly only supports session scope)
+    function createTestEngine(budgets: EconomicPolicyConfig['budgets']) {
+      const state = new Map<string, { spent: number; limit: number; currency: string; approval_threshold?: number }>();
+      for (const b of budgets ?? []) {
+        state.set(b.scope, { spent: 0, limit: b.limit, currency: b.currency, approval_threshold: b.approval_threshold });
+      }
+      return {
+        check(cost: number, currency: string, scope: BudgetScope) {
+          const b = state.get(scope);
+          if (!b) return { allowed: true, decision: 'allow' as const };
+          if (cost > b.limit - b.spent) return {
+            allowed: false, decision: 'deny' as const,
+            denial: { reason: 'budget_exceeded' as const, cost, currency, budget_scope: scope, budget_limit: b.limit, budget_spent: b.spent, budget_remaining: Math.max(0, b.limit - b.spent) },
+          };
+          return { allowed: true, decision: 'allow' as const };
+        },
+        reserve(cost: number, currency: string, scope: BudgetScope) {
+          const result = this.check(cost, currency, scope);
+          if (result.allowed) { const b = state.get(scope); if (b) b.spent += cost; }
+          return result;
+        },
+        record(cost: number, _currency: string, scope: BudgetScope) { const b = state.get(scope); if (b) b.spent += cost; },
+        refund(amount: number, scope: BudgetScope) { const b = state.get(scope); if (b) b.spent = Math.max(0, b.spent - amount); },
+        getStatus(scope: BudgetScope) { const b = state.get(scope); if (!b) return null; return { scope, spent: b.spent, limit: b.limit, remaining: Math.max(0, b.limit - b.spent), currency: b.currency }; },
+        reset(scope: BudgetScope) { const b = state.get(scope); if (b) b.spent = 0; },
+      };
+    }
+
     it('should rollback first scope when second scope fails', () => {
       const multiScopePolicy: EconomicPolicyConfig = {
         budgets: [
@@ -504,10 +534,7 @@ describe('EconomicEvaluator', () => {
           { scope: 'agent', limit: 20, currency: 'USD', window: 'session' },
         ],
       };
-      const engine = new LocalBudgetEngine({
-        budgets: multiScopePolicy.budgets!,
-        logger,
-      });
+      const engine = createTestEngine(multiScopePolicy.budgets);
       const multiEval = new EconomicEvaluator({
         policy: multiScopePolicy,
         budgetEngine: engine,
@@ -531,10 +558,7 @@ describe('EconomicEvaluator', () => {
           { scope: 'agent', limit: 50, currency: 'USD', window: 'session' },
         ],
       };
-      const engine = new LocalBudgetEngine({
-        budgets: multiScopePolicy.budgets!,
-        logger,
-      });
+      const engine = createTestEngine(multiScopePolicy.budgets);
       const multiEval = new EconomicEvaluator({
         policy: multiScopePolicy,
         budgetEngine: engine,
