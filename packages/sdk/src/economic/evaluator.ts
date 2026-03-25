@@ -212,7 +212,7 @@ export class EconomicEvaluator {
       .replace(/\{spent\}/g, String(denial.budget_spent))
       .replace(/\{remaining\}/g, String(denial.budget_remaining))
       .replace(/\{payer\}/g, denial.payer ?? 'unknown')
-      .replace(/\{threshold\}/g, String(denial.budget_limit));
+      .replace(/\{threshold\}/g, String(denial.approval_threshold ?? denial.budget_limit));
   }
 
   private checkPayer(

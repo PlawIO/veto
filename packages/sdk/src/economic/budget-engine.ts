@@ -186,6 +186,7 @@ export class LocalBudgetEngine implements BudgetEngine {
       budget_limit: budget.limit,
       budget_spent: budget.spent,
       budget_remaining: Math.max(0, budget.limit - budget.spent),
+      approval_threshold: budget.approval_threshold,
     };
   }
 }

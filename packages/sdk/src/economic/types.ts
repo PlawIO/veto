@@ -57,6 +57,8 @@ export interface EconomicDenialDetails {
   budget_limit: number;
   budget_spent: number;
   budget_remaining: number;
+  /** The approval threshold that was exceeded (for approval_required denials) */
+  approval_threshold?: number;
   payer?: string;
   protocol?: string;
   /** Rendered denial message from template (if configured) */

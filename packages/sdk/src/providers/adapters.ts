@@ -387,7 +387,9 @@ function parseMCPEconomicContext(
   if (cost === undefined || !Number.isFinite(cost) || cost < 0) return null;
 
   const currency = typeof data.currency === 'string' ? data.currency : 'USD';
-  const protocol = typeof data.protocol === 'string'
+  const VALID_PROTOCOLS = new Set<string>(['x402', 'mpp', 'ap2', 'custom']);
+  const protocol: EconomicProtocol = typeof data.protocol === 'string'
+      && VALID_PROTOCOLS.has(data.protocol)
     ? data.protocol as EconomicProtocol
     : 'custom';
   const payer = typeof data.payer === 'string' ? data.payer : undefined;

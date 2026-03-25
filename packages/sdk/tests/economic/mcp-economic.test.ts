@@ -143,4 +143,37 @@ describe('MCP Economic Context Extraction', () => {
     expect(ctx!.cost).toBe(1);
     expect(ctx!.currency).toBe('USD');
   });
+
+  it('should normalize invalid protocol to custom', () => {
+    const toolCall = {
+      name: 'api_call',
+      arguments: {
+        _meta: {
+          economic_context: {
+            cost: 5,
+            currency: 'USD',
+            protocol: 'invalid_garbage_protocol',
+          },
+        },
+      },
+    };
+    const ctx = extractMCPEconomicContext(toolCall);
+    expect(ctx).not.toBeNull();
+    expect(ctx!.protocol).toBe('custom');
+  });
+
+  it('should accept valid protocol values', () => {
+    for (const proto of ['x402', 'mpp', 'ap2', 'custom']) {
+      const toolCall = {
+        name: 'test',
+        arguments: {
+          _meta: {
+            economic_context: { cost: 1, currency: 'USD', protocol: proto },
+          },
+        },
+      };
+      const ctx = extractMCPEconomicContext(toolCall);
+      expect(ctx!.protocol).toBe(proto);
+    }
+  });
 });

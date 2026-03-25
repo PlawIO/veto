@@ -303,4 +303,41 @@ economic:
     expect(result.decision).toBe('deny');
     expect(result.economicDenial).toBeDefined();
   });
+
+  it('shadow mode economic denial sets shadowDecision', async () => {
+    writeFileSync(
+      join(VETO_DIR, 'veto.config.yaml'),
+      `
+version: "1.0"
+mode: "shadow"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+economic:
+  budgets:
+    - scope: "session"
+      limit: 50
+      currency: "USD"
+      window: "session"
+  cost_extraction:
+    default: "arguments.cost"
+`,
+      'utf-8',
+    );
+    const veto = await Veto.init({ configDir: VETO_DIR });
+
+    // Cost exceeds budget — in shadow mode should allow but set shadowDecision
+    const result = await veto.guard('pay_tool', { cost: 60 }, {
+      economic: { cost: 60, currency: 'USD', protocol: 'custom' },
+    });
+
+    expect(result.decision).toBe('allow');
+    expect(result.shadow).toBe(true);
+    expect(result.shadowDecision).toBe('deny');
+    expect(result.economicDenial).toBeDefined();
+    expect(result.economicDenial!.reason).toBe('budget_exceeded');
+  });
 });

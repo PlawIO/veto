@@ -106,6 +106,17 @@ describe('EconomicEvaluator', () => {
       expect(result.denial?.reason).toBe('approval_required');
     });
 
+    it('should include approval_threshold in denial details', () => {
+      const ctx: EconomicContext = {
+        cost: 60,
+        currency: 'USD',
+        payer: 'wallet_0x123',
+        protocol: 'x402',
+      };
+      const result = evaluator.evaluate(ctx);
+      expect(result.denial?.approval_threshold).toBe(50);
+    });
+
     it('should deny on currency mismatch', () => {
       const ctx: EconomicContext = {
         cost: 10,
@@ -281,6 +292,62 @@ describe('EconomicEvaluator', () => {
         budget_remaining: 100,
       });
       expect(message).toBeUndefined();
+    });
+
+    it('should render {threshold} with approval_threshold, not budget_limit', () => {
+      const withTemplates = new EconomicEvaluator({
+        policy: {
+          ...defaultPolicy,
+          denial_reasons: {
+            approval_required: 'Cost {cost} exceeds threshold {threshold} (limit is {limit})',
+          },
+        },
+        budgetEngine: new LocalBudgetEngine({
+          budgets: defaultPolicy.budgets!,
+          logger,
+        }),
+        logger,
+      });
+
+      const message = withTemplates.renderDenialMessage({
+        reason: 'approval_required',
+        cost: 60,
+        currency: 'USD',
+        budget_scope: 'session',
+        budget_limit: 100,
+        budget_spent: 0,
+        budget_remaining: 100,
+        approval_threshold: 50,
+      });
+      // {threshold} should be 50 (approval_threshold), NOT 100 (budget_limit)
+      expect(message).toBe('Cost 60 exceeds threshold 50 (limit is 100)');
+    });
+
+    it('should fallback {threshold} to budget_limit when approval_threshold is absent', () => {
+      const withTemplates = new EconomicEvaluator({
+        policy: {
+          ...defaultPolicy,
+          denial_reasons: {
+            budget_exceeded: 'Threshold: {threshold}',
+          },
+        },
+        budgetEngine: new LocalBudgetEngine({
+          budgets: defaultPolicy.budgets!,
+          logger,
+        }),
+        logger,
+      });
+
+      const message = withTemplates.renderDenialMessage({
+        reason: 'budget_exceeded',
+        cost: 150,
+        currency: 'USD',
+        budget_scope: 'session',
+        budget_limit: 100,
+        budget_spent: 0,
+        budget_remaining: 100,
+      });
+      expect(message).toBe('Threshold: 100');
     });
   });
 

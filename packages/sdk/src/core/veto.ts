@@ -3397,12 +3397,13 @@ export class Veto {
         });
         this.emitEconomicEvent(toolName, args, econResult, context.economic);
         return {
-          decision: econResult.decision,
+          decision: this.mode === 'shadow' ? 'allow' : econResult.decision,
           reason: econResult.denial
             ? `Economic: ${econResult.denial.reason}`
             : 'Economic authorization denied',
           economicDenial: econResult.denial,
           shadow: this.mode === 'shadow' ? true : undefined,
+          shadowDecision: this.mode === 'shadow' ? econResult.decision : undefined,
         };
       }
     }
@@ -3428,12 +3429,13 @@ export class Veto {
           });
           this.emitEconomicEvent(toolName, args, econResult, implicitEconomicContext);
           return {
-            decision: econResult.decision,
+            decision: this.mode === 'shadow' ? 'allow' : econResult.decision,
             reason: econResult.denial
               ? `Economic: ${econResult.denial.reason}`
               : 'Economic authorization denied',
             economicDenial: econResult.denial,
             shadow: this.mode === 'shadow' ? true : undefined,
+            shadowDecision: this.mode === 'shadow' ? econResult.decision : undefined,
           };
         }
       }
