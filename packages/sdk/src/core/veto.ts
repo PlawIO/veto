@@ -26,6 +26,9 @@ import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
 import { BudgetTracker, BudgetExceededError, type BudgetStatus } from './budget.js';
 import { Interceptor, ToolCallDeniedError, type InterceptionResult, type DenialDetails } from './interceptor.js';
+import type { EconomicContext, EconomicDenialDetails, EconomicPolicyConfig, BudgetScope, EconomicBudgetStatus } from '../economic/types.js';
+import { EconomicEvaluator, type EconomicEvaluationResult } from '../economic/evaluator.js';
+import { LocalBudgetEngine } from '../economic/budget-engine.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
@@ -107,6 +110,8 @@ export interface GuardContext {
   market?: Record<string, unknown>;
   budget?: Record<string, unknown>;
   portfolio?: Record<string, unknown>;
+  /** Economic context from a protocol connector (x402, MPP, AP2) */
+  economic?: EconomicContext;
 }
 
 /**
@@ -120,6 +125,8 @@ export interface GuardResult {
   approvalId?: string;
   shadow?: boolean;
   shadowDecision?: string;
+  /** Structured economic denial details (present when economic policy denies) */
+  economicDenial?: EconomicDenialDetails;
 }
 
 const RESERVED_LOCAL_CONTEXT_KEYS = new Set(['market', 'budget', 'portfolio']);
@@ -196,6 +203,8 @@ interface VetoConfigFile {
       format?: 'slack' | 'pagerduty' | 'generic' | 'cef';
     };
   };
+  /** Economic authorization policy (x402, MPP, AP2 support) */
+  economic?: EconomicPolicyConfig;
 }
 
 /**
@@ -372,6 +381,8 @@ export class Veto {
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker: HistoryTracker;
   private readonly budgetTracker: BudgetTracker | null;
+  private readonly economicEvaluator: EconomicEvaluator | null;
+  private readonly economicBudgetEngine: LocalBudgetEngine | null;
   private readonly interceptor: Interceptor;
   private readonly outputValidator: OutputValidator;
   private readonly eventWebhookEmitter: EventWebhookEmitter;
@@ -682,6 +693,28 @@ export class Veto {
       });
     } else {
       this.budgetTracker = null;
+    }
+
+    // Initialize economic evaluator (if configured)
+    if (config.economic?.budgets?.length) {
+      const localBudgetEngine = new LocalBudgetEngine({
+        budgets: config.economic.budgets,
+        logger: this.logger,
+      });
+      this.economicBudgetEngine = localBudgetEngine;
+      this.economicEvaluator = new EconomicEvaluator({
+        policy: config.economic,
+        budgetEngine: localBudgetEngine,
+        logger: this.logger,
+      });
+      this.logger.info('Economic authorization enabled', {
+        budgets: config.economic.budgets.length,
+        protocols: ['x402', 'mpp', 'ap2'],
+        payer_required: config.economic.payer?.required ?? false,
+      });
+    } else {
+      this.economicEvaluator = null;
+      this.economicBudgetEngine = null;
     }
 
     // Initialize interceptor
@@ -2840,6 +2873,56 @@ export class Veto {
     this.eventWebhookEmitter.emit(event);
   }
 
+  /**
+   * Emit a webhook event for economic authorization outcomes.
+   *
+   * Maps economic evaluation results to the appropriate webhook event type:
+   * - budget_exceeded → 'budget_exceeded'
+   * - approval_required → 'approval_triggered'
+   * - budget_warning (>80% utilization on allow) → 'budget_warning'
+   * - spend_committed (successful reservation) → 'spend_committed'
+   */
+  private emitEconomicEvent(
+    toolName: string,
+    args: Record<string, unknown>,
+    econResult: EconomicEvaluationResult,
+    economicContext: EconomicContext,
+    forceType?: VetoWebhookEventType
+  ): void {
+    let eventType: VetoWebhookEventType;
+    if (forceType) {
+      eventType = forceType;
+    } else if (econResult.denial?.reason === 'budget_exceeded') {
+      eventType = 'budget_exceeded';
+    } else if (econResult.denial?.reason === 'approval_required') {
+      eventType = 'approval_triggered';
+    } else {
+      eventType = 'deny';
+    }
+
+    const event: VetoWebhookEvent = {
+      eventType,
+      toolName,
+      arguments: args,
+      decision: econResult.decision,
+      reason: econResult.denial?.reason,
+      severity: eventType === 'budget_exceeded' ? 'high' : 'medium',
+      timestamp: new Date().toISOString(),
+      shadow: this.mode === 'shadow' ? true : undefined,
+      economic: {
+        cost: economicContext.cost,
+        currency: economicContext.currency,
+        protocol: economicContext.protocol,
+        payer: economicContext.payer,
+        budget_spent: econResult.denial?.budget_spent,
+        budget_limit: econResult.denial?.budget_limit,
+        budget_remaining: econResult.denial?.budget_remaining,
+      },
+    };
+
+    this.eventWebhookEmitter.emit(event);
+  }
+
   private toGuardResult(result: ValidationResult): GuardResult {
     const metadata = result.metadata;
     const ruleId = this.extractMetadataString(metadata, ['ruleId', 'rule_id']);
@@ -3299,6 +3382,62 @@ export class Veto {
     args: Record<string, unknown>,
     context: GuardContext = {}
   ): Promise<GuardResult> {
+    // Economic evaluation runs BEFORE behavioral rules.
+    // Economic deny takes priority — if the agent can't afford it, rules don't matter.
+    if (this.economicEvaluator && context.economic) {
+      const econResult = this.economicEvaluator.evaluate(context.economic);
+      if (econResult.decision !== 'allow') {
+        this.logger.warn('Economic authorization denied', {
+          toolName,
+          decision: econResult.decision,
+          reason: econResult.denial?.reason,
+          cost: context.economic.cost,
+          protocol: context.economic.protocol,
+        });
+        this.emitEconomicEvent(toolName, args, econResult, context.economic);
+        return {
+          decision: econResult.decision,
+          reason: econResult.denial
+            ? `Economic: ${econResult.denial.reason}`
+            : 'Economic authorization denied',
+          economicDenial: econResult.denial,
+          shadow: this.mode === 'shadow' ? true : undefined,
+        };
+      }
+    }
+
+    // If economic evaluator is configured and can resolve cost from args
+    // (no explicit EconomicContext provided, but cost_extraction is configured)
+    let implicitEconomicContext: EconomicContext | undefined;
+    if (this.economicEvaluator && !context.economic) {
+      const resolvedCost = this.economicEvaluator.resolveCost(toolName, args);
+      if (resolvedCost !== undefined && resolvedCost > 0) {
+        implicitEconomicContext = {
+          cost: resolvedCost,
+          currency: 'USD', // Default currency for implicit extraction
+          protocol: 'custom',
+        };
+        const econResult = this.economicEvaluator.evaluate(implicitEconomicContext);
+        if (econResult.decision !== 'allow') {
+          this.logger.warn('Economic authorization denied (implicit cost)', {
+            toolName,
+            decision: econResult.decision,
+            reason: econResult.denial?.reason,
+            cost: resolvedCost,
+          });
+          this.emitEconomicEvent(toolName, args, econResult, implicitEconomicContext);
+          return {
+            decision: econResult.decision,
+            reason: econResult.denial
+              ? `Economic: ${econResult.denial.reason}`
+              : 'Economic authorization denied',
+            economicDenial: econResult.denial,
+            shadow: this.mode === 'shadow' ? true : undefined,
+          };
+        }
+      }
+    }
+
     const customContext: Record<string, unknown> = {
       ...(context.custom ?? {}),
     };
@@ -3353,7 +3492,35 @@ export class Veto {
       aggregatedResult.totalDurationMs
     );
 
-    return this.toGuardResult(validationResult);
+    // If behavioral rules allow and economic context exists, reserve budget
+    const behavioralResult = this.toGuardResult(validationResult);
+    const effectiveEconomic = context.economic ?? implicitEconomicContext;
+    if (
+      behavioralResult.decision === 'allow'
+      && this.economicEvaluator
+      && effectiveEconomic
+      && effectiveEconomic.cost > 0
+    ) {
+      const reserveResult = this.economicEvaluator.reserveBudget(
+        effectiveEconomic.cost,
+        effectiveEconomic.currency,
+      );
+      if (reserveResult.decision !== 'allow') {
+        this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic);
+        return {
+          ...behavioralResult,
+          decision: reserveResult.decision,
+          reason: reserveResult.denial
+            ? `Economic: ${reserveResult.denial.reason}`
+            : 'Budget reservation failed',
+          economicDenial: reserveResult.denial,
+        };
+      }
+      // Emit spend_committed event on successful reservation
+      this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic, 'spend_committed');
+    }
+
+    return behavioralResult;
   }
 
 
@@ -3508,6 +3675,21 @@ export class Veto {
 
   resetBudget(): void {
     this.budgetTracker?.reset();
+  }
+
+  /**
+   * Get current economic budget status for a scope.
+   * Returns null if no economic policy is configured.
+   */
+  getEconomicBudgetStatus(scope: BudgetScope = 'session'): EconomicBudgetStatus | null {
+    return this.economicBudgetEngine?.getStatus(scope) ?? null;
+  }
+
+  /**
+   * Reset economic budget for a scope.
+   */
+  resetEconomicBudget(scope: BudgetScope = 'session'): void {
+    this.economicBudgetEngine?.reset(scope);
   }
 
   dispose(): void {

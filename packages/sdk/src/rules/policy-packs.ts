@@ -10,6 +10,7 @@ const BUILT_IN_POLICY_PACK_FILE_NAMES = {
   '@veto/data-access': 'data-access.yaml',
   '@veto/communication': 'communication.yaml',
   '@veto/deployment': 'deployment.yaml',
+  '@veto/economic-agent': 'economic-agent.yaml',
 } as const;
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
