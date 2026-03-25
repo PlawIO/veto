@@ -133,6 +133,7 @@ const result = await veto.guard(
   }
 );
 // result.decision: 'allow' | 'deny' | 'require_approval'
+// (YAML uses action: block/ask — guard() returns the resolved decision)
 ```
 
 Built-in protocol connectors for x402 (HTTP 402), Stripe MPP, and Google AP2. Session budgets enforced locally; agent/user/global budgets via Veto Cloud.
