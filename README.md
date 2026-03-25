@@ -22,8 +22,8 @@ Stop agents from deleting files, leaking secrets, or pushing to prod — without
 AI agents can execute code, call APIs, and modify production systems. Veto is the permission layer that sits between every agent action and execution — validating, blocking, or routing to human approval before anything runs.
 
 ```typescript
-const veto = await Veto.init();           // loads ./veto/veto.config.yaml + rules
-const guarded = veto.wrap(tools);         // inject guardrails — types preserved
+const veto = await Veto.init(); // loads ./veto/veto.config.yaml + rules
+const guarded = veto.wrap(tools); // inject guardrails — types preserved
 // pass guarded to your agent. done.
 ```
 
@@ -48,11 +48,11 @@ The agent is unaware it's being governed. Your tools are unchanged. No behavior 
 
 ## Packages
 
-| Package | Language | Install | Description |
-|---------|----------|---------|-------------|
-| [`veto-sdk`](./packages/sdk) | TypeScript | `npm install veto-sdk` | SDK for guarded agentic apps |
-| [`veto`](./packages/sdk-python) | Python | `pip install veto` | Same API, all major LLM providers |
-| [`veto-cli`](./packages/cli) | TypeScript | `npm install -g veto-cli` | Interactive studio + headless automation |
+| Package                         | Language   | Install                   | Description                              |
+| ------------------------------- | ---------- | ------------------------- | ---------------------------------------- |
+| [`veto-sdk`](./packages/sdk)    | TypeScript | `npm install veto-sdk`    | SDK for guarded agentic apps             |
+| [`veto`](./packages/sdk-python) | Python     | `pip install veto`        | Same API, all major LLM providers        |
+| [`veto-cli`](./packages/cli)    | TypeScript | `npm install -g veto-cli` | Interactive studio + headless automation |
 
 ## Quick start
 
@@ -64,10 +64,10 @@ npx veto init       # creates ./veto/veto.config.yaml + default rules
 ```
 
 ```typescript
-import { Veto } from 'veto-sdk';
+import { Veto } from "veto-sdk";
 
 const veto = await Veto.init();
-const guarded = veto.wrap(myTools);  // LangChain, Vercel AI SDK, or any custom tools
+const guarded = veto.wrap(myTools); // LangChain, Vercel AI SDK, or any custom tools
 ```
 
 ### Python
@@ -109,6 +109,36 @@ rules:
 Actions: `block` · `allow` · `warn` · `log` · `ask` (human-in-the-loop)
 
 → [Full TypeScript SDK docs](./packages/sdk/README.md) · [Python SDK docs](./packages/sdk-python/README.md)
+
+## Economic authorization
+
+For agents that spend money — trading bots, paid API calls, SaaS billing — Veto adds cost-aware policy enforcement.
+
+```yaml
+# veto.config.yaml
+extends: "@veto/economic-agent"
+```
+
+```typescript
+const result = await veto.guard(
+  "purchase",
+  { item: "GPU" },
+  {
+    economic: {
+      cost: 42.5,
+      currency: "USD",
+      payer: "team-wallet",
+      protocol: "custom",
+    },
+  }
+);
+// result.decision: 'allow' | 'deny' | 'require_approval'
+// (YAML uses action: block/ask — guard() returns the resolved decision)
+```
+
+Built-in protocol connectors for x402 (HTTP 402), Stripe MPP, and Google AP2. Session budgets enforced locally; agent/user/global budgets via Veto Cloud.
+
+[Economic Authorization Guide →](https://docs.veto.so/docs/guides/economic-authorization)
 
 ## CLI + Studio
 
