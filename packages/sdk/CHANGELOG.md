@@ -1,5 +1,23 @@
 # veto-sdk
 
+## 2.1.0
+
+### Minor Changes
+
+- [#161](https://github.com/PlawIO/veto/pull/161) [`7207342`](https://github.com/PlawIO/veto/commit/720734208c5b8a783e461a253691aded148dcba6) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add economic authorization module with x402, Stripe MPP, and Google AP2 protocol support.
+
+  - Protocol connectors with `extract()` and `wrapFetch()` for automatic HTTP interception
+  - `EconomicEvaluator` with payer validation, currency matching, budget enforcement, and approval thresholds
+  - `LocalBudgetEngine` for in-memory session budget tracking
+  - `guard()` integration: economic evaluation runs before behavioral rules, auto-reserves budget on allow
+  - `getEconomicBudgetStatus()` and `resetEconomicBudget()` public API
+  - MCP economic context extraction via `extractMCPEconomicContext()`
+  - Policy IR schema validation for economic config sections
+  - Denial reason template rendering with `{variable}` interpolation
+  - AP2 spending cap enforcement and category documentation
+  - Economic webhook events: `budget_warning`, `approval_triggered`, `spend_committed`, `protocol_detected`
+  - `@veto/economic-agent` built-in policy pack
+
 ## 2.0.0
 
 ### Major Changes
