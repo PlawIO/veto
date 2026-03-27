@@ -21,7 +21,7 @@ env:
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     permissions:
       contents: write
@@ -129,7 +129,7 @@ jobs:
   # Manual release option
   release-manual:
     name: Manual Release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true'
     permissions:

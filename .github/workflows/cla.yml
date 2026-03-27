@@ -15,7 +15,7 @@ permissions:
 jobs:
   cla-assistant:
     name: CLA Assistant
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: |
       (github.event.comment.body == 'recheck' ||
        github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
