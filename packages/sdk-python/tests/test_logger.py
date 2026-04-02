@@ -2,6 +2,7 @@
 Tests for Logger utilities.
 """
 
+import pytest
 
 from veto.utils.logger import (
     create_logger,
@@ -12,6 +13,7 @@ from veto.utils.logger import (
     ConsoleLogger,
     SilentLogger,
     MemoryLogger,
+    StreamLogger,
 )
 
 
@@ -76,6 +78,24 @@ class TestConsoleLogger:
         """create_logger should return ConsoleLogger."""
         logger = create_logger("debug")
         assert isinstance(logger, ConsoleLogger)
+
+
+class TestStreamLogger:
+    """Tests for StreamLogger."""
+
+    def test_warn_and_error_still_reach_stderr(self, capsys: pytest.CaptureFixture[str]):
+        """Stream mode should still surface operational warnings and errors."""
+        logger = StreamLogger("compact")
+
+        logger.warn("Warn message", {"component": "sdk"})
+        logger.error("Error message", {"component": "sdk"}, RuntimeError("boom"))
+
+        captured = capsys.readouterr()
+        assert "WARN" in captured.err
+        assert "Warn message" in captured.err
+        assert "ERROR" in captured.err
+        assert "Error message" in captured.err
+        assert "boom" in captured.err
 
 
 class TestSilentLogger:

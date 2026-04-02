@@ -13,6 +13,25 @@ from veto.cloud.types import ValidationResponse, ToolRegistrationResponse, Appro
 from veto.types.config import ValidationContext, ValidationResult
 
 
+@pytest.fixture(autouse=True)
+async def close_initialized_clients(monkeypatch: pytest.MonkeyPatch):
+    """Close real cloud clients created by Veto.init during each test."""
+    original_init = Veto.init.__func__
+    created_clients = []
+
+    async def tracked_init(cls, options=None):
+        veto = await original_init(cls, options)
+        created_clients.append(veto._cloud_client)
+        return veto
+
+    monkeypatch.setattr(Veto, "init", classmethod(tracked_init))
+
+    yield
+
+    for client in created_clients:
+        await client.close()
+
+
 @pytest.fixture
 def mock_cloud_client():
     """Create a mock cloud client for testing."""
@@ -90,6 +109,14 @@ class TestVetoInit:
                 os.environ.pop("VETO_API_KEY", None)
             else:
                 os.environ["VETO_API_KEY"] = old_key
+
+    async def test_init_accepts_stream_log_level_from_env(self, monkeypatch: pytest.MonkeyPatch):
+        """Should honor VETO_LOG_LEVEL=stream."""
+        monkeypatch.setenv("VETO_LOG_LEVEL", "stream")
+
+        veto = await Veto.init(VetoOptions(api_key="test-api-key"))
+
+        assert veto._resolved_log_level == "stream"
 
 
 class TestVetoWrap:

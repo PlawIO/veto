@@ -18,8 +18,11 @@ if TYPE_CHECKING:
     from veto.utils.logger import Logger
 
 
+# Stream log output mode for decision streaming
+StreamLogMode = Literal["compact", "verbose"]
+
 # Log level for Veto operations
-LogLevel = Literal["debug", "info", "warn", "error", "silent"]
+LogLevel = Literal["debug", "info", "stream", "warn", "error", "silent"]
 
 # Validation decision for a tool call
 ValidationDecision = Literal["allow", "deny", "modify", "require_approval"]

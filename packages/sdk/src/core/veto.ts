@@ -18,9 +18,13 @@ import type {
   ValidationContext,
   ValidationResult,
   LogLevel,
+  StreamLogMode,
   ToolCallHistoryEntry,
 } from '../types/config.js';
-import { createLogger, type Logger } from '../utils/logger.js';
+import {
+  createLogger,
+  type Logger,
+} from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
 import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
@@ -184,6 +188,7 @@ interface VetoConfigFile {
   };
   logging?: {
     level?: LogLevel;
+    streamMode?: StreamLogMode;
   };
   rules?: {
     directory?: string;
@@ -282,6 +287,12 @@ export interface VetoOptions {
    * Can also be set via VETO_LOG_LEVEL environment variable.
    */
   logLevel?: LogLevel;
+
+  /**
+   * Decision stream formatting mode when logLevel is set to "stream".
+   * Can also be configured with VETO_LOG=stream:verbose.
+   */
+  streamMode?: StreamLogMode;
 
   /**
    * Session ID for tracking.
@@ -457,10 +468,18 @@ export class Veto {
       ? undefined
       : Veto.parseEnvMode(process.env.VETO_MODE);
     this.mode = options.mode ?? config.mode ?? envMode ?? 'strict';
+    const envLogSetting = this.browserMode
+      ? undefined
+      : Veto.parseEnvLogSetting(process.env.VETO_LOG);
     const envLogLevel = this.browserMode
       ? undefined
       : Veto.parseEnvLogLevel(process.env.VETO_LOG_LEVEL);
-    this.resolvedLogLevel = options.logLevel ?? envLogLevel ?? config.logging?.level ?? 'info';
+    const explicitLogLevel = Veto.resolveExplicitLogLevel(options);
+    this.resolvedLogLevel = explicitLogLevel
+      ?? envLogSetting?.level
+      ?? envLogLevel
+      ?? config.logging?.level
+      ?? 'info';
 
     const explicitValidationMode = config.validation?.mode;
     const cloudApiKey = options.apiKey
@@ -769,8 +788,11 @@ export class Veto {
     const configDir = pathModule.resolve(options.configDir ?? './veto');
 
     // Determine log level
-    const envLogLevel = process.env.VETO_LOG_LEVEL as LogLevel | undefined;
-    let logLevel: LogLevel = options.logLevel ?? envLogLevel ?? 'info';
+    const envLogSetting = Veto.parseEnvLogSetting(process.env.VETO_LOG);
+    const envLogLevel = Veto.parseEnvLogLevel(process.env.VETO_LOG_LEVEL);
+    const explicitLogLevel = Veto.resolveExplicitLogLevel(options);
+    let logLevel: LogLevel = explicitLogLevel ?? envLogSetting?.level ?? envLogLevel ?? 'info';
+    let streamMode: StreamLogMode = options.streamMode ?? envLogSetting?.streamMode ?? 'compact';
 
     // Load config file
     const configPath = pathModule.join(configDir, 'veto.config.yaml');
@@ -779,10 +801,18 @@ export class Veto {
     if (fsModule.existsSync(configPath)) {
       const configContent = fsModule.readFileSync(configPath, 'utf-8');
       config = parseYaml(configContent) as VetoConfigFile;
-      logLevel = options.logLevel ?? envLogLevel ?? config.logging?.level ?? 'info';
+      logLevel = explicitLogLevel
+        ?? envLogSetting?.level
+        ?? envLogLevel
+        ?? config.logging?.level
+        ?? 'info';
+      streamMode = options.streamMode
+        ?? envLogSetting?.streamMode
+        ?? config.logging?.streamMode
+        ?? 'compact';
     }
 
-    const logger = createLogger(logLevel);
+    const logger = createLogger(logLevel, streamMode);
 
     if (!fsModule.existsSync(configPath)) {
       logger.warn('Veto config not found. Run "npx veto init" to initialize.', {
@@ -817,8 +847,17 @@ export class Veto {
   }
 
   static fromRules(options: VetoBrowserOptions): Veto {
-    const logLevel = options.logLevel ?? 'warn';
-    const logger = createLogger(logLevel);
+    const envLogSetting = Veto.parseEnvLogSetting(
+      typeof process === 'undefined' ? undefined : process.env.VETO_LOG
+    );
+    const logLevel = Veto.resolveExplicitLogLevel(options)
+      ?? envLogSetting?.level
+      ?? Veto.parseEnvLogLevel(
+        typeof process === 'undefined' ? undefined : process.env.VETO_LOG_LEVEL
+      )
+      ?? 'warn';
+    const streamMode = options.streamMode ?? envLogSetting?.streamMode ?? 'compact';
+    const logger = createLogger(logLevel, streamMode);
     const envMode = Veto.parseEnvMode(
       typeof process === 'undefined' ? undefined : process.env.VETO_MODE
     );
@@ -845,7 +884,7 @@ export class Veto {
             baseUrl: options.endpoint,
           }
         : undefined,
-      logging: { level: logLevel },
+      logging: { level: logLevel, streamMode },
       budget: options.budget,
       costs: options.costs,
       approval: options.approval,
@@ -860,6 +899,7 @@ export class Veto {
     const vetoOptions: VetoOptions = {
       mode: resolvedMode,
       logLevel,
+      streamMode,
       sessionId: options.sessionId,
       agentId: options.agentId,
       userId: options.userId,
@@ -875,7 +915,16 @@ export class Veto {
   }
 
   static async fromCloud(options: VetoCloudInitOptions): Promise<Veto> {
-    const logger = createLogger('warn');
+    const envLogSetting = Veto.parseEnvLogSetting(
+      typeof process === 'undefined' ? undefined : process.env.VETO_LOG
+    );
+    const logLevel = envLogSetting?.level
+      ?? Veto.parseEnvLogLevel(
+        typeof process === 'undefined' ? undefined : process.env.VETO_LOG_LEVEL
+      )
+      ?? 'warn';
+    const streamMode = envLogSetting?.streamMode ?? 'compact';
+    const logger = createLogger(logLevel, streamMode);
     const cloudClient = new VetoCloudClient({
       config: {
         apiKey: options.apiKey,
@@ -904,10 +953,42 @@ export class Veto {
     return undefined;
   }
 
+  private static parseEnvLogSetting(value: string | undefined): {
+    level: LogLevel;
+    streamMode: StreamLogMode;
+  } | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'stream') {
+      return { level: 'stream', streamMode: 'compact' };
+    }
+
+    if (normalized === 'stream:verbose') {
+      return { level: 'stream', streamMode: 'verbose' };
+    }
+
+    return undefined;
+  }
+
+  private static resolveExplicitLogLevel(options: {
+    logLevel?: LogLevel;
+    stream?: boolean;
+  }): LogLevel | undefined {
+    if (options.stream) {
+      return 'stream';
+    }
+
+    return options.logLevel;
+  }
+
   private static parseEnvLogLevel(level: string | undefined): LogLevel | undefined {
     if (
       level === 'debug'
       || level === 'info'
+      || level === 'stream'
       || level === 'warn'
       || level === 'error'
       || level === 'silent'

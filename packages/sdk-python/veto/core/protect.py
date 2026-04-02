@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Literal, Optional, Protocol, TypeVar, Union, overload, runtime_checkable
+from typing import Any, Literal, Optional, Protocol, TypeVar, Union, cast, overload, runtime_checkable
 
 import yaml
 
 from veto.core.veto import Veto, VetoOptions
+from veto.types.config import LogLevel
 
 ProtectMode = Literal["strict", "log", "shadow"]
 
@@ -270,6 +271,24 @@ def _build_init_decision(
     return "allow_all", [], [], []
 
 
+def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[LogLevel]:
+    if options.get("stream"):
+        return "stream"
+
+    raw_log_level = options.get("log_level")
+    if isinstance(raw_log_level, str) and raw_log_level in {
+        "debug",
+        "info",
+        "stream",
+        "warn",
+        "error",
+        "silent",
+    }:
+        return cast(LogLevel, raw_log_level)
+
+    return None
+
+
 def _create_cache_key(
     options: dict[str, Any],
     source: ProtectInitSource,
@@ -284,7 +303,9 @@ def _create_cache_key(
         "api_key": options.get("api_key"),
         "endpoint": options.get("endpoint"),
         "mode": options.get("mode"),
-        "log_level": options.get("log_level"),
+        "log_level": _resolve_protect_log_level(options),
+        "stream": options.get("stream"),
+        "stream_mode": options.get("stream_mode"),
         "session_id": options.get("session_id"),
         "agent_id": options.get("agent_id"),
         "user_id": options.get("user_id"),
@@ -303,7 +324,8 @@ def _create_allow_all_instance(options: dict[str, Any]) -> Veto:
         rules=[],
         output_rules=[],
         mode=options.get("mode"),
-        log_level=options.get("log_level"),
+        log_level=_resolve_protect_log_level(options),
+        stream_mode=options.get("stream_mode"),
         session_id=options.get("session_id"),
         agent_id=options.get("agent_id"),
         user_id=options.get("user_id"),
@@ -361,7 +383,8 @@ async def _initialize_veto(
                 rules=inline_rules,
                 output_rules=inline_output_rules,
                 mode=options.get("mode"),
-                log_level=options.get("log_level"),
+                log_level=_resolve_protect_log_level(options),
+                stream_mode=options.get("stream_mode"),
                 session_id=options.get("session_id"),
                 agent_id=options.get("agent_id"),
                 user_id=options.get("user_id"),
@@ -375,7 +398,8 @@ async def _initialize_veto(
                 VetoOptions(
                     config_dir=options.get("config_dir"),
                     mode=options.get("mode"),
-                    log_level=options.get("log_level"),
+                    log_level=_resolve_protect_log_level(options),
+                    stream_mode=options.get("stream_mode"),
                     session_id=options.get("session_id"),
                     agent_id=options.get("agent_id"),
                     user_id=options.get("user_id"),
@@ -427,7 +451,7 @@ async def protect(tools: Union[T, list[T]], **kwargs: Any) -> Union[T, list[T]]:
             source=source,
             rules=inline_rules,
             packs=packs,
-            log_level=normalized_options.get("log_level"),
+            log_level=_resolve_protect_log_level(normalized_options),
         )
 
     if not kwargs:

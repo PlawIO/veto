@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { Rule, OutputRule } from '../rules/types.js';
 import { normalizePolicyPackName, resolveBuiltInPolicyPackPath } from '../rules/policy-packs.js';
-import type { LogLevel, ValidationContext } from '../types/config.js';
+import type { LogLevel, StreamLogMode, ValidationContext } from '../types/config.js';
 import type { BudgetConfig, ToolCostMap } from './budget.js';
 import { collectHeuristicPacksForToolNames } from './tool-pack-heuristics.js';
 import { Veto, type VetoMode } from './veto.js';
@@ -21,6 +21,8 @@ export interface ProtectOptions {
   // Behavior
   mode?: ProtectMode;
   logLevel?: LogLevel;
+  stream?: boolean;
+  streamMode?: StreamLogMode;
 
   // Tracking
   sessionId?: string;
@@ -186,6 +188,10 @@ function buildInitDecision<T extends { name: string }>(
   };
 }
 
+function resolveProtectLogLevel(options: ProtectOptions): LogLevel | undefined {
+  return options.stream ? 'stream' : options.logLevel;
+}
+
 function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision): string {
   return stableSerialize({
     source: decision.source,
@@ -194,7 +200,9 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     apiKey: options.apiKey,
     endpoint: options.endpoint,
     mode: options.mode,
-    logLevel: options.logLevel,
+    logLevel: resolveProtectLogLevel(options),
+    stream: options.stream,
+    streamMode: options.streamMode,
     sessionId: options.sessionId,
     agentId: options.agentId,
     userId: options.userId,
@@ -216,7 +224,9 @@ function createAllowAllInstance(options: ProtectOptions): Veto {
     rules: [],
     outputRules: [],
     mode: options.mode,
-    logLevel: options.logLevel,
+    logLevel: resolveProtectLogLevel(options),
+    stream: options.stream,
+    streamMode: options.streamMode,
     sessionId: options.sessionId,
     agentId: options.agentId,
     userId: options.userId,
@@ -281,7 +291,9 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
           rules: inlineRules.rules,
           outputRules: inlineRules.outputRules,
           mode: options.mode,
-          logLevel: options.logLevel,
+          logLevel: resolveProtectLogLevel(options),
+          stream: options.stream,
+          streamMode: options.streamMode,
           sessionId: options.sessionId,
           agentId: options.agentId,
           userId: options.userId,
@@ -301,7 +313,8 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
         instance = await Veto.init({
           configDir: options.configDir,
           mode: options.mode,
-          logLevel: options.logLevel,
+          logLevel: resolveProtectLogLevel(options),
+          streamMode: options.streamMode,
           sessionId: options.sessionId,
           agentId: options.agentId,
           userId: options.userId,

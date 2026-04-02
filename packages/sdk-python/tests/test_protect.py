@@ -118,6 +118,50 @@ async def test_protect_rules_uses_from_rules(isolated_cwd, monkeypatch: pytest.M
     assert from_rules_mock.call_count == 1
 
 
+async def test_protect_stream_options_map_to_decision_stream_logger(
+    isolated_cwd, monkeypatch: pytest.MonkeyPatch
+):
+    _ = isolated_cwd
+    tool = MockTool("stream_tool")
+    from_rules_mock = MagicMock(return_value=FakeVeto())
+    monkeypatch.setattr(protect_module.Veto, "from_rules", from_rules_mock)
+
+    await protect(
+        [tool],
+        rules=[],
+        stream=True,
+        stream_mode="verbose",
+        log_level="silent",
+    )
+
+    assert from_rules_mock.call_count == 1
+    assert from_rules_mock.call_args.kwargs["log_level"] == "stream"
+    assert from_rules_mock.call_args.kwargs["stream_mode"] == "verbose"
+
+
+async def test_protect_init_path_receives_decision_stream_settings(
+    isolated_cwd, monkeypatch: pytest.MonkeyPatch
+):
+    _ = isolated_cwd
+    tool = MockTool("cloud_tool")
+    init_mock = AsyncMock(return_value=FakeVeto())
+    monkeypatch.setattr(protect_module.Veto, "init", init_mock)
+
+    await protect(
+        [tool],
+        api_key="veto_xxx",
+        stream=True,
+        stream_mode="verbose",
+        log_level="silent",
+    )
+
+    init_mock.assert_awaited_once()
+    veto_options = init_mock.await_args.args[0]
+    assert veto_options.api_key == "veto_xxx"
+    assert veto_options.log_level == "stream"
+    assert veto_options.stream_mode == "verbose"
+
+
 async def test_protect_log_mode_allows(isolated_cwd):
     _ = isolated_cwd
     tool = MockTool("transfer_funds", "executed")
@@ -194,7 +238,21 @@ async def test_protect_reuses_cache_for_identical_options(
     assert from_rules_mock.call_count == 1
 
 
-async def test_protect_creates_new_instance_when_options_change(
+async def test_protect_creates_new_instance_when_decision_stream_settings_change(
+    isolated_cwd, monkeypatch: pytest.MonkeyPatch
+):
+    _ = isolated_cwd
+    tool = MockTool("cached_tool")
+    from_rules_mock = MagicMock(return_value=FakeVeto())
+    monkeypatch.setattr(protect_module.Veto, "from_rules", from_rules_mock)
+
+    await protect([tool], rules=[], log_level="silent")
+    await protect([tool], rules=[], stream=True, stream_mode="verbose", log_level="silent")
+
+    assert from_rules_mock.call_count == 2
+
+
+async def test_protect_creates_new_instance_when_mode_changes(
     isolated_cwd, monkeypatch: pytest.MonkeyPatch
 ):
     _ = isolated_cwd
