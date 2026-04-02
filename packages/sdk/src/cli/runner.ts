@@ -7,6 +7,7 @@ import { compile } from './compile.js';
 import { test } from './test.js';
 import { scan } from './scan.js';
 import { diff } from './diff.js';
+import { replay } from './replay.js';
 import { startRepl } from './repl.js';
 import { startStudio } from './studio/start.js';
 import { getCliVersion } from './version.js';
@@ -69,6 +70,7 @@ Core Commands:
   test
   scan
   diff
+  replay
   version
   help
 
@@ -106,6 +108,9 @@ Examples:
   veto mcp init
   veto mcp doctor --json
   veto mcp serve --config ./veto/mcp.config.yaml
+  veto replay --policy ./veto/ --log calls.jsonl
+  veto replay --policy financial.yaml --log calls.jsonl --diff
+  veto replay --policy ./veto/ --log calls.jsonl --format json
   veto doctor
 `);
 }
@@ -806,6 +811,21 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
         log: values.log,
         format: (values.format as 'text' | 'json') ?? undefined,
       });
+      return result.success ? 0 : 1;
+    }
+    case 'replay': {
+      const result = await replay({
+        policy: values.policy ?? positionals[0],
+        log: values.log ?? positionals[1],
+        diff: flags.diff,
+        format: (values.format as 'text' | 'json') ?? undefined,
+        quiet: flags.quiet,
+      });
+      if (!result.success) {
+        for (const error of result.errors) {
+          process.stderr.write(`Error: ${error}\n`);
+        }
+      }
       return result.success ? 0 : 1;
     }
     case 'agent':

@@ -20,6 +20,7 @@ export type ConditionOperator =
   | 'matches'  // Regex match
   | 'greater_than'
   | 'less_than'
+  | 'percent_of'
   | 'length_greater_than'
   | 'in'
   | 'not_in'
@@ -61,6 +62,8 @@ export interface RuleCondition {
   operator?: ConditionOperator;
   /** The value to compare against */
   value?: unknown;
+  /** Reference field used by dynamic operators such as `percent_of` */
+  reference?: string;
   /** AST-compiled policy expression (takes precedence over field/operator/value) */
   expression?: string;
 }

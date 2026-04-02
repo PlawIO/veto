@@ -66,6 +66,19 @@ class InterceptionResult:
     final_arguments: dict[str, Any]
 
 
+@dataclass
+class DenialDetails:
+    """Structured denial details from the server."""
+
+    severity: Optional[str] = None
+    suggested_fixes: Optional[list[str]] = None
+    policy_id: Optional[str] = None
+    policy_name: Optional[str] = None
+    matched_condition: Optional[str] = None
+    docs_url: Optional[str] = None
+    input: Optional[dict[str, Any]] = None
+
+
 class ToolCallDeniedError(Exception):
     """Error thrown when a tool call is denied."""
 
@@ -74,13 +87,55 @@ class ToolCallDeniedError(Exception):
         tool_name: str,
         call_id: str,
         validation_result: ValidationResult,
+        denial: Optional[DenialDetails] = None,
     ):
         reason = validation_result.reason or "Tool call denied"
-        super().__init__(f"Tool call denied: {tool_name} - {reason}")
+        super().__init__(self._format_message(tool_name, reason, denial))
         self.tool_name = tool_name
         self.call_id = call_id
         self.reason = reason
         self.validation_result = validation_result
+        self.policy_id = denial.policy_id if denial else None
+        self.policy_name = denial.policy_name if denial else None
+        self.severity = denial.severity if denial else None
+        self.matched_condition = denial.matched_condition if denial else None
+        self.suggested_fixes = (denial.suggested_fixes or []) if denial else []
+        self.docs_url = denial.docs_url if denial else None
+
+    @staticmethod
+    def _format_message(
+        tool_name: str,
+        reason: str,
+        denial: Optional[DenialDetails] = None,
+    ) -> str:
+        if not denial:
+            return f"Tool call denied: {tool_name} - {reason}"
+
+        lines: list[str] = [f"Veto denied {tool_name}", ""]
+        if denial.policy_name:
+            lines.append(f"Policy:   {denial.policy_name}")
+        lines.append(f"Reason:   {reason}")
+        if denial.matched_condition:
+            lines.append(f"Rule:     {denial.matched_condition}")
+        if denial.input:
+            import json
+
+            input_str = json.dumps(denial.input)
+            if len(input_str) > 120:
+                input_str = input_str[:117] + "..."
+            lines.append(f"Input:    {input_str}")
+
+        if denial.suggested_fixes:
+            lines.append("")
+            lines.append("To resolve:")
+            for fix in denial.suggested_fixes:
+                lines.append(f"  - {fix}")
+
+        if denial.docs_url:
+            lines.append("")
+            lines.append(denial.docs_url)
+
+        return "\n".join(lines)
 
 
 class Interceptor:
@@ -259,10 +314,41 @@ class Interceptor:
         result = await self.intercept(call)
 
         if not result.allowed:
+            denial = None
+            raw_denial = (
+                result.validation_result.metadata.get("denial")
+                if result.validation_result.metadata
+                else None
+            )
+            if raw_denial is not None:
+                if isinstance(raw_denial, DenialDetails):
+                    denial = raw_denial
+                elif isinstance(raw_denial, dict):
+                    denial = DenialDetails(
+                        severity=raw_denial.get("severity"),
+                        suggested_fixes=raw_denial.get("suggestedFixes", []),
+                        policy_id=raw_denial.get("policyId"),
+                        policy_name=raw_denial.get("policyName"),
+                        matched_condition=raw_denial.get("matchedCondition"),
+                        docs_url=raw_denial.get("docsUrl"),
+                        input=raw_denial.get("input"),
+                    )
+                else:
+                    # CloudDenialDetails dataclass from cloud/types
+                    denial = DenialDetails(
+                        severity=getattr(raw_denial, "severity", None),
+                        suggested_fixes=getattr(raw_denial, "suggested_fixes", []),
+                        policy_id=getattr(raw_denial, "policy_id", None),
+                        policy_name=getattr(raw_denial, "policy_name", None),
+                        matched_condition=getattr(raw_denial, "matched_condition", None),
+                        docs_url=getattr(raw_denial, "docs_url", None),
+                        input=getattr(raw_denial, "input", None),
+                    )
             raise ToolCallDeniedError(
                 call.name,
                 call.id or "unknown",
                 result.validation_result,
+                denial,
             )
 
         return result

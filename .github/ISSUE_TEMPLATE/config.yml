@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/PlawIO/veto/discussions
+    about: Use Discussions for questions, ideas, and anything that isn't a bug or feature request
+  - name: Security vulnerability
+    url: https://github.com/PlawIO/veto/security/advisories/new
+    about: Report a vulnerability privately — do not open a public issue

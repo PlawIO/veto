@@ -1,8 +1,10 @@
 # Contributing to Veto
 
-Thanks for your interest in contributing! This guide will get you up and running quickly.
+There's no standard authorization layer for AI agents yet. We're building it. If that's interesting to you, we'd love your help.
 
-## Quick Start
+This guide covers everything you need to go from idea → merged PR.
+
+## Quick start
 
 ```bash
 git clone https://github.com/PlawIO/veto.git
@@ -12,7 +14,7 @@ pnpm build
 pnpm test
 ```
 
-## Project Structure
+## Project structure
 
 ```
 veto/
@@ -23,9 +25,9 @@ veto/
 └── .changeset/        # Version management
 ```
 
-## Development Workflow
+## Development workflow
 
-### 1. Create a Branch
+### 1. Create a branch
 
 ```bash
 git checkout -b feat/sdk/your-feature   # SDK feature
@@ -33,7 +35,7 @@ git checkout -b feat/cli/your-feature   # CLI feature
 git checkout -b fix/sdk/your-fix        # SDK bugfix
 ```
 
-### 2. Make Changes
+### 2. Make changes
 
 ```bash
 pnpm dev:sdk    # Watch SDK
@@ -48,45 +50,37 @@ Code style:
 - **Errors**: Throw typed errors, never `process.exit()` in libraries
 - **Tests**: Add tests for new functionality
 
-### 3. Add a Changeset
+### 3. Add a changeset
 
-Every PR that affects published packages needs a changeset:
+Every PR that affects a published package needs a changeset:
 
 ```bash
 pnpm changeset
 ```
 
-This prompts you to:
+Select changed packages, pick a bump type, write a one-liner summary.
 
-1. Select changed packages
-2. Choose bump type (patch/minor/major)
-3. Write a change summary
-
-**Bump Guidelines:**
+Bump guidelines:
 
 - `patch`: Bug fixes, dependency updates
 - `minor`: New features, non-breaking additions
 - `major`: Breaking changes
 
-### 4. Run Checks
+### 4. Run checks
 
 ```bash
 pnpm build      # Build all packages
 pnpm test       # Run all tests
-pnpm typecheck  # Type check (if available)
+pnpm typecheck  # Type check
 ```
 
-### 5. Submit PR
+### 5. Open a PR
 
-- Use conventional title: `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`
+- Conventional title: `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`
 - Reference issues: `Fixes #123`
-- Ensure CI passes
+- A bot will walk you through any remaining steps (changeset, CLA)
 
-### 6. Changeset requirement for package changes
-
-If your PR changes code in `packages/sdk`, `packages/sdk-python`, or `packages/cli`, include a changeset unless a maintainer labels the PR with `release-exempt` or `no-changeset`.
-
-The CI workflow enforces this automatically.
+If your PR touches `packages/sdk`, `packages/sdk-python`, or `packages/cli`, include a changeset unless a maintainer labels it `release-exempt`.
 
 ## Testing
 
@@ -97,7 +91,7 @@ pnpm --filter veto-cli test         # CLI only
 pnpm --filter veto-sdk test:watch   # Watch mode
 ```
 
-### Python SDK
+**Python SDK:**
 
 ```bash
 cd packages/sdk-python
@@ -107,40 +101,26 @@ ruff check veto
 mypy veto --ignore-missing-imports
 ```
 
-## Release Process
+## Release process
 
-Releases are fully automated:
-
-1. PRs with changesets merge to `master`
-2. A "Version Packages" PR is automatically created
-3. Merging that PR:
-   - Bumps versions
-   - Generates changelogs
-   - Publishes to npm (SDK, CLI)
-   - Publishes to PyPI (Python SDK)
-   - Creates GitHub releases
-
-## CI and Repository Automation
-
-For contributor safety and maintainability, Veto uses these workflows:
-
-- `CI` - build, typecheck, and test packages on PRs and pushes to `master`
-- `Dependency Review` - blocks high-severity vulnerable dependencies in PRs
-- `PR Title` - enforces conventional PR title format
-- `Changeset Required` - ensures package changes include a changeset unless exempt
-- `Auto Label` and `Sync Labels` - path-based labeling and label catalog sync
-- `Actionlint` - validates workflow YAML
-- `First Interaction` - welcomes first-time contributors
-
-Manual release (maintainers only):
+Fully automated. Merge a PR with a changeset → a "Version Packages" PR appears → merge that to publish to npm and PyPI and cut a GitHub release. Nothing manual.
 
 ```bash
-gh workflow run release.yml -f force=true
+gh workflow run release.yml -f force=true   # maintainers only — force a release
 ```
 
-## Commands Reference
+## CI
 
-| Command          | Description              |
+Every PR runs:
+
+- `CI` — build, typecheck, test
+- `Dependency Review` — blocks high-severity dependency risk
+- `PR Title` — conventional format check
+- `Changeset Required` — ensures package changes are versioned
+
+## Commands
+
+| Command          | What it does             |
 | ---------------- | ------------------------ |
 | `pnpm install`   | Install all dependencies |
 | `pnpm build`     | Build all packages       |
@@ -151,11 +131,13 @@ gh workflow run release.yml -f force=true
 | `pnpm dev:cli`   | Watch CLI                |
 | `pnpm dev:web`   | Start web dev server     |
 
-## Getting Help
+## Getting help
 
-- [GitHub Issues](https://github.com/PlawIO/veto/issues) - Bug reports, feature requests
-- [GitHub Discussions](https://github.com/PlawIO/veto/discussions) - Questions, ideas
+- [GitHub Issues](https://github.com/PlawIO/veto/issues) — bugs and feature requests
+- [GitHub Discussions](https://github.com/PlawIO/veto/discussions) — questions and ideas
 
-## License
+## One housekeeping thing
 
-By contributing, you agree that your contributions will be licensed under the Apache-2.0 License.
+First-time contributors need to sign a [Contributor License Agreement](CLA.md). A bot handles it — when you open your first PR it'll post a comment, you reply with one line, and you're done. You only ever sign once.
+
+It's standard practice for open-source projects with a company behind them. It lets us keep the project healthy and properly licensed for everyone using it.

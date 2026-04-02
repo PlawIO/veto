@@ -4,7 +4,8 @@
  * @module cloud/types
  */
 
-import type { ArgumentConstraint } from '../deterministic/types.js';
+import type { ArgumentConstraint, SessionConstraints } from '../deterministic/types.js';
+import type { RedactionTrace } from '../core/output-validator.js';
 import type { Rule, OutputRule } from '../rules/types.js';
 
 /**
@@ -78,6 +79,19 @@ export interface FailedConstraint {
 }
 
 /**
+ * Structured denial details returned by the server on deny/require_approval.
+ */
+export interface CloudDenialDetails {
+  policyId?: string;
+  policyName?: string;
+  severity: 'deny' | 'require_approval';
+  matchedCondition?: string;
+  suggestedFixes: string[];
+  docsUrl?: string;
+  input?: Record<string, unknown>;
+}
+
+/**
  * Response from cloud tool call validation.
  */
 export interface CloudValidationResponse {
@@ -86,6 +100,24 @@ export interface CloudValidationResponse {
   failed_constraints?: FailedConstraint[];
   metadata?: Record<string, unknown>;
   approval_id?: string;
+  denial?: CloudDenialDetails;
+  outputRules?: OutputRule[];
+  /** Session state returned when sessionId is provided in context */
+  session?: SessionState;
+}
+
+/**
+ * Live session state returned in validation responses.
+ */
+export interface SessionState {
+  /** Declared session budget */
+  budget: number;
+  /** Cumulative spend so far */
+  spent: number;
+  /** Budget minus spent */
+  remaining: number;
+  /** Named counter values */
+  counters: Record<string, number>;
 }
 
 /**
@@ -119,7 +151,7 @@ export interface CloudPolicyResponse {
   toolName: string;
   mode: 'deterministic' | 'llm';
   constraints: ArgumentConstraint[];
-  sessionConstraints?: unknown;
+  sessionConstraints?: SessionConstraints;
   rateLimits?: unknown;
   version: number;
 }
@@ -141,4 +173,5 @@ export interface LogDecisionRequest {
   latency_ms: number;
   source: 'client';
   context?: Record<string, unknown>;
+  redactions?: RedactionTrace[];
 }

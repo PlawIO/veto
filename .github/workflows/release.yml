@@ -21,7 +21,7 @@ env:
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     permissions:
       contents: write
@@ -73,6 +73,31 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Auto-approve and enable auto-merge for release PR
+        if: steps.changesets.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="$(gh pr list \
+            --base master \
+            --state open \
+            --json number,title,headRefName \
+            --jq 'map(select(.title == "chore: release packages" and (.headRefName == "changeset-release/master" or .headRefName == "release/packages-master")))[0].number')"
+
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No open release PR found to auto-merge."
+            exit 0
+          fi
+
+          gh pr review "$PR_NUMBER" \
+            --approve \
+            --body "Auto-approving trusted Changesets release PR." || true
+
+          gh pr merge "$PR_NUMBER" \
+            --auto \
+            --squash \
+            --delete-branch
+
       - name: Publish Python SDK to PyPI
         if: steps.changesets.outputs.published == 'true'
         working-directory: packages/sdk-python
@@ -95,7 +120,7 @@ jobs:
             git push origin "sdk-py@$VERSION"
             gh release create "sdk-py@$VERSION" \
               --title "veto-sdk (Python) v$VERSION" \
-              --notes "See [CHANGELOG](https://github.com/VulnZap/veto/blob/master/packages/sdk-python/CHANGELOG.md)" \
+              --notes "See [CHANGELOG](https://github.com/PlawIO/veto/blob/master/packages/sdk-python/CHANGELOG.md)" \
               --target master
           fi
         env:
@@ -104,7 +129,7 @@ jobs:
   # Manual release option
   release-manual:
     name: Manual Release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true'
     permissions:

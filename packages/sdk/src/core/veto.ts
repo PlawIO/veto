@@ -29,7 +29,10 @@ import { generateId, generateToolCallId } from '../utils/id.js';
 import { ValidationEngine } from './validator.js';
 import { HistoryTracker, type HistoryStats } from './history.js';
 import { BudgetTracker, BudgetExceededError, type BudgetStatus } from './budget.js';
-import { Interceptor, ToolCallDeniedError, type InterceptionResult } from './interceptor.js';
+import { Interceptor, ToolCallDeniedError, type InterceptionResult, type DenialDetails } from './interceptor.js';
+import type { EconomicContext, EconomicDenialDetails, EconomicPolicyConfig, BudgetScope, EconomicBudgetStatus } from '../economic/types.js';
+import { EconomicEvaluator, type EconomicEvaluationResult } from '../economic/evaluator.js';
+import { LocalBudgetEngine } from '../economic/budget-engine.js';
 import type { MCPTool, MCPServerClient, MCPToolResult } from '../providers/types.js';
 import type {
   Rule,
@@ -107,6 +110,12 @@ export interface GuardContext {
   agentId?: string;
   userId?: string;
   role?: string;
+  custom?: Record<string, unknown>;
+  market?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
+  portfolio?: Record<string, unknown>;
+  /** Economic context from a protocol connector (x402, MPP, AP2) */
+  economic?: EconomicContext;
 }
 
 /**
@@ -120,7 +129,11 @@ export interface GuardResult {
   approvalId?: string;
   shadow?: boolean;
   shadowDecision?: string;
+  /** Structured economic denial details (present when economic policy denies) */
+  economicDenial?: EconomicDenialDetails;
 }
+
+const RESERVED_LOCAL_CONTEXT_KEYS = new Set(['market', 'budget', 'portfolio']);
 
 /**
  * Parsed veto.config.yaml structure.
@@ -195,6 +208,8 @@ interface VetoConfigFile {
       format?: 'slack' | 'pagerduty' | 'generic' | 'cef';
     };
   };
+  /** Economic authorization policy (x402, MPP, AP2 support) */
+  economic?: EconomicPolicyConfig;
 }
 
 /**
@@ -207,6 +222,17 @@ interface LoadedRulesState {
   outputRulesByTool: Map<string, OutputRule[]>;
   globalRules: Rule[];
   globalOutputRules: OutputRule[];
+}
+
+interface LoadedLocalRules {
+  state: LoadedRulesState;
+  sourceFiles: string[];
+}
+
+interface LocalRulesSource {
+  dir: string;
+  recursive: boolean;
+  sourceFiles: string[];
 }
 
 interface LocalApprovalConfig {
@@ -366,6 +392,8 @@ export class Veto {
   private readonly validationEngine: ValidationEngine;
   private readonly historyTracker: HistoryTracker;
   private readonly budgetTracker: BudgetTracker | null;
+  private readonly economicEvaluator: EconomicEvaluator | null;
+  private readonly economicBudgetEngine: LocalBudgetEngine | null;
   private readonly interceptor: Interceptor;
   private readonly outputValidator: OutputValidator;
   private readonly eventWebhookEmitter: EventWebhookEmitter;
@@ -409,9 +437,13 @@ export class Veto {
 
   // Client-side deterministic validation cache
   private readonly policyCache: PolicyCache | null = null;
+  private readonly remoteOutputRulesByTool = new Map<string, OutputRule[]>();
 
   // Loaded rules
   private rulesState: LoadedRulesState;
+  private localSourceFiles: string[] = [];
+  private readonly localRulesDir?: string;
+  private readonly localRulesRecursive: boolean;
   private readonly browserMode: boolean;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
   private refreshIntervalId: ReturnType<typeof setInterval> | null = null;
@@ -421,11 +453,15 @@ export class Veto {
     config: VetoConfigFile,
     rules: LoadedRulesState,
     logger: Logger,
-    browserMode = false
+    browserMode = false,
+    localRulesSource?: LocalRulesSource
   ) {
     this.logger = logger;
     this.configDir = options.configDir ?? './veto';
     this.rulesState = rules;
+    this.localSourceFiles = localRulesSource?.sourceFiles ?? [];
+    this.localRulesDir = localRulesSource?.dir;
+    this.localRulesRecursive = localRulesSource?.recursive ?? true;
     this.browserMode = browserMode;
 
     const envMode = this.browserMode
@@ -678,6 +714,28 @@ export class Veto {
       this.budgetTracker = null;
     }
 
+    // Initialize economic evaluator (if configured)
+    if (config.economic?.budgets?.length) {
+      const localBudgetEngine = new LocalBudgetEngine({
+        budgets: config.economic.budgets,
+        logger: this.logger,
+      });
+      this.economicBudgetEngine = localBudgetEngine;
+      this.economicEvaluator = new EconomicEvaluator({
+        policy: config.economic,
+        budgetEngine: localBudgetEngine,
+        logger: this.logger,
+      });
+      this.logger.info('Economic authorization enabled', {
+        budgets: config.economic.budgets.length,
+        protocols: ['x402', 'mpp', 'ap2'],
+        payer_required: config.economic.payer?.required ?? false,
+      });
+    } else {
+      this.economicEvaluator = null;
+      this.economicBudgetEngine = null;
+    }
+
     // Initialize interceptor
     this.outputValidator = new OutputValidator({
       logger: this.logger,
@@ -774,7 +832,18 @@ export class Veto {
       parseYaml
     );
 
-    return new Veto(options, config, rules, logger);
+    return new Veto(
+      { ...options, configDir },
+      config,
+      rules.state,
+      logger,
+      false,
+      {
+        dir: rulesDir,
+        recursive,
+        sourceFiles: rules.sourceFiles,
+      }
+    );
   }
 
   static fromRules(options: VetoBrowserOptions): Veto {
@@ -1026,12 +1095,15 @@ export class Veto {
     fsModule: NodeFsModule,
     pathModule: NodePathModule,
     parseYaml: ParseYaml
-  ): Promise<LoadedRulesState> {
+  ): Promise<LoadedLocalRules> {
     const state = Veto.createEmptyRulesState();
 
     if (!fsModule.existsSync(rulesDir)) {
       logger.debug('Rules directory not found', { path: rulesDir });
-      return state;
+      return {
+        state,
+        sourceFiles: [],
+      };
     }
 
     const yamlFiles = Veto.findYamlFiles(rulesDir, recursive, fsModule, pathModule);
@@ -1110,7 +1182,10 @@ export class Veto {
       outputToolSpecific: state.outputRulesByTool.size,
     });
 
-    return state;
+    return {
+      state,
+      sourceFiles: yamlFiles,
+    };
   }
 
   /**
@@ -1157,7 +1232,18 @@ export class Veto {
 
   private getOutputRulesForTool(toolName: string): OutputRule[] {
     const toolSpecific = this.rulesState.outputRulesByTool.get(toolName) ?? [];
-    return [...this.rulesState.globalOutputRules, ...toolSpecific];
+    const remote = this.remoteOutputRulesByTool.get(toolName) ?? [];
+    return [...this.rulesState.globalOutputRules, ...toolSpecific, ...remote]
+      .filter((rule) => rule.enabled !== false);
+  }
+
+  private cacheRemoteOutputRules(toolName: string, outputRules: OutputRule[] | undefined): void {
+    if (!outputRules || outputRules.length === 0) {
+      this.remoteOutputRulesByTool.delete(toolName);
+      return;
+    }
+
+    this.remoteOutputRulesByTool.set(toolName, outputRules);
   }
 
   private isGuardEvaluation(context: ValidationContext): boolean {
@@ -1488,111 +1574,135 @@ export class Veto {
 
     const localContext = this.buildLocalEvaluationContext(context);
     let firstAllowRule: Rule | null = null;
+    let firstApprovalRule: Rule | null = null;
+    let firstBlockRule: Rule | null = null;
+    let firstNonBlockingRule: Rule | null = null;
 
     for (const rule of rules) {
       if (!this.matchesLocalRule(rule, context, localContext)) {
         continue;
       }
 
-      const reason = rule.description ?? `Matched rule: ${rule.name}`;
-      const metadata = this.toLocalRuleMetadata(rule);
-
-      if (rule.action === 'require_approval') {
-        if (this.shouldApplyLogModeOverride(context)) {
-          if (this.mode === 'shadow') {
-            return this.applyShadowModeOverride(
-              context,
-              'require_approval',
-              reason,
-              metadata,
-              rule.id
-            );
-          }
-
-          this.logger.warn('Tool call would require approval locally (log mode)', {
-            tool: context.toolName,
-            ruleId: rule.id,
-            reason,
-          });
-
-          return {
-            decision: 'allow',
-            reason: `[LOG MODE] Would require approval: ${reason}`,
-            metadata: {
-              blocked_in_strict_mode: true,
-              ...metadata,
-            },
-          };
-        }
-
-        if (this.isGuardEvaluation(context)) {
-          return {
-            decision: 'require_approval',
-            reason,
-            metadata,
-          };
-        }
-
-        return this.handleLocalApprovalFlow(context, rule, reason);
+      if (rule.action === 'block' && !firstBlockRule) {
+        firstBlockRule = rule;
+        continue;
       }
 
-      if (rule.action === 'block') {
-        if (this.shouldApplyLogModeOverride(context)) {
-          if (this.mode === 'shadow') {
-            return this.applyShadowModeOverride(
-              context,
-              'deny',
-              reason,
-              metadata,
-              rule.id
-            );
-          }
+      if (rule.action === 'require_approval' && !firstApprovalRule) {
+        firstApprovalRule = rule;
+        continue;
+      }
 
-          this.logger.warn('Tool call would be blocked locally (log mode)', {
-            tool: context.toolName,
-            ruleId: rule.id,
+      if (rule.action === 'allow' && !firstAllowRule) {
+        firstAllowRule = rule;
+        continue;
+      }
+
+      if ((rule.action === 'warn' || rule.action === 'log') && !firstNonBlockingRule) {
+        firstNonBlockingRule = rule;
+      }
+    }
+
+    const decisiveRule = firstBlockRule ?? firstApprovalRule ?? firstAllowRule;
+
+    if (!decisiveRule) {
+      if (firstNonBlockingRule) {
+        this.logger.warn('Local rule matched with non-blocking action', {
+          tool: context.toolName,
+          action: firstNonBlockingRule.action,
+          ruleId: firstNonBlockingRule.id,
+        });
+      }
+
+      return { decision: 'allow' };
+    }
+
+    const reason = decisiveRule.description ?? `Matched rule: ${decisiveRule.name}`;
+    const metadata = this.toLocalRuleMetadata(decisiveRule);
+
+    if (decisiveRule.action === 'require_approval') {
+      if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'require_approval',
             reason,
-          });
-          return {
-            decision: 'allow',
-            reason: `[LOG MODE] Would block: ${reason}`,
-            metadata: {
-              blocked_in_strict_mode: true,
-              ...metadata,
-            },
-          };
+            metadata,
+            decisiveRule.id
+          );
         }
 
-        this.logger.warn('Tool call blocked by local rule', {
+        this.logger.warn('Tool call would require approval locally (log mode)', {
           tool: context.toolName,
-          ruleId: rule.id,
+          ruleId: decisiveRule.id,
           reason,
         });
+
         return {
-          decision: 'deny',
+          decision: 'allow',
+          reason: `[LOG MODE] Would require approval: ${reason}`,
+          metadata: {
+            blocked_in_strict_mode: true,
+            ...metadata,
+          },
+        };
+      }
+
+      if (this.isGuardEvaluation(context)) {
+        return {
+          decision: 'require_approval',
           reason,
           metadata,
         };
       }
 
-      if (rule.action === 'allow' && !firstAllowRule) {
-        firstAllowRule = rule;
-      }
-
-      if (rule.action === 'warn' || rule.action === 'log') {
-        this.logger.warn('Local rule matched with non-blocking action', {
-          tool: context.toolName,
-          action: rule.action,
-          ruleId: rule.id,
-        });
-      }
+      return this.handleLocalApprovalFlow(context, decisiveRule, reason);
     }
 
-    if (firstAllowRule) {
+    if (decisiveRule.action === 'block') {
+      if (this.shouldApplyLogModeOverride(context)) {
+        if (this.mode === 'shadow') {
+          return this.applyShadowModeOverride(
+            context,
+            'deny',
+            reason,
+            metadata,
+            decisiveRule.id
+          );
+        }
+
+        this.logger.warn('Tool call would be blocked locally (log mode)', {
+          tool: context.toolName,
+          ruleId: decisiveRule.id,
+          reason,
+        });
+        return {
+          decision: 'allow',
+          reason: `[LOG MODE] Would block: ${reason}`,
+          metadata: {
+            blocked_in_strict_mode: true,
+            ...metadata,
+          },
+        };
+      }
+
+      this.logger.warn('Tool call blocked by local rule', {
+        tool: context.toolName,
+        ruleId: decisiveRule.id,
+        reason,
+      });
+      return {
+        decision: 'deny',
+        reason,
+        metadata,
+      };
+    }
+
+    if (decisiveRule.action === 'allow') {
       return {
         decision: 'allow',
-        reason: firstAllowRule.description ?? `Allowed by rule: ${firstAllowRule.name}`,
-        metadata: this.toLocalRuleMetadata(firstAllowRule),
+        reason: decisiveRule.description ?? `Allowed by rule: ${decisiveRule.name}`,
+        metadata,
       };
     }
 
@@ -1600,15 +1710,32 @@ export class Veto {
   }
 
   private buildLocalEvaluationContext(context: ValidationContext): Record<string, unknown> {
+    const customContext = context.custom ?? {};
+    const localArguments = Object.fromEntries(
+      Object.entries(context.arguments).filter(([key]) => !RESERVED_LOCAL_CONTEXT_KEYS.has(key))
+    );
+    const marketContext = customContext.market && typeof customContext.market === 'object' && !Array.isArray(customContext.market)
+      ? customContext.market as Record<string, unknown>
+      : undefined;
+    const budgetContext = customContext.budget && typeof customContext.budget === 'object' && !Array.isArray(customContext.budget)
+      ? customContext.budget as Record<string, unknown>
+      : undefined;
+    const portfolioContext = customContext.portfolio && typeof customContext.portfolio === 'object' && !Array.isArray(customContext.portfolio)
+      ? customContext.portfolio as Record<string, unknown>
+      : undefined;
+
     return {
-      ...context.arguments,
+      ...localArguments,
       tool_name: context.toolName,
       arguments: context.arguments,
       session_id: this.resolveSessionId(context),
       agent_id: this.resolveAgentId(context),
       user_id: this.resolveUserId(context),
       role: this.resolveRole(context),
-      custom: context.custom,
+      ...(marketContext ? { market: marketContext } : {}),
+      ...(budgetContext ? { budget: budgetContext } : {}),
+      ...(portfolioContext ? { portfolio: portfolioContext } : {}),
+      custom: customContext,
     };
   }
 
@@ -2211,6 +2338,7 @@ export class Veto {
         context.arguments,
         apiContext
       );
+      this.cacheRemoteOutputRules(context.toolName, response.outputRules);
 
       const metadata: Record<string, unknown> = {};
       if (response.failed_constraints) {
@@ -2223,6 +2351,9 @@ export class Veto {
       // Handle require_approval decision
       if (response.decision === 'require_approval') {
         const approvalReason = response.reason ?? 'Approval required';
+        if (response.denial) {
+          metadata.denial = response.denial;
+        }
         const metadataWithApproval = response.approval_id
           ? { ...metadata, approvalId: response.approval_id }
           : metadata;
@@ -2318,6 +2449,9 @@ export class Veto {
         tool: context.toolName,
         reason: response.reason,
       });
+      if (response.denial) {
+        metadata.denial = response.denial;
+      }
       return {
         decision: 'deny',
         reason: response.reason,
@@ -2820,6 +2954,56 @@ export class Veto {
     this.eventWebhookEmitter.emit(event);
   }
 
+  /**
+   * Emit a webhook event for economic authorization outcomes.
+   *
+   * Maps economic evaluation results to the appropriate webhook event type:
+   * - budget_exceeded → 'budget_exceeded'
+   * - approval_required → 'approval_triggered'
+   * - budget_warning (>80% utilization on allow) → 'budget_warning'
+   * - spend_committed (successful reservation) → 'spend_committed'
+   */
+  private emitEconomicEvent(
+    toolName: string,
+    args: Record<string, unknown>,
+    econResult: EconomicEvaluationResult,
+    economicContext: EconomicContext,
+    forceType?: VetoWebhookEventType
+  ): void {
+    let eventType: VetoWebhookEventType;
+    if (forceType) {
+      eventType = forceType;
+    } else if (econResult.denial?.reason === 'budget_exceeded') {
+      eventType = 'budget_exceeded';
+    } else if (econResult.denial?.reason === 'approval_required') {
+      eventType = 'approval_triggered';
+    } else {
+      eventType = 'deny';
+    }
+
+    const event: VetoWebhookEvent = {
+      eventType,
+      toolName,
+      arguments: args,
+      decision: econResult.decision,
+      reason: econResult.denial?.reason,
+      severity: eventType === 'budget_exceeded' ? 'high' : 'medium',
+      timestamp: new Date().toISOString(),
+      shadow: this.mode === 'shadow' ? true : undefined,
+      economic: {
+        cost: economicContext.cost,
+        currency: economicContext.currency,
+        protocol: economicContext.protocol,
+        payer: economicContext.payer,
+        budget_spent: econResult.denial?.budget_spent,
+        budget_limit: econResult.denial?.budget_limit,
+        budget_remaining: econResult.denial?.budget_remaining,
+      },
+    };
+
+    this.eventWebhookEmitter.emit(event);
+  }
+
   private toGuardResult(result: ValidationResult): GuardResult {
     const metadata = result.metadata;
     const ruleId = this.extractMetadataString(metadata, ['ruleId', 'rule_id']);
@@ -2911,9 +3095,58 @@ export class Veto {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private validateOutputOrThrow(toolName: string, output: unknown): unknown {
+  private logOutputValidation(
+    toolName: string,
+    args: Record<string, unknown>,
+    outputResult: OutputValidationResult,
+    latencyMs: number
+  ): void {
+    if (!this.cloudClient) {
+      return;
+    }
+
+    if (outputResult.decision !== 'block' && outputResult.trace.length === 0) {
+      return;
+    }
+
+    this.getCloudClient().logDecision({
+      tool_name: toolName,
+      arguments: args,
+      decision: outputResult.decision === 'block' ? 'deny' : 'allow',
+      reason: outputResult.reason,
+      mode: 'deterministic',
+      latency_ms: latencyMs,
+      source: 'client',
+      context: {
+        output_validation: true,
+      },
+      redactions: outputResult.trace,
+    });
+  }
+
+  private validateOutputOrThrow(
+    toolName: string,
+    args: Record<string, unknown>,
+    output: unknown
+  ): unknown {
+    const startedAt = Date.now();
     const outputResult = this.validateOutput(toolName, output);
+    const latencyMs = Date.now() - startedAt;
+    this.logOutputValidation(toolName, args, outputResult, latencyMs);
     if (outputResult.decision === 'block') {
+      if (this.mode === 'log' || this.mode === 'shadow') {
+        this.logger.warn(
+          this.mode === 'shadow'
+            ? '[shadow] Tool output would be blocked'
+            : 'Tool output would be blocked (log mode)',
+          {
+            tool: toolName,
+            reason: outputResult.reason,
+          }
+        );
+        return output;
+      }
+
       throw new Error(outputResult.reason ?? `Tool output blocked for ${toolName}`);
     }
     return outputResult.output;
@@ -2986,17 +3219,19 @@ export class Veto {
         });
 
         if (!result.allowed) {
+          const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
           throw new ToolCallDeniedError(
             toolName,
             result.originalCall.id || '',
-            result.validationResult
+            result.validationResult,
+            denial
           );
         }
 
         // Execute the original function with potentially modified arguments
         const finalArgs = result.finalArguments ?? input;
         const executionResult = await originalFunc.call(tool, finalArgs);
-        return veto.validateOutputOrThrow(toolName, executionResult);
+        return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
       };
 
       // Replace func
@@ -3014,17 +3249,19 @@ export class Veto {
           });
 
           if (!result.allowed) {
+            const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
             throw new ToolCallDeniedError(
               toolName,
               result.originalCall.id || '',
-              result.validationResult
+              result.validationResult,
+              denial
             );
           }
 
           // Call original invoke with potentially modified arguments
           const finalArgs = result.finalArguments ?? input;
           const executionResult = await originalInvoke.call(tool, finalArgs, ...rest);
-          return veto.validateOutputOrThrow(toolName, executionResult);
+          return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
         };
       }
 
@@ -3057,20 +3294,22 @@ export class Veto {
           });
 
           if (!result.allowed) {
+            const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
             throw new ToolCallDeniedError(
               toolName,
               result.originalCall.id || '',
-              result.validationResult
+              result.validationResult,
+              denial
             );
           }
 
           const finalArgs = result.finalArguments ?? callArgs;
           if (args.length === 1 && typeof args[0] === 'object') {
             const executionResult = await originalFunc.call(tool, finalArgs);
-            return veto.validateOutputOrThrow(toolName, executionResult);
+            return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
           }
           const executionResult = await originalFunc.apply(tool, args);
-          return veto.validateOutputOrThrow(toolName, executionResult);
+          return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
         };
 
         wrapped[key] = wrappedFunc;
@@ -3158,16 +3397,18 @@ export class Veto {
       });
 
       if (!result.allowed) {
+        const denial = result.validationResult.metadata?.denial as DenialDetails | undefined;
         throw new ToolCallDeniedError(
           args.name,
           result.originalCall.id || '',
-          result.validationResult
+          result.validationResult,
+          denial
         );
       }
 
       const finalArgs = result.finalArguments ?? callArgs;
       const executionResult = await serverClient.callTool({ name: args.name, arguments: finalArgs });
-      return veto.validateOutputOrThrow(args.name, executionResult) as MCPToolResult;
+      return veto.validateOutputOrThrow(args.name, finalArgs, executionResult) as MCPToolResult;
     };
 
     this.logger.debug('MCP tools wrapped', { count: tools.length });
@@ -3222,6 +3463,88 @@ export class Veto {
     args: Record<string, unknown>,
     context: GuardContext = {}
   ): Promise<GuardResult> {
+    // Economic pre-checks: payer validation and cost validation run BEFORE
+    // behavioral rules. Budget reservation happens AFTER behavioral rules
+    // to avoid the TOCTOU double-spend (check then reserve race).
+    if (this.economicEvaluator && context.economic) {
+      const econResult = this.economicEvaluator.evaluate(context.economic);
+      if (econResult.decision !== 'allow') {
+        this.logger.warn('Economic authorization denied', {
+          toolName,
+          decision: econResult.decision,
+          reason: econResult.denial?.reason,
+          cost: context.economic.cost,
+          protocol: context.economic.protocol,
+        });
+        this.emitEconomicEvent(toolName, args, econResult, context.economic);
+        return {
+          decision: this.mode === 'shadow' ? 'allow' : econResult.decision,
+          reason: econResult.denial
+            ? `Economic: ${econResult.denial.reason}`
+            : 'Economic authorization denied',
+          economicDenial: econResult.denial,
+          shadow: this.mode === 'shadow' ? true : undefined,
+          shadowDecision: this.mode === 'shadow' ? econResult.decision : undefined,
+        };
+      }
+    }
+
+    // If economic evaluator is configured and can resolve cost from args
+    // (no explicit EconomicContext provided, but cost_extraction is configured)
+    let implicitEconomicContext: EconomicContext | undefined;
+    if (this.economicEvaluator && !context.economic) {
+      const resolvedCost = this.economicEvaluator.resolveCost(toolName, args);
+      if (resolvedCost !== undefined && resolvedCost > 0) {
+        implicitEconomicContext = {
+          cost: resolvedCost,
+          currency: 'USD', // Default currency for implicit extraction
+          protocol: 'custom',
+        };
+        const econResult = this.economicEvaluator.evaluate(implicitEconomicContext);
+        if (econResult.decision !== 'allow') {
+          this.logger.warn('Economic authorization denied (implicit cost)', {
+            toolName,
+            decision: econResult.decision,
+            reason: econResult.denial?.reason,
+            cost: resolvedCost,
+          });
+          this.emitEconomicEvent(toolName, args, econResult, implicitEconomicContext);
+          return {
+            decision: this.mode === 'shadow' ? 'allow' : econResult.decision,
+            reason: econResult.denial
+              ? `Economic: ${econResult.denial.reason}`
+              : 'Economic authorization denied',
+            economicDenial: econResult.denial,
+            shadow: this.mode === 'shadow' ? true : undefined,
+            shadowDecision: this.mode === 'shadow' ? econResult.decision : undefined,
+          };
+        }
+      }
+    }
+
+    const customContext: Record<string, unknown> = {
+      ...(context.custom ?? {}),
+    };
+
+    if (context.market) {
+      if (customContext.market !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'market' });
+      }
+      customContext.market = context.market;
+    }
+    if (context.budget) {
+      if (customContext.budget !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'budget' });
+      }
+      customContext.budget = context.budget;
+    }
+    if (context.portfolio) {
+      if (customContext.portfolio !== undefined) {
+        this.logger.debug('Guard context override applied', { key: 'portfolio' });
+      }
+      customContext.portfolio = context.portfolio;
+    }
+
     const validationContext: ValidationContext = {
       toolName,
       arguments: args,
@@ -3232,6 +3555,7 @@ export class Veto {
       agentId: context.agentId ?? this.agentId,
       userId: context.userId ?? this.userId,
       role: context.role ?? this.role,
+      custom: Object.keys(customContext).length > 0 ? customContext : undefined,
       source: 'guard',
     };
 
@@ -3252,7 +3576,37 @@ export class Veto {
       aggregatedResult.totalDurationMs
     );
 
-    return this.toGuardResult(validationResult);
+    // If behavioral rules allow and economic context exists, reserve budget.
+    // Skip reservation in shadow mode — shadow should never deduct real budget.
+    const behavioralResult = this.toGuardResult(validationResult);
+    const effectiveEconomic = context.economic ?? implicitEconomicContext;
+    if (
+      behavioralResult.decision === 'allow'
+      && this.economicEvaluator
+      && effectiveEconomic
+      && effectiveEconomic.cost > 0
+      && this.mode !== 'shadow'
+    ) {
+      const reserveResult = this.economicEvaluator.reserveBudget(
+        effectiveEconomic.cost,
+        effectiveEconomic.currency,
+      );
+      if (reserveResult.decision !== 'allow') {
+        this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic);
+        return {
+          ...behavioralResult,
+          decision: reserveResult.decision,
+          reason: reserveResult.denial
+            ? `Economic: ${reserveResult.denial.reason}`
+            : 'Budget reservation failed',
+          economicDenial: reserveResult.denial,
+        };
+      }
+      // Emit spend_committed event on successful reservation
+      this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic, 'spend_committed');
+    }
+
+    return behavioralResult;
   }
 
 
@@ -3330,6 +3684,37 @@ export class Veto {
     });
   }
 
+  async reloadLocalRules(): Promise<void> {
+    if (this.validationMode !== 'local' || !this.localRulesDir) {
+      throw new Error('No local rules configured');
+    }
+
+    const [fsModule, pathModule, parseYaml] = await Promise.all([
+      Veto.loadNodeFsModule(),
+      Veto.loadNodePathModule(),
+      Veto.loadYamlParser(),
+    ]);
+
+    const rules = await Veto.loadRules(
+      this.localRulesDir,
+      this.localRulesRecursive,
+      this.logger,
+      fsModule,
+      pathModule,
+      parseYaml
+    );
+
+    this.rulesState = rules.state;
+    this.localSourceFiles = rules.sourceFiles;
+    this.compiledExpressionCache.clear();
+
+    this.logger.info('Local rules reloaded', {
+      rulesLoaded: this.rulesState.allRules.length,
+      outputRulesLoaded: this.rulesState.allOutputRules.length,
+      sourceFiles: this.localSourceFiles.length,
+    });
+  }
+
   private setRefreshInterval(refreshIntervalMs?: number): void {
     if (this.refreshIntervalId) {
       clearInterval(this.refreshIntervalId);
@@ -3376,6 +3761,21 @@ export class Veto {
 
   resetBudget(): void {
     this.budgetTracker?.reset();
+  }
+
+  /**
+   * Get current economic budget status for a scope.
+   * Returns null if no economic policy is configured.
+   */
+  getEconomicBudgetStatus(scope: BudgetScope = 'session'): EconomicBudgetStatus | null {
+    return this.economicBudgetEngine?.getStatus(scope) ?? null;
+  }
+
+  /**
+   * Reset economic budget for a scope.
+   */
+  resetEconomicBudget(scope: BudgetScope = 'session'): void {
+    this.economicBudgetEngine?.reset(scope);
   }
 
   dispose(): void {

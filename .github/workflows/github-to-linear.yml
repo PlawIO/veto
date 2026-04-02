@@ -1,0 +1,105 @@
+name: GitHub Issues → Linear
+
+on:
+  issues:
+    types: [closed, reopened, assigned, unassigned]
+
+jobs:
+  sync:
+    name: Update Linear issue
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      issues: read
+    steps:
+      - name: Sync
+        uses: actions/github-script@v7
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        with:
+          script: |
+            const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
+
+            const LINEAR_STATES = {
+              done:        "15c1731a-68be-4180-a847-91a784c3cc01",
+              in_progress: "67b0af85-5d27-498d-9765-afa5589756c4",
+            };
+
+            const GITHUB_TO_LINEAR_USER = {
+              "yazcaleb":   "173fe360-9675-41d3-9098-35af3e0ac969",
+              "anirudhp26": "2bb85710-9b10-4552-878b-480aebadbb0b",
+            };
+
+            const issue  = context.payload.issue;
+            const action = context.payload.action;
+
+            const linearTag = issue.labels.find(l => l.name.startsWith("linear:"));
+            if (!linearTag) { console.log("No linear: label — skipping."); return; }
+
+            const linearId = linearTag.name.replace("linear:", "");
+
+            async function linearQuery(query, variables = {}) {
+              const res = await fetch("https://api.linear.app/graphql", {
+                method: "POST",
+                headers: { Authorization: LINEAR_API_KEY, "Content-Type": "application/json" },
+                body: JSON.stringify({ query, variables }),
+              });
+              const json = await res.json();
+              if (json.errors) throw new Error(JSON.stringify(json.errors));
+              return json.data;
+            }
+
+            const { issues } = await linearQuery(`
+              query FindIssue($id: String!) {
+                issues(filter: { identifier: { eq: $id } }) {
+                  nodes { id identifier state { type } assignee { id } }
+                }
+              }
+            `, { id: linearId });
+
+            if (!issues.nodes.length) { console.log(`${linearId} not found in Linear.`); return; }
+            const li = issues.nodes[0];
+
+            if (action === "closed" || action === "reopened") {
+              const targetStateId = action === "closed" ? LINEAR_STATES.done : LINEAR_STATES.in_progress;
+              if (action === "closed"   && li.state.type === "completed") { console.log(`${linearId} already Done.`);        return; }
+              if (action === "reopened" && li.state.type === "started")   { console.log(`${linearId} already In Progress.`); return; }
+
+              const { issueUpdate } = await linearQuery(`
+                mutation Update($id: String!, $stateId: String!) {
+                  issueUpdate(id: $id, input: { stateId: $stateId }) {
+                    success
+                    issue { identifier state { name } }
+                  }
+                }
+              `, { id: li.id, stateId: targetStateId });
+
+              if (!issueUpdate.success) throw new Error(`Linear update failed for ${linearId}`);
+              console.log(`${linearId} → ${issueUpdate.issue.state.name}`);
+            }
+
+            if (action === "assigned" || action === "unassigned") {
+              const ghLogin      = context.payload.assignee?.login;
+              const linearUserId = ghLogin ? (GITHUB_TO_LINEAR_USER[ghLogin] ?? null) : null;
+
+              if (action === "assigned" && !linearUserId) {
+                console.log(`No Linear mapping for @${ghLogin} — skipping.`);
+                return;
+              }
+
+              if (action === "assigned"   && li.assignee?.id === linearUserId) { console.log(`${linearId} already assigned.`);   return; }
+              if (action === "unassigned" && !li.assignee)                     { console.log(`${linearId} already unassigned.`); return; }
+
+              const { issueUpdate } = await linearQuery(`
+                mutation Assign($id: String!, $assigneeId: String) {
+                  issueUpdate(id: $id, input: { assigneeId: $assigneeId }) {
+                    success
+                    issue { identifier assignee { displayName } }
+                  }
+                }
+              `, { id: li.id, assigneeId: action === "assigned" ? linearUserId : null });
+
+              if (!issueUpdate.success) throw new Error(`Linear assignee update failed for ${linearId}`);
+              const who = issueUpdate.issue.assignee?.displayName ?? "nobody";
+              console.log(`${linearId} assigned → ${who}`);
+            }

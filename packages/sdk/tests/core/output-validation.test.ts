@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Veto } from '../../src/core/veto.js';
@@ -7,12 +7,12 @@ const TEST_DIR = `/tmp/veto-output-validation-test-${Date.now()}`;
 const VETO_DIR = join(TEST_DIR, 'veto');
 const RULES_DIR = join(VETO_DIR, 'rules');
 
-function writeConfig(): void {
+function writeConfig(mode: 'strict' | 'log' | 'shadow' = 'strict'): void {
   writeFileSync(
     join(VETO_DIR, 'veto.config.yaml'),
     `
 version: "1.0"
-mode: "strict"
+mode: "${mode}"
 validation:
   mode: "local"
 logging:
@@ -38,6 +38,7 @@ describe('Veto output validation', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
@@ -76,6 +77,62 @@ output_rules:
     expect(result.decision).toBe('allow');
     expect((result.output as any).user.contact.email).toBe('[EMAIL]');
     expect(result.redactions).toBe(1);
+    expect(result.trace).toEqual([
+      {
+        ruleId: 'redact-email',
+        ruleName: 'Redact email',
+        field: 'output.user.contact.email',
+        pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}',
+        redactedCount: 1,
+        replacement: '[EMAIL]',
+      },
+    ]);
+  });
+
+  it('redacts matching strings anywhere in structured output when field is output', async () => {
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: redact-acme
+    name: Redact Acme everywhere
+    enabled: true
+    action: redact
+    tools: [google_sheets_read]
+    output_conditions:
+      - field: output
+        operator: matches
+        value: "(?i)\\\\bacme\\\\b(?:\\\\s+(?:inc|corp|llc))?\\\\.?"
+    redact_with: "[REDACTED]"
+`
+    );
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const result = veto.validateOutput('google_sheets_read', {
+      sheet: 'Q1 Pipeline',
+      rows: [
+        { company: 'Acme Inc.', owner: 'alice@example.com' },
+        { company: 'Globex', notes: 'Met with ACME corp yesterday' },
+      ],
+      summary: 'Top customer is acme llc',
+    });
+
+    expect(result.decision).toBe('allow');
+    expect((result.output as any).rows[0].company).toBe('[REDACTED]');
+    expect((result.output as any).rows[1].notes).toBe('Met with [REDACTED] yesterday');
+    expect((result.output as any).summary).toBe('Top customer is [REDACTED]');
+    expect(result.redactions).toBe(3);
+    expect(result.trace).toEqual([
+      {
+        ruleId: 'redact-acme',
+        ruleName: 'Redact Acme everywhere',
+        field: 'output',
+        pattern: '(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?',
+        redactedCount: 3,
+        replacement: '[REDACTED]',
+      },
+    ]);
   });
 
   it('blocks output when a block output rule matches', async () => {
@@ -216,7 +273,7 @@ output_rules:
     const wrapped = veto.wrap([{
       name: 'get_profile',
       inputSchema: { type: 'object' },
-      handler: async () => ({ email: 'alice@example.com' }),
+      handler: async (_input: Record<string, unknown>) => ({ email: 'alice@example.com' }),
     }]);
 
     const result = await wrapped[0].handler({});
@@ -246,9 +303,123 @@ output_rules:
     const wrapped = veto.wrap([{
       name: 'get_secret',
       inputSchema: { type: 'object' },
-      handler: async () => ({ secret: 'api-token-123' }),
+      handler: async (_input: Record<string, unknown>) => ({ secret: 'api-token-123' }),
     }]);
 
     await expect(wrapped[0].handler({})).rejects.toThrow('Output blocked by policy');
+  });
+
+  it.each(['log', 'shadow'] as const)(
+    'does not block wrapped tool output in %s mode',
+    async (mode) => {
+      writeConfig(mode);
+      writePolicy(
+        `
+version: "1.0"
+rules: []
+output_rules:
+  - id: wrap-block
+    name: Wrap blocking
+    enabled: true
+    action: block
+    tools: [get_secret]
+    description: Output blocked by policy
+    output_conditions:
+      - field: output.secret
+        operator: contains
+        value: token
+`
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const wrapped = veto.wrap([{
+        name: 'get_secret',
+        inputSchema: { type: 'object' },
+        handler: async (_input: Record<string, unknown>) => ({ secret: 'api-token-123' }),
+      }]);
+
+      await expect(wrapped[0].handler({})).resolves.toEqual({ secret: 'api-token-123' });
+    }
+  );
+
+  it('does not mutate the caller output when cloning fails', async () => {
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: redact-secret
+    name: Redact secret
+    enabled: true
+    action: redact
+    tools: [report_tool]
+    output_conditions:
+      - field: output.note
+        operator: matches
+        value: SECRET
+    redact_with: "[REDACTED]"
+`
+    );
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const output: Record<string, unknown> & { self?: unknown; fn?: () => string } = {
+      note: 'contains SECRET value',
+    };
+    output.self = output;
+    output.fn = () => 'noop';
+
+    const result = veto.validateOutput('report_tool', output);
+
+    expect(result.decision).toBe('allow');
+    expect(result.redactions).toBe(0);
+    expect(result.trace).toEqual([]);
+    expect(result.output).toBe(output);
+    expect(output.note).toBe('contains SECRET value');
+  });
+
+  it('records real output validation latency in cloud decision logs', () => {
+    const logDecision = vi.fn();
+    const veto = Veto.fromRules({
+      rules: [],
+      outputRules: [
+        {
+          id: 'redact-secret',
+          name: 'Redact secret',
+          enabled: true,
+          severity: 'medium',
+          action: 'redact',
+          tools: ['report_tool'],
+          output_conditions: [
+            {
+              field: 'output.note',
+              operator: 'matches',
+              value: 'SECRET',
+            },
+          ],
+          redact_with: '[REDACTED]',
+        },
+      ],
+      cloudClient: {
+        logDecision,
+      } as any,
+    });
+
+    const originalDateNow = Date.now;
+    let callCount = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) return 100;
+      if (callCount === 2) return 107;
+      return originalDateNow();
+    });
+
+    (veto as any).validateOutputOrThrow('report_tool', {}, { note: 'contains SECRET value' });
+
+    expect(logDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latency_ms: 7,
+        decision: 'allow',
+      })
+    );
   });
 });

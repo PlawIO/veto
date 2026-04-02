@@ -163,6 +163,283 @@ rules:
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it('uses custom guard context in local rule evaluation', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+
+      writeFileSync(
+        join(RULES_DIR, 'budget.yaml'),
+        `
+version: "1.0"
+name: budget-rules
+rules:
+  - id: budget-block
+    name: Budget Block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: budget.remaining
+        operator: less_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { amount_usd: 40 }, {
+        custom: {
+          budget: {
+            remaining: 80,
+          },
+        },
+      });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('budget-block');
+    });
+
+    it('preserves reserved runtime context keys under arguments while keeping top-level market data namespaced', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'reserved-runtime-context.yaml'),
+        `
+version: "1.0"
+name: reserved-runtime-context
+rules:
+  - id: reserved-runtime-context-block
+    name: Reserved runtime context block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.market
+        operator: equals
+        value: BTC-USD
+      - field: market.category
+        operator: equals
+        value: sports
+      - field: budget.remaining
+        operator: less_than
+        value: 100
+      - field: portfolio.positionCount
+        operator: greater_than
+        value: 0
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { market: 'BTC-USD' }, {
+        market: { category: 'sports' },
+        budget: { remaining: 50 },
+        portfolio: { positionCount: 1 },
+      });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('reserved-runtime-context-block');
+    });
+
+    it('logs when explicit runtime context overrides custom nested context keys', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+      const veto = await Veto.init({ configDir: VETO_DIR, logLevel: 'debug' });
+      await veto.guard('trade', {}, {
+        custom: {
+          market: { category: 'legacy' },
+        },
+        market: { category: 'sports' },
+      });
+
+      expect(debugSpy.mock.calls.some(([message]) =>
+        String(message).includes('Guard context override applied')
+        && String(message).includes('"key":"market"')
+      )).toBe(true);
+
+      debugSpy.mockRestore();
+    });
+
+    it('prevents custom guard context from overriding raw local argument fields', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'raw-amount.yaml'),
+        `
+version: "1.0"
+name: raw-amount-rules
+rules:
+  - id: raw-amount-block
+    name: Raw Amount Block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: amount_usd
+        operator: greater_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { amount_usd: 50 }, {
+        custom: {
+          amount_usd: 500,
+        },
+      });
+
+      expect(result.decision).toBe('allow');
+    });
+
+    it('does not emit non-blocking local log side effects when a block rule is decisive', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "warn"
+rules:
+  directory: "./rules"
+`,
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(RULES_DIR, 'mixed-actions.yaml'),
+        `
+version: "1.0"
+name: mixed-actions
+rules:
+  - id: warn-trade
+    name: Warn trade
+    enabled: true
+    action: warn
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 100
+  - id: block-trade
+    name: Block trade
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        const veto = await Veto.init({ configDir: VETO_DIR });
+        const result = await veto.guard('trade', { amount_usd: 150 });
+
+        expect(result.decision).toBe('deny');
+
+        const messages = warnSpy.mock.calls.map(([message]) => String(message));
+        expect(messages.some((message) => message.includes('Local rule matched with non-blocking action'))).toBe(false);
+        expect(messages.some((message) => message.includes('Tool call blocked by local rule'))).toBe(true);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('reloads local rules after new files are written', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const before = await veto.guard('trade', { amount_usd: 150 });
+      expect(before.decision).toBe('allow');
+
+      writeFileSync(
+        join(RULES_DIR, 'new-rule.yaml'),
+        `
+version: "1.0"
+name: dynamic-rules
+rules:
+  - id: dynamic-block
+    name: Dynamic Block
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 100
+`,
+        'utf-8'
+      );
+
+      await veto.reloadLocalRules();
+      const after = await veto.guard('trade', { amount_usd: 150 });
+
+      expect(after.decision).toBe('deny');
+      expect(after.ruleId).toBe('dynamic-block');
+    });
+
+    it('prefers the most restrictive matching local rule', async () => {
+      rmSync(join(VETO_DIR, 'veto.config.yaml'));
+      writeLocalConfig();
+
+      writeFileSync(
+        join(RULES_DIR, 'precedence.yaml'),
+        `
+version: "1.0"
+name: precedence-rules
+rules:
+  - id: allow-small-trades
+    name: Allow small trades
+    enabled: true
+    action: allow
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 10
+  - id: require-review
+    name: Require review
+    enabled: true
+    action: require_approval
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 10
+  - id: block-trade
+    name: Block trade
+    enabled: true
+    action: block
+    tools: [trade]
+    conditions:
+      - field: arguments.amount_usd
+        operator: greater_than
+        value: 10
+`,
+        'utf-8'
+      );
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const result = await veto.guard('trade', { amount_usd: 50 });
+
+      expect(result.decision).toBe('deny');
+      expect(result.ruleId).toBe('block-trade');
+    });
+
     it('should auto-detect cloud mode when apiKey is provided', async () => {
       const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 
@@ -1128,6 +1405,173 @@ logging:
 
       const result = await wrapped[0].handler({ query: 'test' });
       expect(result).toBe('ok');
+    });
+
+    it('should cache output rules from cloud validation and redact tool output', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "cloud"
+cloud:
+  baseUrl: "http://localhost:3001"
+  apiKey: "test-key"
+  retries: 0
+logging:
+  level: "silent"
+`,
+        'utf-8'
+      );
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed',
+            outputRules: [
+              {
+                id: 'redact-acme',
+                name: 'Hide Acme',
+                enabled: true,
+                severity: 'high',
+                action: 'redact',
+                tools: ['google_sheets_read'],
+                output_conditions: [
+                  {
+                    field: 'output.company',
+                    operator: 'matches',
+                    value: '(?i)\\bacme\\b(?:\\s+(?:inc|corp|llc))?\\.?',
+                  },
+                ],
+                redact_with: '[REDACTED]',
+              },
+            ],
+          }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        });
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const handler = vi.fn().mockResolvedValue({ company: 'Acme Inc.' });
+      const tools = [{ name: 'google_sheets_read', handler, inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      const result = await wrapped[0].handler({ sheet: 'pipeline' });
+
+      expect(result).toEqual({ company: '[REDACTED]' });
+    });
+
+    it('clears cached remote output rules when a later cloud response omits outputRules', async () => {
+      writeFileSync(
+        join(VETO_DIR, 'veto.config.yaml'),
+        `
+version: "1.0"
+mode: "strict"
+validation:
+  mode: "cloud"
+cloud:
+  baseUrl: "http://localhost:3001"
+  apiKey: "test-key"
+  retries: 0
+logging:
+  level: "silent"
+`,
+        'utf-8'
+      );
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed',
+            outputRules: [
+              {
+                id: 'redact-acme',
+                name: 'Hide Acme',
+                enabled: true,
+                severity: 'high',
+                action: 'redact',
+                tools: ['google_sheets_read'],
+                output_conditions: [
+                  {
+                    field: 'output.company',
+                    operator: 'matches',
+                    value: '(?i)\\bacme\\b',
+                  },
+                ],
+                redact_with: '[REDACTED]',
+              },
+            ],
+          }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ success: true }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            decision: 'allow',
+            reason: 'Allowed again',
+          }),
+          text: async () => '',
+        });
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const handler = vi.fn()
+        .mockResolvedValueOnce({ company: 'Acme Inc.' })
+        .mockResolvedValueOnce({ company: 'Acme Inc.' });
+      const tools = [{ name: 'google_sheets_read', handler, inputSchema: {} }];
+      const wrapped = veto.wrap(tools);
+
+      const firstResult = await wrapped[0].handler({ sheet: 'pipeline' });
+      const secondResult = await wrapped[0].handler({ sheet: 'pipeline' });
+
+      expect(firstResult).toEqual({ company: '[REDACTED] Inc.' });
+      expect(secondResult).toEqual({ company: 'Acme Inc.' });
+    });
+
+    it('does not try to create a cloud client while logging output validation without one', async () => {
+      writeLocalConfig();
+
+      const veto = await Veto.init({ configDir: VETO_DIR });
+      const getCloudClientSpy = vi
+        .spyOn(veto as any, 'getCloudClient')
+        .mockImplementation(() => {
+          throw new Error('getCloudClient should not be called');
+        });
+
+      (veto as any).validationMode = 'cloud';
+      (veto as any).cloudClient = undefined;
+
+      expect(() => (veto as any).logOutputValidation('report_tool', {}, {
+        decision: 'allow',
+        output: { value: 'redacted' },
+        matchedRuleIds: ['rule-1'],
+        redactions: 1,
+        trace: [
+          {
+            ruleId: 'rule-1',
+            ruleName: 'Hide secret',
+            field: 'output',
+            pattern: '(?i)secret',
+            redactedCount: 1,
+            replacement: '[REDACTED]',
+          },
+        ],
+      })).not.toThrow();
+
+      expect(getCloudClientSpy).not.toHaveBeenCalled();
     });
 
     it('should deny tool call when cloud returns deny', async () => {

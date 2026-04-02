@@ -1,0 +1,174 @@
+name: Linear → GitHub Issues
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: linear-sync
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    name: Sync Linear → GitHub (SDK/CLI)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Sync
+        uses: actions/github-script@v7
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        with:
+          script: |
+            const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
+            const OWNER = context.repo.owner;
+            const REPO  = context.repo.repo;
+
+            // Only issues whose title starts with these prefixes belong in this repo
+            const SDK_PREFIXES = ["[sdk", "[cli", "[sdk-ts"];
+            const isSdkIssue = (title) => SDK_PREFIXES.some(p => title.toLowerCase().startsWith(p));
+
+            const USER_MAP = {
+              "yaz":     "yazcaleb",
+              "anirudh": "anirudhp26",
+            };
+
+            async function linearQuery(query) {
+              const res = await fetch("https://api.linear.app/graphql", {
+                method: "POST",
+                headers: { Authorization: LINEAR_API_KEY, "Content-Type": "application/json" },
+                body: JSON.stringify({ query }),
+              });
+              const json = await res.json();
+              if (json.errors) throw new Error(JSON.stringify(json.errors));
+              return json.data;
+            }
+
+            async function ensureLabel(name, color, description) {
+              try {
+                await github.rest.issues.createLabel({ owner: OWNER, repo: REPO, name, color, description });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+            await Promise.all([
+              ensureLabel("linear-synced",      "0075ca", "Synced from Linear"),
+              ensureLabel("priority: urgent",    "d93f0b", "Linear priority: urgent"),
+              ensureLabel("priority: high",      "e4e669", "Linear priority: high"),
+              ensureLabel("priority: medium",    "0e8a16", "Linear priority: medium"),
+              ensureLabel("priority: low",       "c5def5", "Linear priority: low"),
+              ensureLabel("state: backlog",      "666666", "Linear state"),
+              ensureLabel("state: todo",         "cccccc", "Linear state"),
+              ensureLabel("state: in progress",  "fbca04", "Linear state"),
+              ensureLabel("state: done",         "0e8a16", "Linear state"),
+              ensureLabel("state: canceled",     "aaaaaa", "Linear state"),
+            ]);
+
+            const { issues } = await linearQuery(`{
+              issues(
+                filter: { team: { key: { eq: "PLW" } } }
+                first: 100
+                orderBy: updatedAt
+              ) {
+                nodes {
+                  id identifier title description
+                  state { name type }
+                  priority url
+                  assignee { displayName }
+                }
+              }
+            }`);
+
+            const sdkIssues = issues.nodes.filter(li => isSdkIssue(li.title));
+
+            const ghIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: OWNER, repo: REPO,
+              labels: "linear-synced", state: "all", per_page: 100,
+            });
+
+            const byLinearId = {};
+            for (const issue of ghIssues) {
+              const tag = issue.labels.find(l => l.name.startsWith("linear:"));
+              if (tag) byLinearId[tag.name.replace("linear:", "")] = issue;
+            }
+
+            const PRIORITY_LABEL = { 0: null, 1: "priority: urgent", 2: "priority: high", 3: "priority: medium", 4: "priority: low" };
+            const STATE_LABEL    = { backlog: "state: backlog", unstarted: "state: todo", started: "state: in progress", completed: "state: done", canceled: "state: canceled" };
+            const CLOSED_TYPES   = ["completed", "canceled"];
+
+            for (const li of sdkIssues) {
+              await ensureLabel(`linear:${li.identifier}`, "ededed", `Linear ${li.identifier}`);
+
+              const isActive  = !CLOSED_TYPES.includes(li.state.type);
+              const existing  = byLinearId[li.identifier];
+              const ghLogin   = li.assignee ? (USER_MAP[li.assignee.displayName] ?? null) : null;
+
+              const priority  = ["No priority", "Urgent", "High", "Medium", "Low"][li.priority] ?? "—";
+              const title     = `${li.identifier}: ${li.title}`;
+              const body      = [
+                li.description ?? "",
+                "",
+                "---",
+                `**Linear:** ${li.url}`,
+                `**State:** ${li.state.name}  |  **Priority:** ${priority}`,
+                li.assignee ? `**Assignee:** ${li.assignee.displayName}` : "",
+              ].filter(Boolean).join("\n").trim();
+
+              const labels = [
+                "linear-synced",
+                `linear:${li.identifier}`,
+                PRIORITY_LABEL[li.priority],
+                STATE_LABEL[li.state.type] ?? `state: ${li.state.name.toLowerCase()}`,
+              ].filter(Boolean);
+
+              if (!existing) {
+                if (!isActive) continue;
+                await github.rest.issues.create({
+                  owner: OWNER, repo: REPO,
+                  title, body, labels,
+                  assignees: ghLogin ? [ghLogin] : [],
+                });
+                console.log(`+ ${li.identifier}${ghLogin ? ` (@${ghLogin})` : ""}`);
+              } else {
+                const wantState     = isActive ? "open" : "closed";
+                const wantAssignees = ghLogin ? [ghLogin] : [];
+                const curAssignees  = existing.assignees.map(a => a.login);
+                const assigneesDiff = JSON.stringify(wantAssignees.sort()) !== JSON.stringify(curAssignees.sort());
+                const changed       = existing.title !== title || existing.body !== body || existing.state !== wantState;
+
+                if (changed) {
+                  await github.rest.issues.update({
+                    owner: OWNER, repo: REPO,
+                    issue_number: existing.number,
+                    title, body, state: wantState,
+                    assignees: wantAssignees,
+                  });
+                } else if (assigneesDiff) {
+                  await github.rest.issues.update({
+                    owner: OWNER, repo: REPO,
+                    issue_number: existing.number,
+                    assignees: wantAssignees,
+                  });
+                }
+
+                const unmanaged = existing.labels
+                  .filter(l => !l.name.startsWith("linear:") && !l.name.startsWith("priority:") && !l.name.startsWith("state:") && l.name !== "linear-synced")
+                  .map(l => l.name);
+                await github.rest.issues.setLabels({
+                  owner: OWNER, repo: REPO,
+                  issue_number: existing.number,
+                  labels: [...unmanaged, ...labels],
+                });
+
+                if (changed || assigneesDiff) {
+                  const tag = assigneesDiff ? ` (@${wantAssignees[0] ?? "none"})` : "";
+                  console.log(`~ ${li.identifier} (#${existing.number})${tag}`);
+                }
+              }
+            }
+
+            console.log("Done.");

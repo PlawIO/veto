@@ -48,6 +48,7 @@ from veto.core.interceptor import (
     InterceptorOptions,
     InterceptionResult,
     ToolCallDeniedError,
+    DenialDetails,
 )
 from veto.core.output_validator import (
     OutputValidationResult,
@@ -1497,6 +1498,8 @@ class Veto:
 
         if response.decision == "require_approval":
             approval_reason = response.reason or "Approval required"
+            if response.denial:
+                metadata["denial"] = response.denial
             metadata_with_approval = dict(metadata)
             if response.approval_id:
                 metadata_with_approval["approval_id"] = response.approval_id
@@ -1673,6 +1676,8 @@ class Veto:
                         ],
                     },
                 )
+                if response.denial:
+                    metadata["denial"] = response.denial
                 return ValidationResult(
                     decision="deny",
                     reason=response.reason,
@@ -1766,6 +1771,7 @@ class Veto:
                         tool_name,
                         result.original_call.id or "",
                         result.validation_result,
+                        self._extract_denial(result),
                     )
 
                 # Execute the original function with potentially modified arguments
@@ -1814,6 +1820,7 @@ class Veto:
                                 tool_name,
                                 result.original_call.id or "",
                                 result.validation_result,
+                                self._extract_denial(result),
                             )
 
                         # Call original ainvoke with the original input format
@@ -1850,6 +1857,7 @@ class Veto:
                                     tool_name,
                                     result.original_call.id or "",
                                     result.validation_result,
+                                    self._extract_denial(result),
                                 )
 
                             return result.final_arguments or input_data
@@ -1922,6 +1930,7 @@ class Veto:
                                 tool_name,
                                 result.original_call.id or "",
                                 result.validation_result,
+                                self._extract_denial(result),
                             )
 
                         final_args = result.final_arguments or call_args
@@ -2074,6 +2083,38 @@ class Veto:
                 timestamp=context.timestamp.isoformat(),
                 shadow=True if self._mode == "shadow" else None,
             )
+        )
+
+    @staticmethod
+    def _extract_denial(result: InterceptionResult) -> Optional[DenialDetails]:
+        """Extract DenialDetails from an interception result's metadata."""
+        raw = (
+            result.validation_result.metadata.get("denial")
+            if result.validation_result.metadata
+            else None
+        )
+        if raw is None:
+            return None
+        if isinstance(raw, DenialDetails):
+            return raw
+        if isinstance(raw, dict):
+            return DenialDetails(
+                severity=raw.get("severity"),
+                suggested_fixes=raw.get("suggestedFixes", []),
+                policy_id=raw.get("policyId"),
+                policy_name=raw.get("policyName"),
+                matched_condition=raw.get("matchedCondition"),
+                docs_url=raw.get("docsUrl"),
+                input=raw.get("input"),
+            )
+        return DenialDetails(
+            severity=getattr(raw, "severity", None),
+            suggested_fixes=getattr(raw, "suggested_fixes", []),
+            policy_id=getattr(raw, "policy_id", None),
+            policy_name=getattr(raw, "policy_name", None),
+            matched_condition=getattr(raw, "matched_condition", None),
+            docs_url=getattr(raw, "docs_url", None),
+            input=getattr(raw, "input", None),
         )
 
     def _to_guard_result(self, result: ValidationResult) -> GuardResult:
