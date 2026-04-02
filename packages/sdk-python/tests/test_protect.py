@@ -252,6 +252,20 @@ async def test_protect_creates_new_instance_when_decision_stream_settings_change
     assert from_rules_mock.call_count == 2
 
 
+async def test_protect_creates_new_instance_when_mode_changes(
+    isolated_cwd, monkeypatch: pytest.MonkeyPatch
+):
+    _ = isolated_cwd
+    tool = MockTool("cached_tool")
+    from_rules_mock = MagicMock(return_value=FakeVeto())
+    monkeypatch.setattr(protect_module.Veto, "from_rules", from_rules_mock)
+
+    await protect([tool], rules=[], log_level="silent")
+    await protect([tool], rules=[], mode="log", log_level="silent")
+
+    assert from_rules_mock.call_count == 2
+
+
 async def test_wrapped_tool_validates_before_execution_and_throws_on_deny(isolated_cwd):
     _ = isolated_cwd
     tool = MockTool("transfer_funds", "should-not-run")

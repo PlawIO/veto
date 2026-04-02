@@ -258,6 +258,21 @@ describe('protect', () => {
     expect(fromRulesSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('creates a new Veto instance when mode changes', async () => {
+    const tool = createTool('cached_tool');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    await protect([tool], { rules: [], logLevel: 'silent' });
+    await protect([tool], { rules: [], mode: 'log', logLevel: 'silent' });
+
+    expect(fromRulesSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('validates before execution and throws ToolCallDeniedError on deny', async () => {
     const tool = createTool('transfer_funds', 'should-not-run');
 

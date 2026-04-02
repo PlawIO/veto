@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Literal, Optional, Protocol, TypeVar, Union, overload, runtime_checkable
+from typing import Any, Literal, Optional, Protocol, TypeVar, Union, cast, overload, runtime_checkable
 
 import yaml
 
 from veto.core.veto import Veto, VetoOptions
+from veto.types.config import LogLevel
 
 ProtectMode = Literal["strict", "log", "shadow"]
 
@@ -270,8 +271,22 @@ def _build_init_decision(
     return "allow_all", [], [], []
 
 
-def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[str]:
-    return "stream" if options.get("stream") else options.get("log_level")
+def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[LogLevel]:
+    if options.get("stream"):
+        return "stream"
+
+    raw_log_level = options.get("log_level")
+    if isinstance(raw_log_level, str) and raw_log_level in {
+        "debug",
+        "info",
+        "stream",
+        "warn",
+        "error",
+        "silent",
+    }:
+        return cast(LogLevel, raw_log_level)
+
+    return None
 
 
 def _create_cache_key(

@@ -330,7 +330,7 @@ class StreamLogger:
     def warn(
         self, message: str, context: Optional[dict[str, Any]] = None
     ) -> None:
-        _ = (message, context)
+        _write_to_stderr(format_message("warn", message, context))
 
     def error(
         self,
@@ -338,7 +338,9 @@ class StreamLogger:
         context: Optional[dict[str, Any]] = None,
         error: Optional[Exception] = None,
     ) -> None:
-        _ = (message, context, error)
+        _write_to_stderr(format_message("error", message, context))
+        if error is not None:
+            _write_to_stderr(str(error))
 
     def stream_decision(self, event: DecisionStreamEvent) -> None:
         _write_to_stderr(

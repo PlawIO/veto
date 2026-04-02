@@ -357,9 +357,16 @@ export class StreamLogger implements DecisionStreamLogger {
 
   info(): void {}
 
-  warn(): void {}
+  warn(message: string, context?: Record<string, unknown>): void {
+    writeToStderr(formatMessage('warn', message, context));
+  }
 
-  error(): void {}
+  error(message: string, context?: Record<string, unknown>, error?: Error): void {
+    writeToStderr(formatMessage('error', message, context));
+    if (error) {
+      writeToStderr(error.stack ?? error.message);
+    }
+  }
 
   streamDecision(event: DecisionStreamEvent): void {
     writeToStderr(

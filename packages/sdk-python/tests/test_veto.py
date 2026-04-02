@@ -91,6 +91,14 @@ class TestVetoInit:
             else:
                 os.environ["VETO_API_KEY"] = old_key
 
+    async def test_init_accepts_stream_log_level_from_env(self, monkeypatch: pytest.MonkeyPatch):
+        """Should honor VETO_LOG_LEVEL=stream."""
+        monkeypatch.setenv("VETO_LOG_LEVEL", "stream")
+
+        veto = await Veto.init(VetoOptions(api_key="test-api-key"))
+
+        assert veto._resolved_log_level == "stream"
+
 
 class TestVetoWrap:
     """Tests for Veto.wrap() method."""

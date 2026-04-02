@@ -350,7 +350,7 @@ class Veto:
             options.log_level
             or (
                 env_log_level
-                if env_log_level in ("debug", "info", "warn", "error", "silent")
+                if env_log_level in ("debug", "info", "stream", "warn", "error", "silent")
                 else None
             )  # type: ignore[assignment]
             or "info"

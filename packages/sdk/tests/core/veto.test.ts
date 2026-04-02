@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Veto } from '../../src/core/veto.js';
+import { createLogger } from '../../src/utils/logger.js';
 
 const TEST_DIR = '/tmp/veto-test-' + Date.now();
 const VETO_DIR = join(TEST_DIR, 'veto');
@@ -67,6 +68,23 @@ rules:
   });
 
   describe('init', () => {
+    it('should keep warnings and errors visible in stream mode', () => {
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const logger = createLogger('stream');
+
+      logger.warn('Warn message', { component: 'sdk' });
+      logger.error('Error message', { component: 'sdk' }, new Error('boom'));
+
+      const output = stderrSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+      expect(output).toContain('WARN');
+      expect(output).toContain('Warn message');
+      expect(output).toContain('ERROR');
+      expect(output).toContain('Error message');
+      expect(output).toContain('boom');
+
+      stderrSpy.mockRestore();
+    });
+
     it('should initialize with config from directory', async () => {
       const veto = await Veto.init({ configDir: VETO_DIR });
       expect(veto).toBeInstanceOf(Veto);
