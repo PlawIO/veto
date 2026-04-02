@@ -7,7 +7,7 @@
  * @module utils/logger
  */
 
-import type { LogLevel } from '../types/config.js';
+import type { LogLevel, StreamLogMode } from '../types/config.js';
 
 /**
  * Log entry structure for structured logging.
@@ -23,6 +23,19 @@ export interface LogEntry {
   context?: Record<string, unknown>;
   /** Error object if applicable */
   error?: Error;
+}
+
+/**
+ * Structured payload for one-line tool decision stream output.
+ */
+export interface DecisionStreamEvent {
+  decision: 'allow' | 'deny' | 'await';
+  toolName: string;
+  arguments?: Record<string, unknown>;
+  reason?: string;
+  ruleId?: string;
+  latencyMs?: number;
+  approvalId?: string;
 }
 
 /**
@@ -45,29 +58,252 @@ export interface Logger {
   error(message: string, context?: Record<string, unknown>, error?: Error): void;
 }
 
+export interface DecisionStreamLogger extends Logger {
+  streamDecision(event: DecisionStreamEvent): void;
+}
+
 /**
  * Numeric priority for log levels (lower = more verbose).
  */
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
+  stream: 1,
   warn: 2,
   error: 3,
   silent: 4,
 };
 
+const ANSI_RESET = '\u001B[0m';
+const ANSI_GREEN = '\u001B[32m';
+const ANSI_RED = '\u001B[31m';
+const ANSI_YELLOW = '\u001B[33m';
+const ANSI_DIM = '\u001B[2m';
+const ANSI_BOLD = '\u001B[1m';
+
 /**
  * Check if a log level should be emitted given the configured level.
  */
-function shouldLog(messageLevel: LogLevel, configuredLevel: LogLevel): boolean {
+function shouldLog(messageLevel: Exclude<LogLevel, 'stream'>, configuredLevel: LogLevel): boolean {
   return LOG_LEVEL_PRIORITY[messageLevel] >= LOG_LEVEL_PRIORITY[configuredLevel];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function escapeString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function formatScalar(value: unknown): string {
+  if (typeof value === 'string') {
+    return `'${escapeString(value)}'`;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+
+  if (value === null) {
+    return 'null';
+  }
+
+  if (value instanceof Date) {
+    return `'${value.toISOString()}'`;
+  }
+
+  if (typeof value === 'undefined') {
+    return 'undefined';
+  }
+
+  return String(value);
+}
+
+function formatValue(value: unknown, depth = 0): string {
+  if (
+    value === null
+    || typeof value === 'string'
+    || typeof value === 'number'
+    || typeof value === 'boolean'
+    || typeof value === 'bigint'
+    || typeof value === 'undefined'
+    || value instanceof Date
+  ) {
+    return formatScalar(value);
+  }
+
+  if (Array.isArray(value)) {
+    if (depth >= 2) {
+      return '[…]';
+    }
+
+    return `[${value.map((item) => formatValue(item, depth + 1)).join(', ')}]`;
+  }
+
+  if (isPlainObject(value)) {
+    if (depth >= 2) {
+      return '{…}';
+    }
+
+    return `{${Object.entries(value)
+      .map(([key, item]) => `${key}: ${formatValue(item, depth + 1)}`)
+      .join(', ')}}`;
+  }
+
+  return formatScalar(value);
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function formatCallArguments(args?: Record<string, unknown>, maxLength = 120): string {
+  if (!args || Object.keys(args).length === 0) {
+    return '';
+  }
+
+  const inlineEntries = Object.entries(args)
+    .map(([key, value]) => `${key}=${formatValue(value)}`)
+    .join(', ');
+
+  if (inlineEntries.length <= maxLength) {
+    return inlineEntries;
+  }
+
+  return truncate(formatValue(args), maxLength);
+}
+
+function formatDuration(latencyMs?: number): string | null {
+  if (typeof latencyMs !== 'number' || !Number.isFinite(latencyMs) || latencyMs < 0) {
+    return null;
+  }
+
+  return `${Math.round(latencyMs)}ms`;
+}
+
+function supportsColor(): boolean {
+  return typeof process !== 'undefined' && Boolean(process.stderr?.isTTY);
+}
+
+function colorize(value: string, color: string): string {
+  if (!supportsColor()) {
+    return value;
+  }
+
+  return `${color}${value}${ANSI_RESET}`;
+}
+
+function dim(value: string): string {
+  if (!supportsColor()) {
+    return value;
+  }
+
+  return `${ANSI_DIM}${value}${ANSI_RESET}`;
+}
+
+function bold(value: string): string {
+  if (!supportsColor()) {
+    return value;
+  }
+
+  return `${ANSI_BOLD}${value}${ANSI_RESET}`;
+}
+
+function getDecisionLabel(decision: DecisionStreamEvent['decision']): string {
+  switch (decision) {
+    case 'allow':
+      return colorize('ALLOW', ANSI_GREEN);
+    case 'deny':
+      return colorize('DENY', ANSI_RED);
+    case 'await':
+      return colorize('AWAIT', ANSI_YELLOW);
+  }
+}
+
+function formatDecisionReason(reason: string | undefined, maxLength: number): string | null {
+  if (!reason || reason.trim().length === 0) {
+    return null;
+  }
+
+  return truncate(reason.trim(), maxLength);
+}
+
+function formatCompactDecision(event: DecisionStreamEvent): string {
+  const args = formatCallArguments(event.arguments, 140);
+  const call = args.length > 0 ? `${event.toolName}(${args})` : `${event.toolName}()`;
+  const metaParts: string[] = [];
+
+  if (event.decision !== 'await') {
+    metaParts.push(event.decision === 'allow' ? '✓' : '✗');
+  } else {
+    metaParts.push('…');
+  }
+
+  const duration = formatDuration(event.latencyMs);
+  if (duration) {
+    metaParts.push(duration);
+  }
+
+  if (event.ruleId) {
+    metaParts.push(`[rule: ${event.ruleId}]`);
+  }
+
+  if (event.approvalId && event.decision === 'await') {
+    metaParts.push(`[approval: ${event.approvalId}]`);
+  }
+
+  const reason = formatDecisionReason(event.reason, 140);
+  const meta = metaParts.length > 0 ? ` ${dim(metaParts.join(' '))}` : '';
+  const suffix = reason ? ` ${dim(`— ${reason}`)}` : '';
+
+  return `${getDecisionLabel(event.decision)} ${call}${meta}${suffix}`;
+}
+
+function formatVerboseDecision(event: DecisionStreamEvent): string {
+  const args = formatCallArguments(event.arguments, 320);
+  const duration = formatDuration(event.latencyMs);
+  const reason = formatDecisionReason(event.reason, 320) ?? 'n/a';
+  const lines = [
+    `${bold('VETO DECISION')} ${getDecisionLabel(event.decision)}`,
+    `tool: ${event.toolName}`,
+    `args: ${args.length > 0 ? args : '(none)'}`,
+    `reason: ${reason}`,
+  ];
+
+  if (event.ruleId) {
+    lines.push(`rule: ${event.ruleId}`);
+  }
+
+  if (event.approvalId) {
+    lines.push(`approval: ${event.approvalId}`);
+  }
+
+  if (duration) {
+    lines.push(`latency: ${duration}`);
+  }
+
+  return lines.join('\n');
+}
+
+function writeToStderr(message: string): void {
+  if (typeof process !== 'undefined' && typeof process.stderr?.write === 'function') {
+    process.stderr.write(`${message}\n`);
+    return;
+  }
+
+  console.log(message);
 }
 
 /**
  * Format a log message with optional context.
  */
 function formatMessage(
-  level: LogLevel,
+  level: Exclude<LogLevel, 'stream'>,
   message: string,
   context?: Record<string, unknown>
 ): string {
@@ -83,6 +319,61 @@ function formatMessage(
   return `${prefix} ${message}`;
 }
 
+class ConsoleLogger implements Logger {
+  constructor(private readonly level: Exclude<LogLevel, 'stream'>) {}
+
+  debug(message: string, context?: Record<string, unknown>): void {
+    if (shouldLog('debug', this.level)) {
+      console.debug(formatMessage('debug', message, context));
+    }
+  }
+
+  info(message: string, context?: Record<string, unknown>): void {
+    if (shouldLog('info', this.level)) {
+      console.info(formatMessage('info', message, context));
+    }
+  }
+
+  warn(message: string, context?: Record<string, unknown>): void {
+    if (shouldLog('warn', this.level)) {
+      console.warn(formatMessage('warn', message, context));
+    }
+  }
+
+  error(message: string, context?: Record<string, unknown>, error?: Error): void {
+    if (shouldLog('error', this.level)) {
+      console.error(formatMessage('error', message, context));
+      if (error) {
+        console.error(error);
+      }
+    }
+  }
+}
+
+export class StreamLogger implements DecisionStreamLogger {
+  constructor(private readonly mode: StreamLogMode = 'compact') {}
+
+  debug(): void {}
+
+  info(): void {}
+
+  warn(): void {}
+
+  error(): void {}
+
+  streamDecision(event: DecisionStreamEvent): void {
+    writeToStderr(
+      this.mode === 'verbose'
+        ? formatVerboseDecision(event)
+        : formatCompactDecision(event)
+    );
+  }
+}
+
+export function isDecisionStreamLogger(logger: Logger): logger is DecisionStreamLogger {
+  return typeof (logger as DecisionStreamLogger).streamDecision === 'function';
+}
+
 /**
  * Create a console-based logger with the specified log level.
  *
@@ -96,39 +387,12 @@ function formatMessage(
  * logger.info('This will be logged');
  * ```
  */
-export function createLogger(level: LogLevel): Logger {
-  return {
-    debug(message: string, context?: Record<string, unknown>): void {
-      if (shouldLog('debug', level)) {
-        console.debug(formatMessage('debug', message, context));
-      }
-    },
+export function createLogger(level: LogLevel, streamMode: StreamLogMode = 'compact'): Logger {
+  if (level === 'stream') {
+    return new StreamLogger(streamMode);
+  }
 
-    info(message: string, context?: Record<string, unknown>): void {
-      if (shouldLog('info', level)) {
-        console.info(formatMessage('info', message, context));
-      }
-    },
-
-    warn(message: string, context?: Record<string, unknown>): void {
-      if (shouldLog('warn', level)) {
-        console.warn(formatMessage('warn', message, context));
-      }
-    },
-
-    error(
-      message: string,
-      context?: Record<string, unknown>,
-      error?: Error
-    ): void {
-      if (shouldLog('error', level)) {
-        console.error(formatMessage('error', message, context));
-        if (error) {
-          console.error(error);
-        }
-      }
-    },
-  };
+  return new ConsoleLogger(level);
 }
 
 /**
@@ -164,7 +428,7 @@ export function createMemoryLogger(level: LogLevel = 'debug'): {
   const entries: LogEntry[] = [];
 
   const addEntry = (
-    messageLevel: LogLevel,
+    messageLevel: Exclude<LogLevel, 'stream'>,
     message: string,
     context?: Record<string, unknown>,
     error?: Error
@@ -227,3 +491,10 @@ export function createChildLogger(
       parent.error(message, mergeContext(context), error),
   };
 }
+
+export {
+  formatCompactDecision,
+  formatMessage,
+  formatVerboseDecision,
+  shouldLog,
+};

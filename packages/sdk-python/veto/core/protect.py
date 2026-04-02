@@ -270,6 +270,10 @@ def _build_init_decision(
     return "allow_all", [], [], []
 
 
+def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[str]:
+    return "stream" if options.get("stream") else options.get("log_level")
+
+
 def _create_cache_key(
     options: dict[str, Any],
     source: ProtectInitSource,
@@ -284,7 +288,9 @@ def _create_cache_key(
         "api_key": options.get("api_key"),
         "endpoint": options.get("endpoint"),
         "mode": options.get("mode"),
-        "log_level": options.get("log_level"),
+        "log_level": _resolve_protect_log_level(options),
+        "stream": options.get("stream"),
+        "stream_mode": options.get("stream_mode"),
         "session_id": options.get("session_id"),
         "agent_id": options.get("agent_id"),
         "user_id": options.get("user_id"),
@@ -303,7 +309,8 @@ def _create_allow_all_instance(options: dict[str, Any]) -> Veto:
         rules=[],
         output_rules=[],
         mode=options.get("mode"),
-        log_level=options.get("log_level"),
+        log_level=_resolve_protect_log_level(options),
+        stream_mode=options.get("stream_mode"),
         session_id=options.get("session_id"),
         agent_id=options.get("agent_id"),
         user_id=options.get("user_id"),
@@ -361,7 +368,8 @@ async def _initialize_veto(
                 rules=inline_rules,
                 output_rules=inline_output_rules,
                 mode=options.get("mode"),
-                log_level=options.get("log_level"),
+                log_level=_resolve_protect_log_level(options),
+                stream_mode=options.get("stream_mode"),
                 session_id=options.get("session_id"),
                 agent_id=options.get("agent_id"),
                 user_id=options.get("user_id"),
@@ -375,7 +383,8 @@ async def _initialize_veto(
                 VetoOptions(
                     config_dir=options.get("config_dir"),
                     mode=options.get("mode"),
-                    log_level=options.get("log_level"),
+                    log_level=_resolve_protect_log_level(options),
+                    stream_mode=options.get("stream_mode"),
                     session_id=options.get("session_id"),
                     agent_id=options.get("agent_id"),
                     user_id=options.get("user_id"),
@@ -427,7 +436,7 @@ async def protect(tools: Union[T, list[T]], **kwargs: Any) -> Union[T, list[T]]:
             source=source,
             rules=inline_rules,
             packs=packs,
-            log_level=normalized_options.get("log_level"),
+            log_level=_resolve_protect_log_level(normalized_options),
         )
 
     if not kwargs:

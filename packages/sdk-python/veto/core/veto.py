@@ -30,12 +30,16 @@ from veto.types.tool import ToolDefinition, ToolCall
 from veto.types.config import (
     DecisionExportFormat,
     LogLevel,
+    StreamLogMode,
     Validator,
     NamedValidator,
     ValidationContext,
     ValidationResult,
 )
-from veto.utils.logger import Logger, create_logger
+from veto.utils.logger import (
+    Logger,
+    create_logger,
+)
 from veto.utils.id import generate_tool_call_id
 from veto.core.validator import ValidationEngine, ValidationEngineOptions
 from veto.core.history import HistoryTracker, HistoryTrackerOptions, HistoryStats
@@ -128,6 +132,8 @@ class VetoOptions:
     mode: Optional[VetoMode] = None
     # Log level for Veto operations
     log_level: Optional[LogLevel] = None
+    # Decision stream formatting mode when log_level is set to "stream"
+    stream_mode: Optional[StreamLogMode] = None
     # Optional session ID for tracking
     session_id: Optional[str] = None
     # Optional agent ID for tracking
@@ -350,7 +356,9 @@ class Veto:
             or "info"
         )
 
-        logger = create_logger(log_level)
+        stream_mode: StreamLogMode = options.stream_mode or "compact"
+
+        logger = create_logger(log_level, stream_mode)
 
         # Create cloud client
         cloud_config = VetoCloudConfig(
@@ -450,6 +458,7 @@ class Veto:
         output_rules: Optional[list[dict[str, Any]]] = None,
         mode: Optional[VetoMode] = None,
         log_level: Optional[LogLevel] = None,
+        stream_mode: Optional[StreamLogMode] = None,
         session_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -465,7 +474,7 @@ class Veto:
     ) -> "Veto":
         resolved_log_level = log_level or "warn"
         resolved_mode = mode or cls._parse_mode(os.environ.get("VETO_MODE")) or "strict"
-        logger = create_logger(resolved_log_level)
+        logger = create_logger(resolved_log_level, stream_mode or "compact")
 
         cloud_config = VetoCloudConfig(
             api_key=api_key,
@@ -480,6 +489,7 @@ class Veto:
             base_url=endpoint,
             mode=resolved_mode,
             log_level=resolved_log_level,
+            stream_mode=stream_mode,
             session_id=session_id,
             agent_id=agent_id,
             user_id=user_id,

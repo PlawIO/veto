@@ -122,6 +122,52 @@ describe('protect', () => {
     expect(fromRulesSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('maps stream options to decision stream logger settings for inline rules', async () => {
+    const tool = createTool('stream_tool');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    await protect([tool], {
+      rules: [],
+      stream: true,
+      streamMode: 'verbose',
+      logLevel: 'silent',
+    });
+
+    expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      logLevel: 'stream',
+      stream: true,
+      streamMode: 'verbose',
+    }));
+  });
+
+  it('passes decision stream settings through the init path', async () => {
+    const tool = createTool('cloud_tool');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+
+    const initSpy = vi.spyOn(Veto, 'init').mockResolvedValue(fakeVeto);
+
+    await protect([tool], {
+      apiKey: 'veto_xxx',
+      stream: true,
+      streamMode: 'verbose',
+      logLevel: 'silent',
+    });
+
+    expect(initSpy).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: 'veto_xxx',
+      logLevel: 'stream',
+      streamMode: 'verbose',
+    }));
+  });
+
   it('applies log mode (allows while logging)', async () => {
     const tool = createTool('transfer_funds', 'executed');
 
@@ -197,7 +243,7 @@ describe('protect', () => {
     expect(fromRulesSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('creates a new Veto instance when options differ', async () => {
+  it('creates a new Veto instance when decision stream settings differ', async () => {
     const tool = createTool('cached_tool');
     const fakeVeto = {
       wrap: vi.fn((tools: TestTool[]) => tools),
@@ -207,7 +253,7 @@ describe('protect', () => {
     const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
 
     await protect([tool], { rules: [], logLevel: 'silent' });
-    await protect([tool], { rules: [], mode: 'log', logLevel: 'silent' });
+    await protect([tool], { rules: [], stream: true, streamMode: 'verbose', logLevel: 'silent' });
 
     expect(fromRulesSpy).toHaveBeenCalledTimes(2);
   });

@@ -64,6 +64,7 @@ export type {
 
 export type {
   LogLevel,
+  StreamLogMode,
   ValidationDecision,
   ValidationResult,
   ValidationContext,

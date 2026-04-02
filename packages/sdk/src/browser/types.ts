@@ -1,6 +1,7 @@
 import type {
   LogLevel,
   NamedValidator,
+  StreamLogMode,
   ValidationContext,
   Validator,
 } from '../types/config.js';
@@ -53,6 +54,8 @@ export interface VetoBrowserOptions<TCloudClient = BrowserCloudClient> {
   outputRules?: OutputRule[];
   mode?: VetoMode;
   logLevel?: LogLevel;
+  stream?: boolean;
+  streamMode?: StreamLogMode;
   sessionId?: string;
   agentId?: string;
   userId?: string;

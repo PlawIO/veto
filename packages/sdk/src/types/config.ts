@@ -6,11 +6,13 @@
 
 import type { Logger } from '../utils/logger.js';
 
+export type StreamLogMode = 'compact' | 'verbose';
+
 /**
  * Log level for Veto operations.
  * Controls the verbosity of internal logging.
  */
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
+export type LogLevel = 'debug' | 'info' | 'stream' | 'warn' | 'error' | 'silent';
 
 /**
  * Validation decision for a tool call.

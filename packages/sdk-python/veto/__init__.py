@@ -47,6 +47,7 @@ from veto.types.config import (
     DecisionExportFormat,
     DecisionExportRecord,
     LogLevel,
+    StreamLogMode,
     ValidationDecision,
     ValidationResult,
     ValidationContext,
@@ -156,6 +157,7 @@ __all__ = [
     "JsonSchemaProperty",
     # Config types
     "LogLevel",
+    "StreamLogMode",
     "DecisionExportFormat",
     "DecisionExportRecord",
     "ValidationDecision",
