@@ -13,6 +13,25 @@ from veto.cloud.types import ValidationResponse, ToolRegistrationResponse, Appro
 from veto.types.config import ValidationContext, ValidationResult
 
 
+@pytest.fixture(autouse=True)
+async def close_initialized_clients(monkeypatch: pytest.MonkeyPatch):
+    """Close real cloud clients created by Veto.init during each test."""
+    original_init = Veto.init.__func__
+    created_clients = []
+
+    async def tracked_init(cls, options=None):
+        veto = await original_init(cls, options)
+        created_clients.append(veto._cloud_client)
+        return veto
+
+    monkeypatch.setattr(Veto, "init", classmethod(tracked_init))
+
+    yield
+
+    for client in created_clients:
+        await client.close()
+
+
 @pytest.fixture
 def mock_cloud_client():
     """Create a mock cloud client for testing."""
