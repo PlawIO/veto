@@ -13,3 +13,9 @@ export * from './schema-validator.js';
 export * from './policy-ir-schema.js';
 export * from './condition-evaluator.js';
 export * from './patterns.js';
+export {
+  evaluateRulesLocally,
+  evaluateCondition as evaluateConditionLocally,
+  resolveFieldPath as resolveLocalFieldPath,
+  type LocalEvalResult,
+} from './local-evaluator.js';

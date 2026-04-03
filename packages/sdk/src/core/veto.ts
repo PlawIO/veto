@@ -354,6 +354,9 @@ export interface VetoOptions {
     context: ValidationContext,
     approvalId: string
   ) => void | Promise<void>;
+
+  /** Callback fired after every guard() invocation. Enables UI logging, audit trails, analytics. */
+  onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
 }
 
 export type VetoBrowserOptions = SharedVetoBrowserOptions<VetoCloudClient> & {

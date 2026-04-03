@@ -222,5 +222,33 @@ export {
   OUTPUT_PATTERN_US_PHONE,
 } from './rules/patterns.js';
 
+// Content extractors
+export {
+  extractEntities,
+  type ExtractedEntities,
+  type ExtractEntitiesOptions,
+} from './extractors/content.js';
+
+// Local rule evaluator
+export {
+  evaluateRulesLocally,
+  evaluateCondition as evaluateConditionLocally,
+  resolveFieldPath as resolveLocalFieldPath,
+  type LocalEvalResult,
+} from './rules/local-evaluator.js';
+
+// Policy generator utilities
+export {
+  BROWSER_AGENT_SYSTEM_PROMPT,
+  getPolicyOutputSchema,
+  sanitizeGeneratedRules,
+  validatePolicyOutput,
+  tryInstantGeneration,
+  looksLikePolicyDeclaration,
+  reviewPolicyRequest,
+  type PolicyGenerationResult,
+  type PolicyClarificationRequest,
+} from './policy/generator.js';
+
 // CLI init function (for programmatic use)
 export { init, isInitialized } from './cli/init.js';
