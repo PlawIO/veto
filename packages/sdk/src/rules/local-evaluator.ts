@@ -11,6 +11,7 @@
  */
 
 import type { Rule, RuleCondition } from './types.js';
+import { createSafeRegex } from './condition-evaluator.js';
 
 export interface LocalEvalResult {
   decision: 'allow' | 'deny' | 'require_approval' | null;
@@ -83,11 +84,8 @@ export function evaluateCondition(
       );
     case 'matches':
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
-        try {
-          return new RegExp(expected, 'i').test(fieldValue);
-        } catch {
-          return false;
-        }
+        const regex = createSafeRegex(expected, 'i');
+        return regex !== null && regex.test(fieldValue);
       }
       return false;
     case 'greater_than':
