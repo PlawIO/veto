@@ -136,6 +136,44 @@ describe('looksLikePolicyDeclaration', () => {
     expect(looksLikePolicyDeclaration("Don't proceed with checkout only if the total is under $50")).toBe(true);
   });
 
+  // Real-world policy scenarios
+
+  it('#1 NDA Gate: prohibition + unless', () => {
+    expect(
+      looksLikePolicyDeclaration("Don't open any file from Acme Inc. unless Jared has forwarded me a signed NDA."),
+    ).toBe(true);
+  });
+
+  it('#2 Doomscroll Kill Switch: block + all', () => {
+    expect(
+      looksLikePolicyDeclaration(
+        "If I've spent more than 20 mins on social media today, block all social tabs and redirect me to my task list.",
+      ),
+    ).toBe(true);
+  });
+
+  it('#3 Shopping Guardrail: never + without + anything', () => {
+    expect(
+      looksLikePolicyDeclaration(
+        'Never purchase anything above $150 without showing me a human approval prompt first.',
+      ),
+    ).toBe(true);
+  });
+
+  it('#4 Research Boundary: imperative never + competitors', () => {
+    expect(looksLikePolicyDeclaration("Never visit or extract data from our top 3 competitors' pricing pages.")).toBe(
+      true,
+    );
+  });
+
+  it('#5 Context Collapse Prevention: never + anyone', () => {
+    expect(
+      looksLikePolicyDeclaration(
+        'Never send an email that contains salary figures, equity percentages, or investor names to anyone outside the company domain.',
+      ),
+    ).toBe(true);
+  });
+
   // Should NOT match: immediate browsing instructions
   it('rejects simple browsing task', () => {
     expect(looksLikePolicyDeclaration('Go to amazon.com and find the cheapest laptop')).toBe(false);
@@ -159,6 +197,10 @@ describe('looksLikePolicyDeclaration', () => {
 
   it('rejects navigation instruction', () => {
     expect(looksLikePolicyDeclaration('Open my email and check for new messages')).toBe(false);
+  });
+
+  it('rejects "never mind" as a conversational phrase', () => {
+    expect(looksLikePolicyDeclaration('Never mind, just go to google.com')).toBe(false);
   });
 });
 

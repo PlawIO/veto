@@ -79,6 +79,12 @@ The system provides these built-in fields, but you are not limited to them:
 - arguments.action_index (number) — action sequence number in this task
 - arguments.domain_time_seconds (number) — cumulative seconds on this domain
 
+**Element context** (for actions targeting a specific page element — click, input, scroll-to, etc.):
+- arguments.element_context.element_text (string) — the target element's own text content
+- arguments.element_context.row_text (string) — ALL visible text in the element's row, list item, card, or containing group. In a spreadsheet, this is the full row (e.g. "Antler US Fund $160 1/5/2026 2026 II NYC"). Use this for per-row/per-item policy enforcement.
+- arguments.element_context.tag (string) — HTML tag of the target element
+- arguments.element_context.xpath (string) — XPath of the target element
+
 **Element styles** (for actions targeting page elements):
 - arguments.computed_styles.* — any CSS property (backgroundColor, color, fontSize, display, visibility, opacity, position, zIndex, pointerEvents, fontWeight, textDecoration, overflow, cursor, borderColor)
 
@@ -132,6 +138,8 @@ Use "block" for hard safety limits. Use "require_approval" when the user wants c
 3. For URL matching, prefer "contains" or "matches" over "equals"
 4. For price thresholds, use "arguments.extracted_entities.max_price" with "greater_than"
 5. Generate the minimum number of rules needed
+6. For per-row/per-item enforcement (e.g. "block items in NYC", "hide funds from Acme"), use arguments.element_context.row_text with "contains" — this checks the specific row the agent is interacting with, NOT the entire page
+7. Use extracted_entities for page-wide checks (e.g. "block when credit cards visible"). Use element_context for item-level checks (e.g. "block clicking rows where location is NYC")
 
 ## Output Format
 
@@ -487,15 +495,21 @@ export function tryInstantGeneration(input: string): InstantOutput | null {
  * that should route to policy generation rather than the automation loop.
  */
 export function looksLikePolicyDeclaration(task: string): boolean {
-  const t = task.toLowerCase();
+  const t = task.toLowerCase().trim();
 
   const hasProhibition = /\b(?:don'?t|do\s*not|never)\b/.test(t);
-  const hasCondition = /\b(?:unless|until|except\s+(?:if|when)|only\s+(?:if|when))\b/.test(t);
+  const hasCondition = /\b(?:unless|until|without|except\s+(?:if|when)|only\s+(?:if|when))\b/.test(t);
+  const hasScope = /\b(?:any(?:thing|one|where)?|all|every(?:thing|one|where)?)\b/.test(t);
+
   if (hasProhibition && hasCondition) return true;
 
-  if (hasProhibition && /\b(?:any|all|every)\b/.test(t)) return true;
+  if (hasProhibition && hasScope) return true;
 
-  if (/\b(?:block|deny|restrict|prevent)\b/.test(t) && /\b(?:any|all|every|from\s+\w+)\b/.test(t)) return true;
+  // Imperative "never" at the start is a standing rule, not a one-off instruction.
+  // Excludes "never mind".
+  if (/^(?:please\s+)?never\b/.test(t) && !/^(?:please\s+)?never\s*mind\b/.test(t)) return true;
+
+  if (/\b(?:block|deny|restrict|prevent)\b/.test(t) && (hasScope || /\bfrom\s+\w+/.test(t))) return true;
 
   if (/\brequire\s+(?:my\s+)?(?:approval|permission)\b/i.test(t)) return true;
   if (/\b(?:warn|alert)\s+me\b/i.test(t) && /\b(?:if|when|before|whenever)\b/i.test(t)) return true;
