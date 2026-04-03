@@ -182,6 +182,123 @@ describe('evaluateCondition', () => {
   it('condition without field/operator returns true', () => {
     expect(evaluateCondition({}, { x: 1 })).toBe(true);
   });
+
+  it('equals is case-insensitive for strings', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'equals', value: 'Foo' },
+      { x: 'foo' },
+    )).toBe(true);
+    expect(evaluateCondition(
+      { field: 'x', operator: 'equals', value: 'FOO' },
+      { x: 'foo' },
+    )).toBe(true);
+  });
+
+  it('not_equals is case-insensitive for strings', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'not_equals', value: 'Foo' },
+      { x: 'foo' },
+    )).toBe(false);
+  });
+
+  it('equals uses strict comparison for non-strings', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'equals', value: 1 },
+      { x: 1 },
+    )).toBe(true);
+    expect(evaluateCondition(
+      { field: 'x', operator: 'equals', value: '1' },
+      { x: 1 },
+    )).toBe(false);
+  });
+
+  it('within_hours matches current time window', () => {
+    const now = new Date();
+    const h = now.getHours();
+    const range = `${String(h).padStart(2, '0')}:00-${String((h + 1) % 24).padStart(2, '0')}:00`;
+    expect(evaluateCondition(
+      { field: 'x', operator: 'within_hours', value: range },
+      { x: 'ignored' },
+    )).toBe(true);
+  });
+
+  it('outside_hours is inverse of within_hours', () => {
+    const now = new Date();
+    const h = now.getHours();
+    const range = `${String(h).padStart(2, '0')}:00-${String((h + 1) % 24).padStart(2, '0')}:00`;
+    expect(evaluateCondition(
+      { field: 'x', operator: 'outside_hours', value: range },
+      { x: 'ignored' },
+    )).toBe(false);
+  });
+
+  it('within_hours returns false for malformed input', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'within_hours', value: 'abc:def-09:00' },
+      { x: 'ignored' },
+    )).toBe(false);
+    expect(evaluateCondition(
+      { field: 'x', operator: 'within_hours', value: '25:00-09:00' },
+      { x: 'ignored' },
+    )).toBe(false);
+    expect(evaluateCondition(
+      { field: 'x', operator: 'within_hours', value: '09:00' },
+      { x: 'ignored' },
+    )).toBe(false);
+  });
+
+  it('percent_of with reference field computes percentage', () => {
+    expect(evaluateCondition(
+      { field: 'spent', operator: 'percent_of', value: 80, reference: 'budget' },
+      { spent: 90, budget: 100 },
+    )).toBe(true);
+    expect(evaluateCondition(
+      { field: 'spent', operator: 'percent_of', value: 80, reference: 'budget' },
+      { spent: 50, budget: 100 },
+    )).toBe(false);
+  });
+
+  it('percent_of returns false when reference is zero', () => {
+    expect(evaluateCondition(
+      { field: 'spent', operator: 'percent_of', value: 50, reference: 'budget' },
+      { spent: 10, budget: 0 },
+    )).toBe(false);
+  });
+
+  it('in returns false for non-array expected', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'in', value: 'not-an-array' },
+      { x: 'test' },
+    )).toBe(false);
+  });
+
+  it('not_in returns false for non-array expected', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'not_in', value: 'not-an-array' },
+      { x: 'test' },
+    )).toBe(false);
+  });
+
+  it('greater_than rejects string values', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'greater_than', value: 100 },
+      { x: '150' },
+    )).toBe(false);
+  });
+
+  it('less_than rejects string values', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'less_than', value: 100 },
+      { x: '50' },
+    )).toBe(false);
+  });
+
+  it('matches rejects ReDoS patterns via createSafeRegex', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'matches', value: '(a+)+$' },
+      { x: 'aaaaaaaaaaaaaaaaaaaaa!' },
+    )).toBe(false);
+  });
 });
 
 describe('evaluateRulesLocally', () => {
@@ -412,5 +529,53 @@ describe('evaluateRulesLocally', () => {
 
     const result = evaluateRulesLocally(rules, 'any_tool', {});
     expect(result.reason).toBe('Rule Name');
+  });
+
+  it('conditions-first fallthrough: ignores condition_groups when conditions present', () => {
+    const rules: Rule[] = [
+      makeRule({
+        id: 'r1',
+        name: 'Both fields',
+        action: 'block',
+        conditions: [{ field: 'x', operator: 'equals', value: 'yes' }],
+        condition_groups: [
+          [{ field: 'y', operator: 'equals', value: 'impossible' }],
+        ],
+      }),
+    ];
+
+    // conditions pass, condition_groups would fail if evaluated
+    const result = evaluateRulesLocally(rules, 'any_tool', { x: 'yes', y: 'nope' });
+    expect(result.decision).toBe('deny');
+  });
+
+  it('falls through to condition_groups when no conditions', () => {
+    const rules: Rule[] = [
+      makeRule({
+        id: 'r1',
+        name: 'Groups only',
+        action: 'block',
+        condition_groups: [
+          [{ field: 'x', operator: 'equals', value: 'match' }],
+        ],
+      }),
+    ];
+
+    const result = evaluateRulesLocally(rules, 'any_tool', { x: 'match' });
+    expect(result.decision).toBe('deny');
+  });
+
+  it('empty tools array applies to all tools', () => {
+    const rules: Rule[] = [
+      makeRule({
+        id: 'r1',
+        name: 'Empty tools',
+        action: 'block',
+        tools: [],
+      }),
+    ];
+
+    const result = evaluateRulesLocally(rules, 'any_tool', {});
+    expect(result.decision).toBe('deny');
   });
 });

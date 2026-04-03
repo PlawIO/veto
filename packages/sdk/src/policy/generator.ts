@@ -20,6 +20,7 @@ export interface PolicyGenerationResult {
   success: boolean;
   rules: Rule[];
   explanation: string;
+  warnings?: string[];
   error?: string;
 }
 
@@ -283,13 +284,30 @@ export function sanitizeGeneratedRules(
       };
     };
 
+    const VALID_SEVERITIES: Set<string> = new Set(['low', 'medium', 'high', 'critical', 'info']);
+    const VALID_ACTIONS: Set<string> = new Set(['allow', 'block', 'require_approval', 'warn', 'log']);
+
+    let severity: Rule['severity'] = 'medium';
+    if (VALID_SEVERITIES.has(r.severity)) {
+      severity = r.severity as Rule['severity'];
+    } else {
+      warnings.push(`Invalid severity "${r.severity}" in rule "${r.name}" — defaulting to "medium"`);
+    }
+
+    let action: Rule['action'] = 'block';
+    if (VALID_ACTIONS.has(r.action)) {
+      action = r.action as Rule['action'];
+    } else {
+      warnings.push(`Invalid action "${r.action}" in rule "${r.name}" — defaulting to "block"`);
+    }
+
     const rule: Rule = {
       id,
       name: r.name,
       description: r.description ?? undefined,
       enabled: true,
-      severity: r.severity as Rule['severity'],
-      action: r.action as Rule['action'],
+      severity,
+      action,
       tools: r.tools ?? undefined,
       conditions: r.conditions?.map(toCondition),
       condition_groups: r.condition_groups?.map(group => group.map(toCondition)),
@@ -312,8 +330,8 @@ export async function validatePolicyOutput(raw: unknown): Promise<PolicyGenerati
     const schema = await getPolicyOutputSchema();
      
     const parsed = (schema as any).parse(raw);
-    const { rules, warnings: _warnings } = sanitizeGeneratedRules(parsed);
-    return { success: true, rules, explanation: parsed.explanation };
+    const { rules, warnings } = sanitizeGeneratedRules(parsed);
+    return { success: true, rules, explanation: parsed.explanation, warnings };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, rules: [], explanation: '', error: msg };
@@ -326,8 +344,9 @@ type InstantAction = 'block' | 'require_approval' | 'warn' | 'log';
 
 function inferActionFromIntent(input: string): InstantAction {
   const lower = input.toLowerCase();
-  if (/\b(ask|approv|confirm|review|check with)/.test(lower)) return 'require_approval';
-  if (/\b(warn|alert|flag)/.test(lower)) return 'warn';
+  if (/\b(block|prohibit|deny|prevent|stop|restrict|forbid)/.test(lower)) return 'block';
+  if (/\b(warn|alert|notify|flag)/.test(lower)) return 'warn';
+  if (/\b(ask|approv|confirm|review|check with|permission)/.test(lower)) return 'require_approval';
   if (/\b(log|track|monitor|record)/.test(lower)) return 'log';
   return 'block';
 }
@@ -341,9 +360,17 @@ function actionVerb(action: string): string {
 
 function extractPriceThreshold(input: string): number | null {
   const match = input.match(/\$\s*([0-9,]+(?:\.[0-9]{1,2})?)/);
-  if (match) return parseFloat(match[1].replace(/,/g, ''));
+  if (match) {
+    const price = parseFloat(match[1].replace(/,/g, ''));
+    if (isNaN(price)) return null;
+    return price;
+  }
   const wordMatch = input.match(/(\d+(?:\.\d{1,2})?)\s*(?:dollars?|usd)/i);
-  if (wordMatch) return parseFloat(wordMatch[1]);
+  if (wordMatch) {
+    const price = parseFloat(wordMatch[1]);
+    if (isNaN(price)) return null;
+    return price;
+  }
   return null;
 }
 
@@ -385,7 +412,7 @@ export function tryInstantGeneration(input: string): InstantOutput | null {
   const action = inferActionFromIntent(input);
   const verb = actionVerb(action);
 
-  if (/credit\s*card|card\s*number|cc\s*num/i.test(lower)) {
+  if (/\bcredit\s*cards?\b|\bcard\s*numbers?\b|\bcc\s*num/i.test(lower)) {
     return {
       rules: [
         instantRule(
@@ -511,8 +538,8 @@ export function looksLikePolicyDeclaration(task: string): boolean {
 
   if (/\b(?:block|deny|restrict|prevent)\b/.test(t) && (hasScope || /\bfrom\s+\w+/.test(t))) return true;
 
-  if (/\brequire\s+(?:my\s+)?(?:approval|permission)\b/i.test(t)) return true;
-  if (/\b(?:warn|alert)\s+me\b/i.test(t) && /\b(?:if|when|before|whenever)\b/i.test(t)) return true;
+  if (/\brequire\s+(?:my\s+)?(?:approval|permission)\b/.test(t)) return true;
+  if (/\b(?:warn|alert)\s+me\b/.test(t) && /\b(?:if|when|before|whenever)\b/.test(t)) return true;
 
   return false;
 }

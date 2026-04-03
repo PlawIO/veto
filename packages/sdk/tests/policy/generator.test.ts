@@ -84,6 +84,23 @@ describe('tryInstantGeneration', () => {
     expect(result!.rules[0].name).toBe('Salary Info Shield');
     expect(result!.rules[0].action).toBe('warn');
   });
+
+  it('block keyword overrides approval keywords in same input', () => {
+    const result = tryInstantGeneration('block pages with credit card info for review');
+    expect(result).not.toBeNull();
+    expect(result!.rules[0].action).toBe('block');
+  });
+
+  it('returns null for NaN price threshold', () => {
+    const result = tryInstantGeneration("don't spend more than $,,, on any purchase");
+    expect(result).toBeNull();
+  });
+
+  it('handles comma-formatted price threshold', () => {
+    const result = tryInstantGeneration('ask before any purchase over $1,500');
+    expect(result).not.toBeNull();
+    expect(result!.rules[0].conditions![0].value).toBe(1500);
+  });
 });
 
 describe('looksLikePolicyDeclaration', () => {
@@ -318,5 +335,35 @@ describe('sanitizeGeneratedRules', () => {
     });
 
     expect(rules[0].condition_groups).toHaveLength(2);
+  });
+
+  it('defaults invalid severity to medium with warning', () => {
+    const { rules, warnings } = sanitizeGeneratedRules({
+      rules: [{
+        id: 'test',
+        name: 'Test',
+        severity: 'banana',
+        action: 'block',
+        conditions: [{ field: 'x', operator: 'equals', value: 'y' }],
+      }],
+    });
+
+    expect(rules[0].severity).toBe('medium');
+    expect(warnings.some(w => w.includes('banana'))).toBe(true);
+  });
+
+  it('defaults invalid action to block with warning', () => {
+    const { rules, warnings } = sanitizeGeneratedRules({
+      rules: [{
+        id: 'test',
+        name: 'Test',
+        severity: 'high',
+        action: 'yeet',
+        conditions: [{ field: 'x', operator: 'equals', value: 'y' }],
+      }],
+    });
+
+    expect(rules[0].action).toBe('block');
+    expect(warnings.some(w => w.includes('yeet'))).toBe(true);
   });
 });

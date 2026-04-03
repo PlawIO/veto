@@ -147,6 +147,40 @@ describe('extractEntities', () => {
     });
   });
 
+  describe('salary false positive resistance', () => {
+    it('does not match "compare" as salary keyword', () => {
+      const result = extractEntities('compare $200,000 options across providers');
+      expect(result.has_salary_figures).toBe(false);
+    });
+
+    it('does not match "payload" as salary keyword', () => {
+      const result = extractEntities('payload: $150,000 bytes transferred');
+      expect(result.has_salary_figures).toBe(false);
+    });
+
+    it('still matches standalone "comp" as salary keyword', () => {
+      const result = extractEntities('Total comp $200,000 annually');
+      expect(result.has_salary_figures).toBe(true);
+    });
+  });
+
+  describe('credit card Luhn validation', () => {
+    it('accepts valid Luhn number (4111 1111 1111 1111)', () => {
+      const result = extractEntities('Card: 4111 1111 1111 1111');
+      expect(result.has_credit_cards).toBe(true);
+    });
+
+    it('rejects invalid Luhn number', () => {
+      const result = extractEntities('Tracking: 1234 5678 9012 3456');
+      expect(result.has_credit_cards).toBe(false);
+    });
+
+    it('accepts valid Visa test number without spaces', () => {
+      const result = extractEntities('CC: 4532015112830366');
+      expect(result.has_credit_cards).toBe(true);
+    });
+  });
+
   describe('empty/short input', () => {
     it('returns empty for empty string', () => {
       const result = extractEntities('');

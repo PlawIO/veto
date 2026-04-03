@@ -7,6 +7,14 @@
  * Key behavior: undefined fields NEVER match. This prevents false positives
  * on negative operators like not_equals, not_contains, not_in.
  *
+ * **Divergences from canonical condition-evaluator.ts:**
+ * - All string comparisons are case-insensitive (canonical is case-sensitive).
+ * - `within_hours`/`outside_hours` use wall clock time with "HH:MM-HH:MM"
+ *   strings (canonical uses field values as timestamps with structured
+ *   {@link TimeWindowConditionValue} objects including timezone/day support).
+ * - `percent_of` falls back to simplified `fieldValue >= expected` when
+ *   no `reference` field is provided (canonical requires `reference`).
+ *
  * @module rules/local-evaluator
  */
 
@@ -40,7 +48,27 @@ export function resolveFieldPath(
 /**
  * Evaluate a single condition against a context object.
  *
- * Case-insensitive string matching. Unknown operators return false.
+ * All string comparisons are case-insensitive. This differs from the
+ * canonical `condition-evaluator.ts` which is case-sensitive.
+ *
+ * **`within_hours` / `outside_hours` divergence:**
+ * The local evaluator uses wall clock time (not the field value).
+ * Expected format is a simple `"HH:MM-HH:MM"` string. There is no
+ * timezone or day-of-week support. This intentionally diverges from the
+ * canonical evaluator which interprets the field value as a timestamp
+ * and uses structured `TimeWindowConditionValue` objects with timezone
+ * and day support. The simplified approach is designed for local/browser
+ * use where wall clock checks are sufficient.
+ *
+ * **`percent_of` divergence:**
+ * When a `reference` field is present on the condition, the local
+ * evaluator resolves it and computes `fieldValue / referenceValue * 100`,
+ * returning true when the percentage exceeds `expected`. When no
+ * `reference` field exists, it falls back to a simplified comparison:
+ * `fieldValue >= expected`. The canonical evaluator always requires a
+ * `reference` field and returns false without one.
+ *
+ * Unknown operators return false.
  */
 export function evaluateCondition(
   condition: RuleCondition,
@@ -55,8 +83,14 @@ export function evaluateCondition(
 
   switch (condition.operator) {
     case 'equals':
+      if (typeof fieldValue === 'string' && typeof expected === 'string') {
+        return fieldValue.toLowerCase() === expected.toLowerCase();
+      }
       return fieldValue === expected;
     case 'not_equals':
+      if (typeof fieldValue === 'string' && typeof expected === 'string') {
+        return fieldValue.toLowerCase() !== expected.toLowerCase();
+      }
       return fieldValue !== expected;
     case 'contains':
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
@@ -101,20 +135,40 @@ export function evaluateCondition(
         return typeof expected === 'number' && fieldValue.length > expected;
       }
       return false;
-    case 'percent_of':
-      return typeof fieldValue === 'number' && typeof expected === 'number' && fieldValue >= expected;
+    case 'percent_of': {
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      if (typeof condition.reference === 'string') {
+        const referenceValue = resolveFieldPath(condition.reference, context);
+        if (typeof referenceValue !== 'number' || referenceValue === 0) return false;
+        return (fieldValue / referenceValue) * 100 > expected;
+      }
+      return fieldValue >= expected;
+    }
+    /**
+     * `within_hours` / `outside_hours` — wall clock check.
+     *
+     * Uses the current wall clock time, NOT the field value. Expected
+     * value is a simple `"HH:MM-HH:MM"` string (24h format). No
+     * timezone or day-of-week support. Wrap-around ranges (e.g.
+     * `"22:00-06:00"`) are supported. This intentionally diverges
+     * from the canonical `condition-evaluator.ts`.
+     */
     case 'within_hours':
     case 'outside_hours': {
       if (typeof expected !== 'string') return false;
       const parts = expected.split('-');
       if (parts.length !== 2) return false;
-      const [sH, sM] = parts[0].split(':').map(Number);
-      const [eH, eM] = parts[1].split(':').map(Number);
-      if (isNaN(sH) || isNaN(eH)) return false;
+      const startParts = parts[0].split(':').map(Number);
+      const endParts = parts[1].split(':').map(Number);
+      const [sH, sM] = startParts;
+      const [eH, eM] = endParts;
+      if (isNaN(sH) || isNaN(sM) || isNaN(eH) || isNaN(eM)) return false;
+      if (sH < 0 || sH > 23 || eH < 0 || eH > 23) return false;
+      if (sM < 0 || sM > 59 || eM < 0 || eM > 59) return false;
       const now = new Date();
       const nowMins = now.getHours() * 60 + now.getMinutes();
-      const startMins = sH * 60 + (sM || 0);
-      const endMins = eH * 60 + (eM || 0);
+      const startMins = sH * 60 + sM;
+      const endMins = eH * 60 + eM;
       let within: boolean;
       if (startMins <= endMins) {
         within = nowMins >= startMins && nowMins < endMins;
@@ -148,12 +202,13 @@ export function evaluateRulesLocally(
 
     if (rule.tools && rule.tools.length > 0 && !rule.tools.includes(toolName)) continue;
 
+    // Conditions-first fallthrough: matches canonical evaluateConditionCollections.
+    // If `conditions` is present and non-empty, evaluate only those.
+    // Otherwise fall through to `condition_groups`.
     if (rule.conditions && rule.conditions.length > 0) {
       const allMatch = rule.conditions.every(c => evaluateCondition(c, args));
       if (!allMatch) continue;
-    }
-
-    if (rule.condition_groups && rule.condition_groups.length > 0) {
+    } else if (rule.condition_groups && rule.condition_groups.length > 0) {
       const anyGroupMatch = rule.condition_groups.some(group =>
         group.every(c => evaluateCondition(c, args)),
       );

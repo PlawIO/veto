@@ -2962,7 +2962,10 @@ export class Veto {
 
   private notifyDecisionMade(result: GuardResult, toolName: string): void {
     try {
-      this.onDecisionMade?.({ ...result, toolName });
+      const maybePromise = this.onDecisionMade?.({ ...result, toolName });
+      if (maybePromise && typeof (maybePromise as any).catch === 'function') {
+        (maybePromise as any).catch(() => {});
+      }
     } catch {
       // swallow — callback errors must not break guard flow
     }

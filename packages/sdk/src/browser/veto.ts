@@ -717,7 +717,10 @@ export class Veto {
 
     const guardResult = this.toGuardResult(result);
     try {
-      this.onDecisionMade?.({ ...guardResult, toolName });
+      const maybePromise = this.onDecisionMade?.({ ...guardResult, toolName });
+      if (maybePromise && typeof (maybePromise as any).catch === 'function') {
+        (maybePromise as any).catch(() => {});
+      }
     } catch {
       // swallow — callback errors must not break guard flow
     }

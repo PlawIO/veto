@@ -56,7 +56,7 @@ const PRICE_REGEX = /(?:[$€£¥₹₩]|(?:USD|EUR|GBP|JPY|INR|CHF|AUD|CAD|CNY)
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]{1,64}@[a-zA-Z0-9.-]{1,255}\.[a-zA-Z]{2,}/g;
 const PHONE_REGEX = /(?:\+\d{1,3}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}/g;
 const SALARY_REGEX =
-  /(?:salary|compensation|pay|income|earning|comp|base|total\s*comp|ote|ctc)[:\s]*(?:[$€£¥₹]|(?:USD|EUR|GBP)\s?)?\s?([\d,]+(?:\.\d{1,2})?)\s*(?:k|K|pa|p\.a\.)?/gi;
+  /\b(?:salary|salaries|compensation|comp\b|pay\b|wage|wages|income|earning|base|total\s*comp|ote|ctc)[:\s]*(?:[$€£¥₹]|(?:USD|EUR|GBP)\s?)?\s?([\d,]+(?:\.\d{1,2})?)\s*(?:k|K|pa|p\.a\.)?/gi;
 const SALARY_AMOUNT_REGEX =
   /(?:[$€£¥₹])\s?([\d,]+(?:\.\d{1,2})?)\s*(?:k|K)\s*(?:\/yr|\/year|per\s*(?:year|annum)|salary|comp|annual|base)/gi;
 const EQUITY_REGEX = /([\d.]+)\s*%\s*(?:equity|vesting|options|ownership|stake|shares|stock|rsus?|esop)/gi;
@@ -70,6 +70,21 @@ function parsePrice(match: string): number {
 
 function dedup(arr: string[]): string[] {
   return [...new Set(arr)];
+}
+
+function passesLuhn(digits: string): boolean {
+  let sum = 0;
+  let alternate = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = parseInt(digits[i], 10);
+    if (alternate) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    alternate = !alternate;
+  }
+  return sum % 10 === 0;
 }
 
 function isLikelyPhoneNumber(value: string): boolean {
@@ -114,8 +129,8 @@ export function extractEntities(
   }
 
   const emails = dedup(
-    [...capped.matchAll(EMAIL_REGEX)].map(m => m[0].toLowerCase()).slice(0, maxEmails),
-  );
+    [...capped.matchAll(EMAIL_REGEX)].map(m => m[0].toLowerCase()),
+  ).slice(0, maxEmails);
 
   const phoneNumbers = dedup(
     [...capped.matchAll(PHONE_REGEX)]
@@ -146,7 +161,8 @@ export function extractEntities(
   }
 
   const govIdCount = [...capped.matchAll(GOV_ID_REGEX)].length;
-  const creditCardCount = [...capped.matchAll(CREDIT_CARD_REGEX)].length;
+  const creditCardMatches = [...capped.matchAll(CREDIT_CARD_REGEX)];
+  const creditCardCount = creditCardMatches.filter(m => passesLuhn(m[0].replace(/\D/g, ''))).length;
   const apiKeyCount = [...capped.matchAll(API_KEY_REGEX)].length;
 
   const sensitiveTerms: string[] = [];
