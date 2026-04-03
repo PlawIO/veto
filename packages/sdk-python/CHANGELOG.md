@@ -1,5 +1,11 @@
 # veto (Python SDK)
 
+## 0.12.1
+
+### Patch Changes
+
+- Fix decision stream logging in the TypeScript and Python protect helpers, preserve stream-aware cache separation, and keep operational warnings visible in stream mode.
+
 ## 0.12.0
 
 ### Minor Changes

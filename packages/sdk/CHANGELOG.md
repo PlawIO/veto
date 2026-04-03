@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.1.1
+
+### Patch Changes
+
+- [#165](https://github.com/PlawIO/veto/pull/165) [`f606cde`](https://github.com/PlawIO/veto/commit/f606cdef590530e989b9cdebaa0f22b632a854ac) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix decision stream logging in the TypeScript and Python protect helpers, preserve stream-aware cache separation, and keep operational warnings visible in stream mode.
+
 ## 2.1.0
 
 ### Minor Changes
