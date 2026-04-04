@@ -71,7 +71,7 @@ export interface VetoBrowserOptions<TCloudClient = BrowserCloudClient> {
   budget?: BudgetConfig;
   costs?: ToolCostMap;
   /** Callback fired after every guard() invocation. Enables UI logging, audit trails, analytics. */
-  onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
+  onDecisionMade?: (result: GuardResult & { toolName: string }) => void | Promise<void>;
 }
 
 export interface VetoFromCloudOptions {
