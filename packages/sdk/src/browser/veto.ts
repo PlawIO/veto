@@ -266,6 +266,7 @@ export class Veto {
     context: ValidationContext,
     approvalId: string
   ) => void | Promise<void>;
+  private readonly onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
 
   private rulesState: LoadedRulesState;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
@@ -286,6 +287,7 @@ export class Veto {
         : null
     );
     this.onApprovalRequired = options.onApprovalRequired;
+    this.onDecisionMade = options.onDecisionMade;
 
     this.historyTracker = new HistoryTracker({
       maxSize: 100,
@@ -713,7 +715,16 @@ export class Veto {
     this.historyTracker.record(toolName, args, result, durationMs);
     this.reportDecision(validationContext, result, durationMs);
 
-    return this.toGuardResult(result);
+    const guardResult = this.toGuardResult(result);
+    try {
+      const maybePromise = this.onDecisionMade?.({ ...guardResult, toolName });
+      if (maybePromise && typeof (maybePromise as any).catch === 'function') {
+        (maybePromise as any).catch(() => {});
+      }
+    } catch {
+      // swallow — callback errors must not break guard flow
+    }
+    return guardResult;
   }
 
   async validateToolCall(call: {

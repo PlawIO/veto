@@ -354,6 +354,9 @@ export interface VetoOptions {
     context: ValidationContext,
     approvalId: string
   ) => void | Promise<void>;
+
+  /** Callback fired after every guard() invocation. Enables UI logging, audit trails, analytics. */
+  onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
 }
 
 export type VetoBrowserOptions = SharedVetoBrowserOptions<VetoCloudClient> & {
@@ -431,6 +434,7 @@ export class Veto {
     context: ValidationContext,
     approvalId: string
   ) => void | Promise<void>;
+  private readonly onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
 
   // Approval preference cache: tool name -> 'approve_all' | 'deny_all'
   private readonly approvalPreferences = new Map<string, 'approve_all' | 'deny_all'>();
@@ -612,8 +616,9 @@ export class Veto {
       },
     };
 
-    // Approval hook
+    // Hooks
     this.onApprovalRequired = options.onApprovalRequired;
+    this.onDecisionMade = options.onDecisionMade;
 
     this.eventWebhookEmitter = new EventWebhookEmitter(
       resolveEventWebhookConfig(config.events?.webhook, this.logger),
@@ -909,6 +914,7 @@ export class Veto {
       endpoint: undefined,
       cloudClient,
       onApprovalRequired: options.onApprovalRequired,
+      onDecisionMade: options.onDecisionMade,
     };
 
     return new Veto(vetoOptions, config, rules, logger, true);
@@ -2954,6 +2960,17 @@ export class Veto {
     this.eventWebhookEmitter.emit(event);
   }
 
+  private notifyDecisionMade(result: GuardResult, toolName: string): void {
+    try {
+      const maybePromise = this.onDecisionMade?.({ ...result, toolName });
+      if (maybePromise && typeof (maybePromise as any).catch === 'function') {
+        (maybePromise as any).catch(() => {});
+      }
+    } catch {
+      // swallow — callback errors must not break guard flow
+    }
+  }
+
   /**
    * Emit a webhook event for economic authorization outcomes.
    *
@@ -3477,7 +3494,7 @@ export class Veto {
           protocol: context.economic.protocol,
         });
         this.emitEconomicEvent(toolName, args, econResult, context.economic);
-        return {
+        const result: GuardResult = {
           decision: this.mode === 'shadow' ? 'allow' : econResult.decision,
           reason: econResult.denial
             ? `Economic: ${econResult.denial.reason}`
@@ -3486,6 +3503,8 @@ export class Veto {
           shadow: this.mode === 'shadow' ? true : undefined,
           shadowDecision: this.mode === 'shadow' ? econResult.decision : undefined,
         };
+        this.notifyDecisionMade(result, toolName);
+        return result;
       }
     }
 
@@ -3509,7 +3528,7 @@ export class Veto {
             cost: resolvedCost,
           });
           this.emitEconomicEvent(toolName, args, econResult, implicitEconomicContext);
-          return {
+          const result: GuardResult = {
             decision: this.mode === 'shadow' ? 'allow' : econResult.decision,
             reason: econResult.denial
               ? `Economic: ${econResult.denial.reason}`
@@ -3518,6 +3537,8 @@ export class Veto {
             shadow: this.mode === 'shadow' ? true : undefined,
             shadowDecision: this.mode === 'shadow' ? econResult.decision : undefined,
           };
+          this.notifyDecisionMade(result, toolName);
+          return result;
         }
       }
     }
@@ -3593,7 +3614,7 @@ export class Veto {
       );
       if (reserveResult.decision !== 'allow') {
         this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic);
-        return {
+        const result: GuardResult = {
           ...behavioralResult,
           decision: reserveResult.decision,
           reason: reserveResult.denial
@@ -3601,11 +3622,14 @@ export class Veto {
             : 'Budget reservation failed',
           economicDenial: reserveResult.denial,
         };
+        this.notifyDecisionMade(result, toolName);
+        return result;
       }
       // Emit spend_committed event on successful reservation
       this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic, 'spend_committed');
     }
 
+    this.notifyDecisionMade(behavioralResult, toolName);
     return behavioralResult;
   }
 

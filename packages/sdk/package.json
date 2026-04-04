@@ -149,6 +149,14 @@
     "./integrations/openai-agents": {
       "types": "./dist/integrations/openai-agents/index.d.ts",
       "import": "./dist/integrations/openai-agents/index.js"
+    },
+    "./extractors": {
+      "types": "./dist/extractors/index.d.ts",
+      "import": "./dist/extractors/index.js"
+    },
+    "./policy": {
+      "types": "./dist/policy/index.d.ts",
+      "import": "./dist/policy/index.js"
     }
   },
   "dependencies": {
