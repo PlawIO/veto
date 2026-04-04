@@ -37,4 +37,22 @@ describe('isSafePattern', () => {
   it('should accept empty pattern', () => {
     expect(isSafePattern('')).toBe(true);
   });
+
+  it('rejects overlapping alternation in quantified group: (a|a)+', () => {
+    expect(isSafePattern('(a|a)+')).toBe(false);
+  });
+
+  it('rejects lazy quantifier in quantified group: (.+?)+', () => {
+    expect(isSafePattern('(.+?)+')).toBe(false);
+  });
+
+  it('accepts simple safe patterns', () => {
+    expect(isSafePattern('^[a-z]+$')).toBe(true);
+    expect(isSafePattern('\\d{3}-\\d{4}')).toBe(true);
+    expect(isSafePattern('foo|bar|baz')).toBe(true);
+  });
+
+  it('accepts alternation without quantified group', () => {
+    expect(isSafePattern('(a|b)')).toBe(true);
+  });
 });

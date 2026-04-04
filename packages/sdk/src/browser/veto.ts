@@ -269,6 +269,10 @@ export class Veto {
   private readonly onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
 
   private rulesState: LoadedRulesState;
+  private cloudRules: Rule[] = [];
+  private cloudOutputRules: OutputRule[] = [];
+  private localRules: Rule[] = [];
+  private localOutputRules: OutputRule[] = [];
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
   private refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -280,7 +284,9 @@ export class Veto {
     this.userId = options.userId;
     this.role = options.role;
     this.validators = toNamedValidators(options.validators);
-    this.rulesState = indexRules(options.rules, options.outputRules ?? []);
+    this.cloudRules = options.rules;
+    this.cloudOutputRules = options.outputRules ?? [];
+    this.rulesState = indexRules(this.cloudRules, this.cloudOutputRules);
     this.cloudClient = options.cloudClient ?? (
       options.apiKey
         ? createInlineCloudClient(options.apiKey, options.endpoint, logger)
@@ -314,13 +320,24 @@ export class Veto {
   }
 
   static async fromCloud(options: VetoFromCloudOptions): Promise<Veto> {
-    const logger = createLogger('warn');
+    const logger = createLogger(options.logLevel ?? 'warn');
     const cloudClient = createInlineCloudClient(options.apiKey, options.endpoint, logger);
     const policies = await cloudClient.fetchPolicies();
 
     const veto = Veto.fromRules({
       rules: policies.policies,
       outputRules: policies.outputRules,
+      mode: options.mode,
+      logLevel: options.logLevel,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      userId: options.userId,
+      role: options.role,
+      validators: options.validators,
+      onApprovalRequired: options.onApprovalRequired,
+      onDecisionMade: options.onDecisionMade,
+      budget: options.budget,
+      costs: options.costs,
       apiKey: options.apiKey,
       endpoint: options.endpoint,
       cloudClient,
@@ -348,6 +365,9 @@ export class Veto {
         });
       });
     }, refreshIntervalMs);
+    if (typeof this.refreshIntervalId === 'object' && this.refreshIntervalId !== null && 'unref' in this.refreshIntervalId) {
+      (this.refreshIntervalId as NodeJS.Timeout).unref();
+    }
   }
 
   private getRulesForTool(toolName: string): Rule[] {
@@ -447,6 +467,10 @@ export class Veto {
     if (!ast) {
       try {
         ast = compile(expression);
+        if (this.compiledExpressionCache.size >= 10_000) {
+          const firstKey = this.compiledExpressionCache.keys().next().value;
+          if (firstKey !== undefined) this.compiledExpressionCache.delete(firstKey);
+        }
         this.compiledExpressionCache.set(expression, ast);
       } catch {
         return false;
@@ -873,7 +897,50 @@ export class Veto {
     }
 
     const remote = await this.cloudClient.fetchPolicies();
-    this.rulesState = indexRules(remote.policies, remote.outputRules ?? []);
+    this.cloudRules = remote.policies;
+    this.cloudOutputRules = remote.outputRules ?? [];
+    this.reindex();
+  }
+
+  addRules(rules: Rule[], outputRules?: OutputRule[]): void {
+    for (const rule of rules) {
+      const idx = this.localRules.findIndex(r => r.id === rule.id);
+      if (idx >= 0) {
+        this.localRules[idx] = rule;
+      } else {
+        this.localRules.push(rule);
+      }
+    }
+
+    if (outputRules) {
+      for (const rule of outputRules) {
+        const idx = this.localOutputRules.findIndex(r => r.id === rule.id);
+        if (idx >= 0) {
+          this.localOutputRules[idx] = rule;
+        } else {
+          this.localOutputRules.push(rule);
+        }
+      }
+    }
+
+    this.reindex();
+  }
+
+  removeRule(ruleId: string): void {
+    this.localRules = this.localRules.filter(r => r.id !== ruleId);
+    this.localOutputRules = this.localOutputRules.filter(r => r.id !== ruleId);
+    this.reindex();
+  }
+
+  getRules(): Rule[] {
+    return [...this.rulesState.allRules];
+  }
+
+  private reindex(): void {
+    this.rulesState = indexRules(
+      [...this.localRules, ...this.cloudRules],
+      [...this.localOutputRules, ...this.cloudOutputRules],
+    );
     this.compiledExpressionCache.clear();
   }
 

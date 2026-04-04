@@ -40,6 +40,7 @@ export function resolveFieldPath(
   let current: unknown = obj;
   for (const part of parts) {
     if (current === null || current === undefined || typeof current !== 'object') return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return undefined;
     current = (current as Record<string, unknown>)[part];
   }
   return current;
@@ -74,7 +75,7 @@ export function evaluateCondition(
   condition: RuleCondition,
   context: Record<string, unknown>,
 ): boolean {
-  if (!condition.field || !condition.operator) return true;
+  if (!condition.field || !condition.operator) return false;
 
   const fieldValue = resolveFieldPath(condition.field, context);
   const expected = condition.value;
@@ -96,13 +97,25 @@ export function evaluateCondition(
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
         return fieldValue.toLowerCase().includes(expected.toLowerCase());
       }
-      if (Array.isArray(fieldValue)) return fieldValue.includes(expected);
+      if (Array.isArray(fieldValue)) {
+        if (typeof expected === 'string') {
+          const lower = expected.toLowerCase();
+          return fieldValue.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === expected);
+        }
+        return fieldValue.includes(expected);
+      }
       return false;
     case 'not_contains':
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
         return !fieldValue.toLowerCase().includes(expected.toLowerCase());
       }
-      if (Array.isArray(fieldValue)) return !fieldValue.includes(expected);
+      if (Array.isArray(fieldValue)) {
+        if (typeof expected === 'string') {
+          const lower = expected.toLowerCase();
+          return !fieldValue.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === expected);
+        }
+        return !fieldValue.includes(expected);
+      }
       return false;
     case 'starts_with':
       return (
@@ -127,9 +140,19 @@ export function evaluateCondition(
     case 'less_than':
       return typeof fieldValue === 'number' && typeof expected === 'number' && fieldValue < expected;
     case 'in':
-      return Array.isArray(expected) && expected.includes(fieldValue);
+      if (!Array.isArray(expected)) return false;
+      if (typeof fieldValue === 'string') {
+        const lower = fieldValue.toLowerCase();
+        return expected.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === fieldValue);
+      }
+      return expected.includes(fieldValue);
     case 'not_in':
-      return Array.isArray(expected) && !expected.includes(fieldValue);
+      if (!Array.isArray(expected)) return false;
+      if (typeof fieldValue === 'string') {
+        const lower = fieldValue.toLowerCase();
+        return !expected.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === fieldValue);
+      }
+      return !expected.includes(fieldValue);
     case 'length_greater_than':
       if (typeof fieldValue === 'string' || Array.isArray(fieldValue)) {
         return typeof expected === 'number' && fieldValue.length > expected;

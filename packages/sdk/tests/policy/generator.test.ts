@@ -366,4 +366,20 @@ describe('sanitizeGeneratedRules', () => {
     expect(rules[0].action).toBe('block');
     expect(warnings.some(w => w.includes('yeet'))).toBe(true);
   });
+
+  it('uses deterministic ID deduplication', () => {
+    const input = {
+      rules: [
+        { id: 'same-id', name: 'Rule 1', action: 'block', severity: 'high', conditions: [] },
+        { id: 'same-id', name: 'Rule 2', action: 'warn', severity: 'high', conditions: [] },
+      ],
+    };
+    const { rules } = sanitizeGeneratedRules(input);
+    expect(rules[0].id).toBe('local-nl-same-id');
+    expect(rules[1].id).toMatch(/^local-nl-same-id-\d+$/);
+
+    // Run again to verify determinism
+    const { rules: rules2 } = sanitizeGeneratedRules(input);
+    expect(rules2[1].id).toBe(rules[1].id);
+  });
 });

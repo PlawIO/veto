@@ -10,6 +10,8 @@ export {
 export { Veto };
 export type {
   VetoBrowserOptions,
+  VetoFromCloudOptions,
+  VetoMode,
   GuardResult,
   GuardContext,
 } from './types.js';

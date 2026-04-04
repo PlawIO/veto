@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createSafeRegex,
   evaluateCondition,
+  evaluateConditionCollections,
+  evaluateLegacyCondition,
 } from '../../src/rules/condition-evaluator.js';
 import type { RuleCondition } from '../../src/rules/types.js';
 
@@ -81,5 +83,43 @@ describe('condition evaluator', () => {
     expect(evaluateCondition(condition, {
       arguments: { amount_usd: 80 },
     })).toBe(false);
+  });
+
+  it('malformed condition without field/operator/expression returns false', () => {
+    expect(evaluateCondition({} as RuleCondition, {})).toBe(false);
+  });
+});
+
+describe('evaluateConditionCollections', () => {
+  it('returns true with empty conditions array', () => {
+    expect(evaluateConditionCollections([], undefined, {})).toBe(true);
+  });
+
+  it('returns true with undefined conditions and undefined condition_groups', () => {
+    expect(evaluateConditionCollections(undefined, undefined, {})).toBe(true);
+  });
+});
+
+describe('evaluateLegacyCondition type guards', () => {
+  it('greater_than returns false for string "Infinity"', () => {
+    expect(evaluateLegacyCondition('Infinity', 'greater_than', 100)).toBe(false);
+  });
+
+  it('greater_than returns false for non-numeric string "abc"', () => {
+    expect(evaluateLegacyCondition('abc', 'greater_than', 100)).toBe(false);
+  });
+
+  it('less_than returns false for non-numeric string "abc"', () => {
+    expect(evaluateLegacyCondition('abc', 'less_than', 100)).toBe(false);
+  });
+
+  it('greater_than works for valid numeric inputs', () => {
+    expect(evaluateLegacyCondition(200, 'greater_than', 100)).toBe(true);
+    expect(evaluateLegacyCondition(50, 'greater_than', 100)).toBe(false);
+  });
+
+  it('less_than works for valid numeric inputs', () => {
+    expect(evaluateLegacyCondition(50, 'less_than', 100)).toBe(true);
+    expect(evaluateLegacyCondition(200, 'less_than', 100)).toBe(false);
   });
 });

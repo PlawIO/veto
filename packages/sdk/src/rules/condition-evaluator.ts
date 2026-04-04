@@ -59,6 +59,7 @@ function resolveDotPath(path: string, source: Record<string, unknown>): unknown 
     if (typeof current !== 'object') {
       return undefined;
     }
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return undefined;
     current = (current as Record<string, unknown>)[part];
   }
 
@@ -483,10 +484,14 @@ export function evaluateLegacyCondition(
       return collectNestedStrings(fieldValue)
         .some((value) => regex.test(value));
     }
-    case 'greater_than':
-      return Number(fieldValue) > Number(expected);
-    case 'less_than':
-      return Number(fieldValue) < Number(expected);
+    case 'greater_than': {
+      const a = Number(fieldValue), b = Number(expected);
+      return Number.isFinite(a) && Number.isFinite(b) && a > b;
+    }
+    case 'less_than': {
+      const a = Number(fieldValue), b = Number(expected);
+      return Number.isFinite(a) && Number.isFinite(b) && a < b;
+    }
     case 'length_greater_than': {
       const fieldLength = getLengthComparableValue(fieldValue);
       if (fieldLength === null) {
@@ -562,7 +567,7 @@ export function evaluateCondition(
     });
   }
 
-  return true;
+  return false;
 }
 
 /**

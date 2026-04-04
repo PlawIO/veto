@@ -257,11 +257,12 @@ export function sanitizeGeneratedRules(
 ): { rules: Rule[]; warnings: string[] } {
   const seenIds = new Set<string>();
   const warnings: string[] = [];
+  let dedupeCounter = 0;
 
   const rules = parsed.rules.map(r => {
     let id = `local-nl-${r.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`;
     while (seenIds.has(id)) {
-      id = `${id}-${Math.random().toString(36).slice(2, 10)}`;
+      id = `${id}-${++dedupeCounter}`;
     }
     seenIds.add(id);
 

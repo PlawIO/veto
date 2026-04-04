@@ -181,6 +181,55 @@ describe('extractEntities', () => {
     });
   });
 
+  describe('mutation isolation', () => {
+    it('does not share array references between calls', () => {
+      const result1 = extractEntities('ab');
+      result1.prices.push(999);
+      const result2 = extractEntities('cd');
+      expect(result2.prices).toEqual([]);
+    });
+  });
+
+  describe('Math.max safety', () => {
+    it('handles large price arrays without throwing', () => {
+      const text = Array.from({ length: 1000 }, (_, i) => `$${i + 1}`).join(' ');
+      const result = extractEntities(text, { maxPrices: 1000 });
+      expect(result.max_price).toBe(1000);
+      expect(result.min_price).toBe(1);
+    });
+  });
+
+  describe('API key false positive resistance', () => {
+    it('does not match words starting with "key" without separator', () => {
+      const result = extractEntities('keyboard_shortcut_configuration_settings_manager');
+      expect(result.has_api_keys).toBe(false);
+    });
+
+    it('matches real API keys with separator', () => {
+      const result = extractEntities('Use key_abcdefghijklmnopqrstuvwxyz123');
+      expect(result.has_api_keys).toBe(true);
+    });
+  });
+
+  describe('salary false positive: keyword in longer word', () => {
+    it('does not match "keynote" as salary keyword', () => {
+      const result = extractEntities('keynote $5,000 presentation');
+      expect(result.has_salary_figures).toBe(false);
+    });
+  });
+
+  describe('price boundary', () => {
+    it('includes $999,999.99', () => {
+      const result = extractEntities('Price: $999,999.99');
+      expect(result.prices).toContain(999999.99);
+    });
+
+    it('excludes $1,000,000', () => {
+      const result = extractEntities('Price: $1,000,000');
+      expect(result.prices).toEqual([]);
+    });
+  });
+
   describe('empty/short input', () => {
     it('returns empty for empty string', () => {
       const result = extractEntities('');

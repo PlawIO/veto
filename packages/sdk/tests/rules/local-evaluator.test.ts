@@ -179,8 +179,8 @@ describe('evaluateCondition', () => {
     )).toBe(false);
   });
 
-  it('condition without field/operator returns true', () => {
-    expect(evaluateCondition({}, { x: 1 })).toBe(true);
+  it('condition without field/operator returns false', () => {
+    expect(evaluateCondition({}, { x: 1 })).toBe(false);
   });
 
   it('equals is case-insensitive for strings', () => {
@@ -577,5 +577,68 @@ describe('evaluateRulesLocally', () => {
 
     const result = evaluateRulesLocally(rules, 'any_tool', {});
     expect(result.decision).toBe('deny');
+  });
+});
+
+describe('malformed condition handling', () => {
+  it('returns false when field is missing', () => {
+    expect(evaluateCondition({ field: '', operator: 'equals', value: 'x' } as any, {})).toBe(false);
+  });
+
+  it('returns false when operator is missing', () => {
+    expect(evaluateCondition({ field: 'x', operator: '', value: 'y' } as any, {})).toBe(false);
+  });
+});
+
+describe('in/not_in case insensitivity', () => {
+  it('in operator matches case-insensitively for strings', () => {
+    expect(evaluateCondition(
+      { field: 'role', operator: 'in', value: ['Admin', 'User'] },
+      { role: 'admin' }
+    )).toBe(true);
+  });
+
+  it('not_in operator matches case-insensitively for strings', () => {
+    expect(evaluateCondition(
+      { field: 'role', operator: 'not_in', value: ['Admin', 'User'] },
+      { role: 'admin' }
+    )).toBe(false);
+  });
+
+  it('in operator still works for non-string values', () => {
+    expect(evaluateCondition(
+      { field: 'code', operator: 'in', value: [1, 2, 3] },
+      { code: 2 }
+    )).toBe(true);
+  });
+});
+
+describe('contains/not_contains array case insensitivity', () => {
+  it('contains matches case-insensitively in string arrays', () => {
+    expect(evaluateCondition(
+      { field: 'roles', operator: 'contains', value: 'admin' },
+      { roles: ['Admin', 'User'] }
+    )).toBe(true);
+  });
+
+  it('not_contains matches case-insensitively in string arrays', () => {
+    expect(evaluateCondition(
+      { field: 'roles', operator: 'not_contains', value: 'admin' },
+      { roles: ['Admin', 'User'] }
+    )).toBe(false);
+  });
+});
+
+describe('prototype chain safety', () => {
+  it('resolveFieldPath does not resolve prototype properties', () => {
+    expect(resolveFieldPath('constructor', { name: 'test' })).toBeUndefined();
+  });
+
+  it('resolveFieldPath does not resolve __proto__', () => {
+    expect(resolveFieldPath('__proto__', { name: 'test' })).toBeUndefined();
+  });
+
+  it('resolveFieldPath still resolves own properties', () => {
+    expect(resolveFieldPath('name', { name: 'test' })).toBe('test');
   });
 });
