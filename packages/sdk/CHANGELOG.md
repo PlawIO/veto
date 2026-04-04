@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.2.2
+
+### Patch Changes
+
+- [#171](https://github.com/PlawIO/veto/pull/171) [`8c5e643`](https://github.com/PlawIO/veto/commit/8c5e643f7090edeb387ac1d50156d9cac044f20e) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Harden SDK security: fix ReDoS in regex evaluator, fail-closed malformed conditions, prototype chain traversal guards, bounded caches, evaluator consistency alignment, and eliminate all npm audit vulnerabilities
+
 ## 2.2.1
 
 ### Patch Changes
