@@ -42,6 +42,23 @@
     "node": ">=20",
     "pnpm": ">=9"
   },
+  "pnpm": {
+    "overrides": {
+      "minimatch@<3.1.4": "3.1.4",
+      "minimatch@>=9.0.0 <9.0.7": "9.0.7",
+      "picomatch@<2.3.2": "2.3.2",
+      "picomatch@>=4.0.0 <4.0.4": "4.0.4",
+      "flatted@<3.4.2": "3.4.2",
+      "brace-expansion@<2.0.3": "2.0.3",
+      "rollup@>=4.0.0 <4.59.0": "4.59.0",
+      "yaml@>=2.0.0 <2.8.3": "2.8.3",
+      "diff@>=6.0.0 <8.0.3": "8.0.3",
+      "ajv@>=6.0.0 <6.14.0": "6.14.0",
+      "@langchain/core@<0.3.80": "0.3.80",
+      "file-type@>=13.0.0 <21.3.2": "21.3.2",
+      "langsmith@<0.4.6": "0.4.6"
+    }
+  },
   "packageManager": "pnpm@9.15.0",
   "license": "Apache-2.0",
   "author": "Plaw, Inc.",
