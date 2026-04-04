@@ -65,4 +65,18 @@ describe('isSafePattern', () => {
     expect(isSafePattern('(a(b|c))')).toBe(true);
     expect(isSafePattern('(?:foo|bar)')).toBe(true);
   });
+
+  it('rejects nested quantifiers with multiple closing parens', () => {
+    // Multi-paren nesting: inner quantifier + ))*
+    expect(isSafePattern('((a+))*')).toBe(false);
+    expect(isSafePattern('(([a-z]+))+')).toBe(false);
+  });
+
+  it('rejects adjacent quantifiers after brace-quantifier', () => {
+    expect(isSafePattern('a{2}+')).toBe(false);
+  });
+
+  it('rejects lazy star in quantified group: (.*?)+', () => {
+    expect(isSafePattern('(.*?)+')).toBe(false);
+  });
 });

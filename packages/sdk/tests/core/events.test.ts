@@ -149,6 +149,19 @@ describe('event webhooks', () => {
       redactEventArguments(args, ['body']);
       expect(args.body).toBe('Secret');
     });
+
+    it('ignores prototype chain properties in selective redaction', () => {
+      const args = { to: 'team@example.com' };
+      const result = redactEventArguments(args, ['toString', 'constructor', 'to']);
+      expect(result.to).toBe('[REDACTED]');
+      expect(typeof result.toString).toBe('function');
+      expect(result.toString()).not.toBe('[REDACTED]');
+    });
+
+    it('returns args unchanged when redact is false', () => {
+      const args = { to: 'team@example.com' };
+      expect(redactEventArguments(args, false as unknown as boolean)).toBe(args);
+    });
   });
 
   it('fires webhook on deny event', async () => {

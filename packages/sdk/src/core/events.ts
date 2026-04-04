@@ -112,7 +112,7 @@ export function redactEventArguments(
   if (Array.isArray(redact)) {
     const result = { ...args };
     for (const key of redact) {
-      if (key in result) {
+      if (Object.prototype.hasOwnProperty.call(result, key)) {
         result[key] = '[REDACTED]';
       }
     }

@@ -1,6 +1,6 @@
 const MAX_PATTERN_LENGTH = 256;
 // Detect quantifier inside group followed by quantifier on the group: (a+)+, (a*){2,}, etc.
-const NESTED_QUANTIFIER_ON_GROUP = /[+*}]\s*\)\s*[+*{]/;
+const NESTED_QUANTIFIER_ON_GROUP = /[+*}]\s*\)+\s*[+*{]/;
 // Detect directly adjacent quantifiers: a++, a*+, etc.
 const ADJACENT_QUANTIFIERS = /[+*}]\s*[+*{]/;
 const OVERLAPPING_ALTERNATION = /\.\*.*\|.*\.\*/;

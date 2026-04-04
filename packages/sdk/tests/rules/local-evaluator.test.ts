@@ -363,6 +363,20 @@ describe('evaluateCondition', () => {
     )).toBe(false);
   });
 
+  it('greater_than rejects Infinity', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'greater_than', value: 100 },
+      { x: Infinity },
+    )).toBe(false);
+  });
+
+  it('less_than rejects -Infinity', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'less_than', value: 100 },
+      { x: -Infinity },
+    )).toBe(false);
+  });
+
   it('matches rejects ReDoS patterns via createSafeRegex', () => {
     expect(evaluateCondition(
       { field: 'x', operator: 'matches', value: '(a+)+$' },

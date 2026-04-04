@@ -244,6 +244,10 @@ function getTimeZoneFormatter(timezone: string): Intl.DateTimeFormat | null {
       minute: '2-digit',
       hour12: false,
     });
+    if (TIMEZONE_FORMATTER_CACHE.size >= 1000) {
+      const firstKey = TIMEZONE_FORMATTER_CACHE.keys().next().value;
+      if (firstKey !== undefined) TIMEZONE_FORMATTER_CACHE.delete(firstKey);
+    }
     TIMEZONE_FORMATTER_CACHE.set(timezone, formatter);
     return formatter;
   } catch {
@@ -473,7 +477,7 @@ export function evaluateLegacyCondition(
         return collectNestedStrings(fieldValue)
           .every((value) => !value.toLowerCase().includes(lower));
       }
-      return true;
+      return false;
     case 'starts_with':
       return typeof fieldValue === 'string' && typeof expected === 'string'
         && fieldValue.toLowerCase().startsWith(expected.toLowerCase());
@@ -581,6 +585,7 @@ export function evaluateCondition(
         Number.isNaN(resolvedFieldValue)
         || Number.isNaN(resolvedExpectedValue)
         || Number.isNaN(resolvedReferenceValue)
+        || resolvedReferenceValue === 0
       ) {
         return false;
       }

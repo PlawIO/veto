@@ -85,6 +85,25 @@ describe('condition evaluator', () => {
     })).toBe(false);
   });
 
+  it('percent_of returns false when reference is zero', () => {
+    const condition: RuleCondition = {
+      field: 'arguments.spent',
+      operator: 'percent_of',
+      value: 50,
+      reference: 'budget.remaining',
+    };
+
+    expect(evaluateCondition(condition, {
+      arguments: { spent: 10 },
+      budget: { remaining: 0 },
+    })).toBe(false);
+  });
+
+  it('not_contains returns false for non-string non-array field values', () => {
+    expect(evaluateLegacyCondition(42, 'not_contains', 'foo')).toBe(false);
+    expect(evaluateLegacyCondition(true, 'not_contains', 'bar')).toBe(false);
+  });
+
   it('malformed condition without field/operator/expression returns false', () => {
     expect(evaluateCondition({} as RuleCondition, {})).toBe(false);
   });
@@ -198,5 +217,55 @@ describe('evaluateLegacyCondition type guards', () => {
   it('less_than rejects null and booleans', () => {
     expect(evaluateLegacyCondition(null, 'less_than', 1)).toBe(false);
     expect(evaluateLegacyCondition(true, 'less_than', 2)).toBe(false);
+  });
+
+  it('greater_than rejects Infinity', () => {
+    expect(evaluateLegacyCondition(Infinity, 'greater_than', 100)).toBe(false);
+  });
+
+  it('less_than rejects -Infinity', () => {
+    expect(evaluateLegacyCondition(-Infinity, 'less_than', 100)).toBe(false);
+  });
+
+  it('contains returns false for non-string non-array field', () => {
+    expect(evaluateLegacyCondition(42, 'contains', '4')).toBe(false);
+  });
+
+  it('not_contains returns false for non-string non-array field', () => {
+    expect(evaluateLegacyCondition(42, 'not_contains', 'foo')).toBe(false);
+  });
+
+  it('starts_with returns false for non-string inputs', () => {
+    expect(evaluateLegacyCondition(123, 'starts_with', '1')).toBe(false);
+  });
+
+  it('ends_with returns false for non-string inputs', () => {
+    expect(evaluateLegacyCondition(123, 'ends_with', '3')).toBe(false);
+  });
+
+  it('matches returns false when expected is not a string', () => {
+    expect(evaluateLegacyCondition('hello', 'matches', 42)).toBe(false);
+  });
+
+  it('in returns false for non-array expected', () => {
+    expect(evaluateLegacyCondition('admin', 'in', 'admin')).toBe(false);
+  });
+
+  it('not_in returns false for non-array expected', () => {
+    expect(evaluateLegacyCondition('admin', 'not_in', 'admin')).toBe(false);
+  });
+
+  it('in works with non-string field values', () => {
+    expect(evaluateLegacyCondition(2, 'in', [1, 2, 3])).toBe(true);
+    expect(evaluateLegacyCondition(4, 'in', [1, 2, 3])).toBe(false);
+  });
+
+  it('not_in works with non-string field values', () => {
+    expect(evaluateLegacyCondition(4, 'not_in', [1, 2, 3])).toBe(true);
+    expect(evaluateLegacyCondition(2, 'not_in', [1, 2, 3])).toBe(false);
+  });
+
+  it('unknown operator returns false', () => {
+    expect(evaluateLegacyCondition('x', 'unknown_op' as 'equals', 'y')).toBe(false);
   });
 });

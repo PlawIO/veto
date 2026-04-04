@@ -132,9 +132,11 @@ export function evaluateCondition(
       }
       return false;
     case 'greater_than':
-      return typeof fieldValue === 'number' && typeof expected === 'number' && fieldValue > expected;
+      return typeof fieldValue === 'number' && typeof expected === 'number'
+        && Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue > expected;
     case 'less_than':
-      return typeof fieldValue === 'number' && typeof expected === 'number' && fieldValue < expected;
+      return typeof fieldValue === 'number' && typeof expected === 'number'
+        && Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue < expected;
     case 'in':
       if (!Array.isArray(expected)) return false;
       if (typeof fieldValue === 'string') {
