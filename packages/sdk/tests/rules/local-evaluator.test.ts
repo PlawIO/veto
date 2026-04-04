@@ -232,6 +232,76 @@ describe('evaluateCondition', () => {
     )).toBe(false);
   });
 
+  it('within_hours supports structured TimeWindowValue', () => {
+    const now = new Date();
+    const h = now.getUTCHours();
+    const nextH = (h + 2) % 24;
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'within_hours',
+        value: {
+          start: `${String(h).padStart(2, '0')}:00`,
+          end: `${String(nextH).padStart(2, '0')}:00`,
+          timezone: 'UTC',
+        },
+      },
+      { x: now.toISOString() },
+    )).toBe(true);
+  });
+
+  it('outside_hours supports structured TimeWindowValue', () => {
+    const now = new Date();
+    const h = now.getUTCHours();
+    const prevH = (h + 22) % 24;
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'outside_hours',
+        value: {
+          start: `${String(prevH).padStart(2, '0')}:00`,
+          end: `${String(prevH).padStart(2, '0')}:30`,
+          timezone: 'UTC',
+        },
+      },
+      { x: now.toISOString() },
+    )).toBe(true);
+  });
+
+  it('within_hours structured format returns false for invalid timestamp', () => {
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'within_hours',
+        value: {
+          start: '09:00',
+          end: '17:00',
+          timezone: 'UTC',
+        },
+      },
+      { x: 'not-a-date' },
+    )).toBe(false);
+  });
+
+  it('within_hours structured format supports day-of-week filtering', () => {
+    const now = new Date();
+    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const wrongDay = dayNames[(now.getUTCDay() + 1) % 7];
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'within_hours',
+        value: {
+          start: '00:00',
+          end: '23:59',
+          timezone: 'UTC',
+          days: [wrongDay],
+        },
+      },
+      { x: now.toISOString() },
+    )).toBe(false);
+  });
+
   it('within_hours returns false for malformed input', () => {
     expect(evaluateCondition(
       { field: 'x', operator: 'within_hours', value: 'abc:def-09:00' },

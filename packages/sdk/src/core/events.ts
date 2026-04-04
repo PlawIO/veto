@@ -39,6 +39,7 @@ export interface EventWebhookConfig {
   on: VetoWebhookEventType[];
   minSeverity: RuleSeverity;
   format: VetoWebhookFormat;
+  redactArguments?: boolean | string[];
 }
 
 const VALID_EVENT_TYPES: readonly VetoWebhookEventType[] = [
@@ -65,6 +66,7 @@ type RawEventWebhookConfig = {
   on?: unknown;
   min_severity?: unknown;
   format?: unknown;
+  redact_arguments?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -98,6 +100,25 @@ function mapCefSeverity(severity: RuleSeverity | undefined): number {
   if (severity === 'medium') return 5;
   if (severity === 'low') return 3;
   return 1;
+}
+
+export function redactEventArguments(
+  args: Record<string, unknown>,
+  redact: boolean | string[]
+): Record<string, unknown> {
+  if (redact === true) {
+    return Object.fromEntries(Object.keys(args).map(k => [k, '[REDACTED]']));
+  }
+  if (Array.isArray(redact)) {
+    const result = { ...args };
+    for (const key of redact) {
+      if (key in result) {
+        result[key] = '[REDACTED]';
+      }
+    }
+    return result;
+  }
+  return args;
 }
 
 function escapeCef(value: string): string {
@@ -151,11 +172,22 @@ export function resolveEventWebhookConfig(
     }
   }
 
+  let redactArguments: boolean | string[] | undefined;
+  if (webhook.redact_arguments === true) {
+    redactArguments = true;
+  } else if (Array.isArray(webhook.redact_arguments)) {
+    const validKeys = webhook.redact_arguments.filter((k): k is string => typeof k === 'string');
+    if (validKeys.length > 0) {
+      redactArguments = validKeys;
+    }
+  }
+
   return {
     url: webhook.url.trim(),
     on,
     minSeverity,
     format,
+    ...(redactArguments !== undefined && { redactArguments }),
   };
 }
 
@@ -283,16 +315,19 @@ export class EventWebhookEmitter {
     if (!this.config) return;
     if (!this.shouldEmit(event)) return;
 
-    const payload = this.formatPayload(event);
+    const emittedEvent = this.config.redactArguments
+      ? { ...event, arguments: redactEventArguments(event.arguments, this.config.redactArguments) }
+      : event;
+    const payload = this.formatPayload(emittedEvent);
     const contentType = typeof payload === 'string'
       ? 'text/plain; charset=utf-8'
       : 'application/json';
     const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
 
     this.logger.debug('Dispatching webhook event', {
-      eventType: event.eventType,
-      toolName: event.toolName,
-      decision: event.decision,
+      eventType: emittedEvent.eventType,
+      toolName: emittedEvent.toolName,
+      decision: emittedEvent.decision,
       format: this.config.format,
       url: this.config.url,
     });

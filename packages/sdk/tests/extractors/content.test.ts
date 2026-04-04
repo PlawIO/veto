@@ -230,6 +230,55 @@ describe('extractEntities', () => {
     });
   });
 
+  describe('GOV_ID keyword proximity', () => {
+    it('detects SSN with keyword nearby', () => {
+      const result = extractEntities('SSN: 123-45-6789');
+      expect(result.has_gov_ids).toBe(true);
+    });
+
+    it('detects Social Security number with keyword nearby', () => {
+      const result = extractEntities('Social Security Number: 123-45-6789');
+      expect(result.has_gov_ids).toBe(true);
+    });
+
+    it('does not flag bare SSN-shaped number without keyword', () => {
+      const result = extractEntities('Reference code: 123-45-6789 for your order');
+      expect(result.has_gov_ids).toBe(false);
+    });
+
+    it('detects EIN with keyword nearby', () => {
+      const result = extractEntities('EIN: 12-3456789');
+      expect(result.has_gov_ids).toBe(true);
+    });
+
+    it('does not flag bare EIN-shaped number without keyword', () => {
+      const result = extractEntities('Order 12-3456789 confirmed');
+      expect(result.has_gov_ids).toBe(false);
+    });
+  });
+
+  describe('unicode normalization', () => {
+    it('extracts prices through non-breaking spaces', () => {
+      const result = extractEntities('Price:\u00A0$199.99');
+      expect(result.prices).toContain(199.99);
+    });
+
+    it('extracts prices through zero-width chars', () => {
+      const result = extractEntities('Price: $\u200B199.99');
+      expect(result.prices).toContain(199.99);
+    });
+
+    it('extracts emails through NBSP', () => {
+      const result = extractEntities('Contact:\u00A0user@example.com');
+      expect(result.emails).toContain('user@example.com');
+    });
+
+    it('normalizes full-width digits in prices', () => {
+      const result = extractEntities('Cost: $１９９.99');
+      expect(result.prices).toContain(199.99);
+    });
+  });
+
   describe('empty/short input', () => {
     it('returns empty for empty string', () => {
       const result = extractEntities('');

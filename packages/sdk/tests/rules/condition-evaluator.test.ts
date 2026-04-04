@@ -100,6 +100,65 @@ describe('evaluateConditionCollections', () => {
   });
 });
 
+describe('evaluateLegacyCondition case-insensitive string operations', () => {
+  it('equals is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('Hello', 'equals', 'hello')).toBe(true);
+    expect(evaluateLegacyCondition('HELLO', 'equals', 'hello')).toBe(true);
+  });
+
+  it('not_equals is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('Hello', 'not_equals', 'hello')).toBe(false);
+    expect(evaluateLegacyCondition('Hello', 'not_equals', 'world')).toBe(true);
+  });
+
+  it('contains is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('Hello World', 'contains', 'hello')).toBe(true);
+    expect(evaluateLegacyCondition('hello world', 'contains', 'WORLD')).toBe(true);
+  });
+
+  it('not_contains is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('Hello World', 'not_contains', 'hello')).toBe(false);
+    expect(evaluateLegacyCondition('hello world', 'not_contains', 'missing')).toBe(true);
+  });
+
+  it('starts_with is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('HTTPS://example.com', 'starts_with', 'https')).toBe(true);
+  });
+
+  it('ends_with is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('example.COM', 'ends_with', '.com')).toBe(true);
+  });
+
+  it('matches is case-insensitive', () => {
+    expect(evaluateLegacyCondition('Hello World', 'matches', 'hello')).toBe(true);
+  });
+
+  it('in is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('admin', 'in', ['Admin', 'User'])).toBe(true);
+    expect(evaluateLegacyCondition('ADMIN', 'in', ['admin', 'user'])).toBe(true);
+  });
+
+  it('not_in is case-insensitive for strings', () => {
+    expect(evaluateLegacyCondition('admin', 'not_in', ['Admin', 'User'])).toBe(false);
+    expect(evaluateLegacyCondition('guest', 'not_in', ['Admin', 'User'])).toBe(true);
+  });
+
+  it('contains is case-insensitive for arrays with string elements', () => {
+    expect(evaluateLegacyCondition(['Admin', 'User'], 'contains', 'admin')).toBe(true);
+    expect(evaluateLegacyCondition(['admin', 'user'], 'contains', 'ADMIN')).toBe(true);
+  });
+
+  it('not_contains is case-insensitive for arrays with string elements', () => {
+    expect(evaluateLegacyCondition(['Admin', 'User'], 'not_contains', 'admin')).toBe(false);
+    expect(evaluateLegacyCondition(['admin', 'user'], 'not_contains', 'guest')).toBe(true);
+  });
+
+  it('equals uses strict comparison for non-strings', () => {
+    expect(evaluateLegacyCondition(1, 'equals', 1)).toBe(true);
+    expect(evaluateLegacyCondition(1, 'equals', '1')).toBe(false);
+  });
+});
+
 describe('evaluateLegacyCondition type guards', () => {
   it('greater_than returns false for string "Infinity"', () => {
     expect(evaluateLegacyCondition('Infinity', 'greater_than', 100)).toBe(false);

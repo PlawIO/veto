@@ -52,7 +52,11 @@
     "zod": "^3.22.0",
     "browser-use-node": ">=0.1.0",
     "ai": ">=3.0.0",
-    "@langchain/core": ">=0.2.0"
+    "@langchain/core": ">=0.2.0",
+    "ink": "^5.0.0",
+    "react": "^18.0.0",
+    "@opentui/core": "^0.1.0",
+    "picocolors": "^1.0.0"
   },
   "peerDependenciesMeta": {
     "openai": {
@@ -74,6 +78,18 @@
       "optional": true
     },
     "@langchain/core": {
+      "optional": true
+    },
+    "ink": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "@opentui/core": {
+      "optional": true
+    },
+    "picocolors": {
       "optional": true
     }
   },
@@ -160,11 +176,7 @@
     }
   },
   "dependencies": {
-    "@opentui/core": "^0.1.82",
     "ajv": "^8.17.1",
-    "ink": "^5.2.1",
-    "picocolors": "^1.1.1",
-    "react": "^18.3.1",
     "yaml": "^2.8.2"
   }
 }

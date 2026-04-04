@@ -7,11 +7,11 @@
  * Key behavior: undefined fields NEVER match. This prevents false positives
  * on negative operators like not_equals, not_contains, not_in.
  *
- * **Divergences from canonical condition-evaluator.ts:**
- * - All string comparisons are case-insensitive (canonical is case-sensitive).
- * - `within_hours`/`outside_hours` use wall clock time with "HH:MM-HH:MM"
- *   strings (canonical uses field values as timestamps with structured
- *   {@link TimeWindowConditionValue} objects including timezone/day support).
+ * **Alignment with canonical condition-evaluator.ts:**
+ * - All string comparisons are case-insensitive (aligned with canonical).
+ * - `within_hours`/`outside_hours` support structured TimeWindowValue objects
+ *   with timezone/day support (aligned with canonical), plus simple
+ *   "HH:MM-HH:MM" wall clock strings for backwards compatibility.
  * - `percent_of` falls back to simplified `fieldValue >= expected` when
  *   no `reference` field is provided (canonical requires `reference`).
  *
@@ -19,7 +19,7 @@
  */
 
 import type { Rule, RuleCondition } from './types.js';
-import { createSafeRegex } from './condition-evaluator.js';
+import { createSafeRegex, evaluateTimeWindow } from './condition-evaluator.js';
 
 export interface LocalEvalResult {
   decision: 'allow' | 'deny' | 'require_approval' | null;
@@ -49,17 +49,13 @@ export function resolveFieldPath(
 /**
  * Evaluate a single condition against a context object.
  *
- * All string comparisons are case-insensitive. This differs from the
- * canonical `condition-evaluator.ts` which is case-sensitive.
+ * All string comparisons are case-insensitive (aligned with canonical evaluator).
  *
- * **`within_hours` / `outside_hours` divergence:**
- * The local evaluator uses wall clock time (not the field value).
- * Expected format is a simple `"HH:MM-HH:MM"` string. There is no
- * timezone or day-of-week support. This intentionally diverges from the
- * canonical evaluator which interprets the field value as a timestamp
- * and uses structured `TimeWindowConditionValue` objects with timezone
- * and day support. The simplified approach is designed for local/browser
- * use where wall clock checks are sufficient.
+ * **`within_hours` / `outside_hours`:**
+ * Supports two formats:
+ * 1. Structured TimeWindowValue objects with timezone/day support (aligned
+ *    with canonical evaluator, uses field value as timestamp).
+ * 2. Simple `"HH:MM-HH:MM"` strings for backwards-compatible wall clock mode.
  *
  * **`percent_of` divergence:**
  * When a `reference` field is present on the condition, the local
@@ -168,16 +164,26 @@ export function evaluateCondition(
       return fieldValue >= expected;
     }
     /**
-     * `within_hours` / `outside_hours` — wall clock check.
+     * `within_hours` / `outside_hours` — supports two formats:
      *
-     * Uses the current wall clock time, NOT the field value. Expected
-     * value is a simple `"HH:MM-HH:MM"` string (24h format). No
-     * timezone or day-of-week support. Wrap-around ranges (e.g.
-     * `"22:00-06:00"`) are supported. This intentionally diverges
-     * from the canonical `condition-evaluator.ts`.
+     * 1. Structured TimeWindowValue object (aligned with canonical evaluator):
+     *    `{ start: "09:00", end: "17:00", timezone: "America/New_York", days?: ["mon","tue",...] }`
+     *    Uses the field value as a timestamp, with timezone and day-of-week support.
+     *
+     * 2. Simple "HH:MM-HH:MM" string (backwards-compatible wall clock mode):
+     *    Uses the current wall clock time, NOT the field value. No timezone
+     *    or day-of-week support. Wrap-around ranges (e.g. "22:00-06:00")
+     *    are supported.
      */
     case 'within_hours':
     case 'outside_hours': {
+      if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+        const result = evaluateTimeWindow(fieldValue, expected);
+        if (result === null) return false;
+        return condition.operator === 'within_hours'
+          ? result.inScope && result.withinWindow
+          : result.inScope && !result.withinWindow;
+      }
       if (typeof expected !== 'string') return false;
       const parts = expected.split('-');
       if (parts.length !== 2) return false;
