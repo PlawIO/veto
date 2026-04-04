@@ -55,4 +55,14 @@ describe('isSafePattern', () => {
   it('accepts alternation without quantified group', () => {
     expect(isSafePattern('(a|b)')).toBe(true);
   });
+
+  it('rejects nested-group alternation in quantified group: (a|(b|c))+', () => {
+    expect(isSafePattern('(a|(b|c))+')).toBe(false);
+    expect(isSafePattern('((a|b)|c)*')).toBe(false);
+  });
+
+  it('accepts nested groups without alternation-in-quantified pattern', () => {
+    expect(isSafePattern('(a(b|c))')).toBe(true);
+    expect(isSafePattern('(?:foo|bar)')).toBe(true);
+  });
 });

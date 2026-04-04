@@ -501,12 +501,12 @@ export function evaluateLegacyCondition(
         .some((value) => regex.test(value));
     }
     case 'greater_than': {
-      const a = Number(fieldValue), b = Number(expected);
-      return Number.isFinite(a) && Number.isFinite(b) && a > b;
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue > expected;
     }
     case 'less_than': {
-      const a = Number(fieldValue), b = Number(expected);
-      return Number.isFinite(a) && Number.isFinite(b) && a < b;
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue < expected;
     }
     case 'length_greater_than': {
       const fieldLength = getLengthComparableValue(fieldValue);

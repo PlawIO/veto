@@ -4,8 +4,8 @@ const NESTED_QUANTIFIER_ON_GROUP = /[+*}]\s*\)\s*[+*{]/;
 // Detect directly adjacent quantifiers: a++, a*+, etc.
 const ADJACENT_QUANTIFIERS = /[+*}]\s*[+*{]/;
 const OVERLAPPING_ALTERNATION = /\.\*.*\|.*\.\*/;
-// Detect alternation inside quantified group: (a|a)+, (foo|foo)+
-const QUANTIFIED_ALTERNATION = /\([^)]*\|[^)]*\)\s*[+*{]/;
+// Detect alternation inside quantified group, including nested: (a|a)+, (a|(b|c))+
+const QUANTIFIED_ALTERNATION = /\((?:[^()]*|\([^()]*\))*\|(?:[^()]*|\([^()]*\))*\)\s*[+*{]/;
 // Detect lazy quantifier inside quantified group: (.+?)+
 const LAZY_IN_QUANTIFIED_GROUP = /\([^)]*[+*][?][^)]*\)\s*[+*{]/;
 

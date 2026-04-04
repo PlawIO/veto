@@ -181,4 +181,22 @@ describe('evaluateLegacyCondition type guards', () => {
     expect(evaluateLegacyCondition(50, 'less_than', 100)).toBe(true);
     expect(evaluateLegacyCondition(200, 'less_than', 100)).toBe(false);
   });
+
+  it('greater_than rejects null (no coercion to 0)', () => {
+    expect(evaluateLegacyCondition(null, 'greater_than', -1)).toBe(false);
+  });
+
+  it('greater_than rejects booleans (no coercion to 0/1)', () => {
+    expect(evaluateLegacyCondition(true, 'greater_than', 0.5)).toBe(false);
+    expect(evaluateLegacyCondition(false, 'greater_than', -1)).toBe(false);
+  });
+
+  it('greater_than rejects numeric strings (strict typeof number)', () => {
+    expect(evaluateLegacyCondition('42', 'greater_than', 10)).toBe(false);
+  });
+
+  it('less_than rejects null and booleans', () => {
+    expect(evaluateLegacyCondition(null, 'less_than', 1)).toBe(false);
+    expect(evaluateLegacyCondition(true, 'less_than', 2)).toBe(false);
+  });
 });
