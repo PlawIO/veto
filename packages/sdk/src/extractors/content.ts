@@ -35,34 +35,36 @@ export interface ExtractEntitiesOptions {
   textCap?: number;
 }
 
-const EMPTY_ENTITIES: ExtractedEntities = {
-  prices: [],
-  max_price: 0,
-  min_price: 0,
-  emails: [],
-  phone_numbers: [],
-  salary_figures: [],
-  has_salary_figures: false,
-  equity_percentages: [],
-  has_equity_info: false,
-  sensitive_terms: [],
-  has_sensitive_pii: false,
-  has_credit_cards: false,
-  has_gov_ids: false,
-  has_api_keys: false,
-};
-
 const PRICE_REGEX = /(?:[$€£¥₹₩]|(?:USD|EUR|GBP|JPY|INR|CHF|AUD|CAD|CNY)\s?)\s?([\d,]+(?:\.\d{1,2})?)/gi;
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]{1,64}@[a-zA-Z0-9.-]{1,255}\.[a-zA-Z]{2,}/g;
 const PHONE_REGEX = /(?:\+\d{1,3}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}/g;
 const SALARY_REGEX =
-  /\b(?:salary|salaries|compensation|comp\b|pay\b|wage|wages|income|earning|base|total\s*comp|ote|ctc)[:\s]*(?:[$€£¥₹]|(?:USD|EUR|GBP)\s?)?\s?([\d,]+(?:\.\d{1,2})?)\s*(?:k|K|pa|p\.a\.)?/gi;
+  /\b(?:salary\b|salaries\b|compensation\b|comp\b|pay\b|wage\b|wages\b|income\b|earning\b|base\b|total\s*comp\b|ote\b|ctc\b)[:\s]*(?:[$€£¥₹]|(?:USD|EUR|GBP)\s?)?\s?([\d,]+(?:\.\d{1,2})?)\s*(?:k|K|pa|p\.a\.)?/gi;
 const SALARY_AMOUNT_REGEX =
   /(?:[$€£¥₹])\s?([\d,]+(?:\.\d{1,2})?)\s*(?:k|K)\s*(?:\/yr|\/year|per\s*(?:year|annum)|salary|comp|annual|base)/gi;
 const EQUITY_REGEX = /([\d.]+)\s*%\s*(?:equity|vesting|options|ownership|stake|shares|stock|rsus?|esop)/gi;
 const GOV_ID_REGEX = /\b\d{3}-\d{2}-\d{4}\b|\b[A-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-Z]\b|\b\d{2}-\d{7}\b/g;
 const CREDIT_CARD_REGEX = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
-const API_KEY_REGEX = /\b(?:sk|pk|api|key|token|secret|bearer)[-_]?[a-zA-Z0-9_-]{20,}\b/gi;
+const API_KEY_REGEX = /\b(?:sk|pk|api|key|token|secret|bearer)[-_][a-zA-Z0-9_-]{20,}\b/gi;
+const GOV_ID_KEYWORD_REGEX = /\b(?:ssn|social\s*security|ein|tax\s*id|national\s*id|identity|passport|license|licence|id\s*number)\b/i;
+
+// eslint-disable-next-line no-misleading-character-class
+const ZERO_WIDTH_REGEX = /[\u200B\u200C\u200D\uFEFF]/g;
+
+function normalizeUnicode(text: string): string {
+  return text
+    .replace(/\u00A0/g, ' ')
+    .replace(ZERO_WIDTH_REGEX, '')
+    .replace(/[\uFF10-\uFF19]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 0x30));
+}
+
+function hasGovIdKeywordNearby(text: string, matchIndex: number, matchLength: number): boolean {
+  const windowSize = 30;
+  const start = Math.max(0, matchIndex - windowSize);
+  const end = Math.min(text.length, matchIndex + matchLength + windowSize);
+  const window = text.slice(start, end);
+  return GOV_ID_KEYWORD_REGEX.test(window);
+}
 
 function parsePrice(match: string): number {
   return Number.parseFloat(match.replace(/,/g, ''));
@@ -108,7 +110,22 @@ export function extractEntities(
   text: string,
   options?: ExtractEntitiesOptions,
 ): ExtractedEntities {
-  if (!text || text.length < 3) return { ...EMPTY_ENTITIES };
+  if (!text || text.length < 3) return {
+    prices: [],
+    max_price: 0,
+    min_price: 0,
+    emails: [],
+    phone_numbers: [],
+    salary_figures: [],
+    has_salary_figures: false,
+    equity_percentages: [],
+    has_equity_info: false,
+    sensitive_terms: [],
+    has_sensitive_pii: false,
+    has_credit_cards: false,
+    has_gov_ids: false,
+    has_api_keys: false,
+  };
 
   const maxPrices = options?.maxPrices ?? 100;
   const maxEmails = options?.maxEmails ?? 50;
@@ -117,7 +134,8 @@ export function extractEntities(
   const maxEquityPercentages = options?.maxEquityPercentages ?? 50;
   const textCap = options?.textCap ?? 200_000;
 
-  const capped = text.length > textCap ? text.slice(0, textCap) : text;
+  const raw = text.length > textCap ? text.slice(0, textCap) : text;
+  const capped = normalizeUnicode(raw);
 
   const prices: number[] = [];
   for (const match of capped.matchAll(PRICE_REGEX)) {
@@ -160,7 +178,8 @@ export function extractEntities(
     if (equityPercentages.length >= maxEquityPercentages) break;
   }
 
-  const govIdCount = [...capped.matchAll(GOV_ID_REGEX)].length;
+  const govIdMatches = [...capped.matchAll(GOV_ID_REGEX)];
+  const govIdCount = govIdMatches.filter(m => hasGovIdKeywordNearby(capped, m.index!, m[0].length)).length;
   const creditCardMatches = [...capped.matchAll(CREDIT_CARD_REGEX)];
   const creditCardCount = creditCardMatches.filter(m => passesLuhn(m[0].replace(/\D/g, ''))).length;
   const apiKeyCount = [...capped.matchAll(API_KEY_REGEX)].length;
@@ -176,8 +195,8 @@ export function extractEntities(
 
   return {
     prices,
-    max_price: prices.length > 0 ? Math.max(...prices) : 0,
-    min_price: prices.length > 0 ? Math.min(...prices) : 0,
+    max_price: prices.length > 0 ? prices.reduce((a, b) => a > b ? a : b, -Infinity) : 0,
+    min_price: prices.length > 0 ? prices.reduce((a, b) => a < b ? a : b, Infinity) : 0,
     emails,
     phone_numbers: phoneNumbers,
     salary_figures: salaryFigures,

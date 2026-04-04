@@ -32,6 +32,10 @@ export interface ProtectOptions {
 
   // Callbacks
   onApprovalRequired?: (context: ValidationContext, approvalId: string) => void | Promise<void>;
+  onInitError?: (error: Error) => void;
+
+  // Logging
+  logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 
   // Budget
   budget?: BudgetConfig;
@@ -329,7 +333,15 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
         instance = createAllowAllInstance(options);
       }
     }
-  } catch {
+  } catch (error) {
+    if (options.onInitError) {
+      options.onInitError(error instanceof Error ? error : new Error(String(error)));
+    }
+    if (options.logger) {
+      options.logger.warn('Veto initialization failed, running in allow-all mode', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     instance = createAllowAllInstance(options);
   }
 

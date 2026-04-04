@@ -143,6 +143,10 @@ export class ExpressionValidator {
     let ast = this.compiledCache.get(expression);
     if (!ast) {
       ast = compile(expression);
+      if (this.compiledCache.size >= 10_000) {
+        const firstKey = this.compiledCache.keys().next().value;
+        if (firstKey !== undefined) this.compiledCache.delete(firstKey);
+      }
       this.compiledCache.set(expression, ast);
     }
 

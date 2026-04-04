@@ -37,4 +37,46 @@ describe('isSafePattern', () => {
   it('should accept empty pattern', () => {
     expect(isSafePattern('')).toBe(true);
   });
+
+  it('rejects overlapping alternation in quantified group: (a|a)+', () => {
+    expect(isSafePattern('(a|a)+')).toBe(false);
+  });
+
+  it('rejects lazy quantifier in quantified group: (.+?)+', () => {
+    expect(isSafePattern('(.+?)+')).toBe(false);
+  });
+
+  it('accepts simple safe patterns', () => {
+    expect(isSafePattern('^[a-z]+$')).toBe(true);
+    expect(isSafePattern('\\d{3}-\\d{4}')).toBe(true);
+    expect(isSafePattern('foo|bar|baz')).toBe(true);
+  });
+
+  it('accepts alternation without quantified group', () => {
+    expect(isSafePattern('(a|b)')).toBe(true);
+  });
+
+  it('rejects nested-group alternation in quantified group: (a|(b|c))+', () => {
+    expect(isSafePattern('(a|(b|c))+')).toBe(false);
+    expect(isSafePattern('((a|b)|c)*')).toBe(false);
+  });
+
+  it('accepts nested groups without alternation-in-quantified pattern', () => {
+    expect(isSafePattern('(a(b|c))')).toBe(true);
+    expect(isSafePattern('(?:foo|bar)')).toBe(true);
+  });
+
+  it('rejects nested quantifiers with multiple closing parens', () => {
+    // Multi-paren nesting: inner quantifier + ))*
+    expect(isSafePattern('((a+))*')).toBe(false);
+    expect(isSafePattern('(([a-z]+))+')).toBe(false);
+  });
+
+  it('rejects adjacent quantifiers after brace-quantifier', () => {
+    expect(isSafePattern('a{2}+')).toBe(false);
+  });
+
+  it('rejects lazy star in quantified group: (.*?)+', () => {
+    expect(isSafePattern('(.*?)+')).toBe(false);
+  });
 });

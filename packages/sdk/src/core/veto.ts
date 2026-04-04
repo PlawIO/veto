@@ -1879,6 +1879,10 @@ export class Veto {
     if (!ast) {
       try {
         ast = compile(expression);
+        if (this.compiledExpressionCache.size >= 10_000) {
+          const firstKey = this.compiledExpressionCache.keys().next().value;
+          if (firstKey !== undefined) this.compiledExpressionCache.delete(firstKey);
+        }
         this.compiledExpressionCache.set(expression, ast);
       } catch (error) {
         this.logger.warn('Failed to compile local rule expression', {
@@ -3756,6 +3760,9 @@ export class Veto {
         });
       });
     }, refreshIntervalMs);
+    if (typeof this.refreshIntervalId === 'object' && this.refreshIntervalId !== null && 'unref' in this.refreshIntervalId) {
+      (this.refreshIntervalId as NodeJS.Timeout).unref();
+    }
   }
 
   /**

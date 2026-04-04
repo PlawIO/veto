@@ -181,6 +181,104 @@ describe('extractEntities', () => {
     });
   });
 
+  describe('mutation isolation', () => {
+    it('does not share array references between calls', () => {
+      const result1 = extractEntities('ab');
+      result1.prices.push(999);
+      const result2 = extractEntities('cd');
+      expect(result2.prices).toEqual([]);
+    });
+  });
+
+  describe('Math.max safety', () => {
+    it('handles large price arrays without throwing', () => {
+      const text = Array.from({ length: 1000 }, (_, i) => `$${i + 1}`).join(' ');
+      const result = extractEntities(text, { maxPrices: 1000 });
+      expect(result.max_price).toBe(1000);
+      expect(result.min_price).toBe(1);
+    });
+  });
+
+  describe('API key false positive resistance', () => {
+    it('does not match words starting with "key" without separator', () => {
+      const result = extractEntities('keyboard_shortcut_configuration_settings_manager');
+      expect(result.has_api_keys).toBe(false);
+    });
+
+    it('matches real API keys with separator', () => {
+      const result = extractEntities('Use key_abcdefghijklmnopqrstuvwxyz123');
+      expect(result.has_api_keys).toBe(true);
+    });
+  });
+
+  describe('salary false positive: keyword in longer word', () => {
+    it('does not match "keynote" as salary keyword', () => {
+      const result = extractEntities('keynote $5,000 presentation');
+      expect(result.has_salary_figures).toBe(false);
+    });
+  });
+
+  describe('price boundary', () => {
+    it('includes $999,999.99', () => {
+      const result = extractEntities('Price: $999,999.99');
+      expect(result.prices).toContain(999999.99);
+    });
+
+    it('excludes $1,000,000', () => {
+      const result = extractEntities('Price: $1,000,000');
+      expect(result.prices).toEqual([]);
+    });
+  });
+
+  describe('GOV_ID keyword proximity', () => {
+    it('detects SSN with keyword nearby', () => {
+      const result = extractEntities('SSN: 123-45-6789');
+      expect(result.has_gov_ids).toBe(true);
+    });
+
+    it('detects Social Security number with keyword nearby', () => {
+      const result = extractEntities('Social Security Number: 123-45-6789');
+      expect(result.has_gov_ids).toBe(true);
+    });
+
+    it('does not flag bare SSN-shaped number without keyword', () => {
+      const result = extractEntities('Reference code: 123-45-6789 for your order');
+      expect(result.has_gov_ids).toBe(false);
+    });
+
+    it('detects EIN with keyword nearby', () => {
+      const result = extractEntities('EIN: 12-3456789');
+      expect(result.has_gov_ids).toBe(true);
+    });
+
+    it('does not flag bare EIN-shaped number without keyword', () => {
+      const result = extractEntities('Order 12-3456789 confirmed');
+      expect(result.has_gov_ids).toBe(false);
+    });
+  });
+
+  describe('unicode normalization', () => {
+    it('extracts prices through non-breaking spaces', () => {
+      const result = extractEntities('Price:\u00A0$199.99');
+      expect(result.prices).toContain(199.99);
+    });
+
+    it('extracts prices through zero-width chars', () => {
+      const result = extractEntities('Price: $\u200B199.99');
+      expect(result.prices).toContain(199.99);
+    });
+
+    it('extracts emails through NBSP', () => {
+      const result = extractEntities('Contact:\u00A0user@example.com');
+      expect(result.emails).toContain('user@example.com');
+    });
+
+    it('normalizes full-width digits in prices', () => {
+      const result = extractEntities('Cost: $１９９.99');
+      expect(result.prices).toContain(199.99);
+    });
+  });
+
   describe('empty/short input', () => {
     it('returns empty for empty string', () => {
       const result = extractEntities('');

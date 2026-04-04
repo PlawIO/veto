@@ -6,6 +6,7 @@
 
 import type { ASTNode, PathSegment } from './ast.js';
 import { astDepth } from './ast.js';
+import { isSafePattern } from '../deterministic/regex-safety.js';
 
 const MAX_DEPTH = 50;
 
@@ -56,6 +57,7 @@ function resolvePath(segments: PathSegment[], ctx: EvalContext): unknown {
     switch (seg.type) {
       case 'field':
         if (typeof current !== 'object') return undefined;
+        if (!Object.prototype.hasOwnProperty.call(current, seg.name)) return undefined;
         current = (current as Record<string, unknown>)[seg.name];
         break;
 
@@ -158,6 +160,9 @@ function evalBinary(
     case 'matches': {
       if (typeof left !== 'string' || typeof right !== 'string') {
         throw new EvaluationError(`'matches' requires strings on both sides`);
+      }
+      if (!isSafePattern(right)) {
+        throw new EvaluationError(`'matches' pattern failed safety check`);
       }
       const re = new RegExp(right);
       return re.test(left);

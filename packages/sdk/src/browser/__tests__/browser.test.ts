@@ -441,4 +441,195 @@ describe('browser entry', () => {
       })
     );
   });
+
+  it('fromCloud passes mode through to the instance', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ policies: [createNavigateBlockRule()] }),
+      text: async () => '',
+    });
+
+    const veto = await Veto.fromCloud({
+      apiKey: 'veto_test_key',
+      endpoint: 'https://api.veto.so',
+      mode: 'shadow',
+    });
+
+    const result = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(result.decision).toBe('deny');
+    expect(result.shadow).toBe(true);
+    expect(result.shadowDecision).toBe('deny');
+
+    veto.dispose();
+  });
+
+  it('fromCloud passes sessionId and agentId through', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ policies: [] }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+        text: async () => '',
+      });
+
+    const veto = await Veto.fromCloud({
+      apiKey: 'veto_test_key',
+      endpoint: 'https://api.veto.so',
+      sessionId: 'sess-123',
+      agentId: 'agent-x',
+    });
+
+    await veto.guard('navigate', { url: 'https://example.com' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const decisionCall = fetchMock.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).includes('/v1/decisions')
+    );
+    expect(decisionCall).toBeDefined();
+    const body = JSON.parse((decisionCall![1] as { body: string }).body);
+    expect(body.context.session_id).toBe('sess-123');
+    expect(body.context.agent_id).toBe('agent-x');
+
+    veto.dispose();
+  });
+
+  it('addRules merges local rules that evaluate correctly', async () => {
+    const veto = Veto.fromRules({
+      rules: [],
+      logLevel: 'silent',
+    });
+
+    const result1 = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(result1.decision).toBe('allow');
+
+    veto.addRules([createNavigateBlockRule()]);
+
+    const result2 = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(result2.decision).toBe('deny');
+    expect(result2.ruleId).toBe('block-sensitive-url');
+  });
+
+  it('addRules upserts rules by ID', async () => {
+    const veto = Veto.fromRules({
+      rules: [],
+      logLevel: 'silent',
+    });
+
+    veto.addRules([{
+      id: 'r1',
+      name: 'Block admin',
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: ['navigate'],
+      conditions: [{ field: 'arguments.url', operator: 'contains', value: 'admin' }],
+    }]);
+
+    const blocked = await veto.guard('navigate', { url: 'https://admin.example.com' });
+    expect(blocked.decision).toBe('deny');
+
+    veto.addRules([{
+      id: 'r1',
+      name: 'Block admin (updated)',
+      enabled: true,
+      severity: 'high',
+      action: 'block',
+      tools: ['navigate'],
+      conditions: [{ field: 'arguments.url', operator: 'contains', value: 'superadmin' }],
+    }]);
+
+    const allowed = await veto.guard('navigate', { url: 'https://admin.example.com' });
+    expect(allowed.decision).toBe('allow');
+
+    const stillBlocked = await veto.guard('navigate', { url: 'https://superadmin.example.com' });
+    expect(stillBlocked.decision).toBe('deny');
+  });
+
+  it('removeRule removes a locally-added rule', async () => {
+    const veto = Veto.fromRules({
+      rules: [],
+      logLevel: 'silent',
+    });
+
+    veto.addRules([createNavigateBlockRule()]);
+    const blocked = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(blocked.decision).toBe('deny');
+
+    veto.removeRule('block-sensitive-url');
+    const allowed = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(allowed.decision).toBe('allow');
+  });
+
+  it('getRules returns all indexed rules', () => {
+    const veto = Veto.fromRules({
+      rules: [createNavigateBlockRule()],
+      logLevel: 'silent',
+    });
+
+    veto.addRules([{
+      id: 'local-1',
+      name: 'Local Rule',
+      enabled: true,
+      severity: 'low',
+      action: 'log',
+    }]);
+
+    const all = veto.getRules();
+    expect(all).toHaveLength(2);
+    expect(all.map(r => r.id)).toContain('block-sensitive-url');
+    expect(all.map(r => r.id)).toContain('local-1');
+  });
+
+  it('local rules survive refreshRules', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ policies: [] }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ policies: [] }),
+        text: async () => '',
+      });
+
+    const veto = await Veto.fromCloud({
+      apiKey: 'veto_test_key',
+      endpoint: 'https://api.veto.so',
+    });
+
+    veto.addRules([createNavigateBlockRule()]);
+    const blocked = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(blocked.decision).toBe('deny');
+
+    await veto.refreshRules();
+
+    const stillBlocked = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(stillBlocked.decision).toBe('deny');
+
+    veto.dispose();
+  });
+
+  it('local rules take precedence over cloud rules', async () => {
+    const veto = Veto.fromRules({
+      rules: [{
+        id: 'cloud-allow-all',
+        name: 'Allow All Navigation',
+        enabled: true,
+        severity: 'low',
+        action: 'allow',
+        tools: ['navigate'],
+      }],
+      logLevel: 'silent',
+    });
+
+    veto.addRules([createNavigateBlockRule()]);
+
+    const result = await veto.guard('navigate', { url: 'https://bank.example.com' });
+    expect(result.decision).toBe('deny');
+  });
 });

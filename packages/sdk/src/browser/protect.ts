@@ -178,7 +178,15 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
         costs: options.costs,
       });
     }
-  } catch {
+  } catch (error) {
+    if (options.onInitError) {
+      options.onInitError(error instanceof Error ? error : new Error(String(error)));
+    }
+    if (options.logger) {
+      options.logger.warn('Veto initialization failed, running in allow-all mode', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     instance = createAllowAllInstance(options);
   }
 

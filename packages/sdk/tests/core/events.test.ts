@@ -8,6 +8,7 @@ import {
   formatGenericPayload,
   formatPagerDutyPayload,
   formatSlackPayload,
+  redactEventArguments,
   type VetoWebhookEvent,
 } from '../../src/core/events.js';
 
@@ -117,6 +118,49 @@ describe('event webhooks', () => {
       expect(payload.startsWith('CEF:0|Veto|SDK|1.0|email-deny-001|')).toBe(true);
       expect(payload).toContain('eventType=deny');
       expect(payload).toContain('toolName=send_email');
+    });
+  });
+
+  describe('argument redaction', () => {
+    it('redacts all arguments when redactArguments is true', () => {
+      const args = { to: 'team@example.com', subject: 'Status', body: 'Secret info' };
+      const result = redactEventArguments(args, true);
+      expect(result.to).toBe('[REDACTED]');
+      expect(result.subject).toBe('[REDACTED]');
+      expect(result.body).toBe('[REDACTED]');
+    });
+
+    it('redacts only specified keys when redactArguments is a string array', () => {
+      const args = { to: 'team@example.com', subject: 'Status', body: 'Secret info' };
+      const result = redactEventArguments(args, ['body', 'to']);
+      expect(result.to).toBe('[REDACTED]');
+      expect(result.subject).toBe('Status');
+      expect(result.body).toBe('[REDACTED]');
+    });
+
+    it('returns args unchanged when no matching keys', () => {
+      const args = { to: 'team@example.com' };
+      const result = redactEventArguments(args, ['nonexistent']);
+      expect(result.to).toBe('team@example.com');
+    });
+
+    it('does not mutate original args', () => {
+      const args = { to: 'team@example.com', body: 'Secret' };
+      redactEventArguments(args, ['body']);
+      expect(args.body).toBe('Secret');
+    });
+
+    it('ignores prototype chain properties in selective redaction', () => {
+      const args = { to: 'team@example.com' };
+      const result = redactEventArguments(args, ['toString', 'constructor', 'to']);
+      expect(result.to).toBe('[REDACTED]');
+      expect(typeof result.toString).toBe('function');
+      expect(result.toString()).not.toBe('[REDACTED]');
+    });
+
+    it('returns args unchanged when redact is false', () => {
+      const args = { to: 'team@example.com' };
+      expect(redactEventArguments(args, false as unknown as boolean)).toBe(args);
     });
   });
 

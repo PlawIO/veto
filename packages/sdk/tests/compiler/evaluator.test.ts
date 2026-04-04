@@ -174,6 +174,14 @@ describe('Evaluator', () => {
       expect(evaluate(compile('email matches "^[a-z]+@"'), { email: 'user@test.com' })).toBe(true);
       expect(evaluate(compile('email matches "^[0-9]+$"'), { email: 'abc' })).toBe(false);
     });
+
+    it('should work with safe regex patterns', () => {
+      expect(evaluate(compile('name matches "^test$"'), { name: 'test' })).toBe(true);
+    });
+
+    it('should throw EvaluationError for unsafe regex patterns', () => {
+      expect(() => evaluate(compile('name matches "(a+)+"'), { name: 'aaa' })).toThrow(EvaluationError);
+    });
   });
 
   describe('unary negation', () => {

@@ -179,8 +179,8 @@ describe('evaluateCondition', () => {
     )).toBe(false);
   });
 
-  it('condition without field/operator returns true', () => {
-    expect(evaluateCondition({}, { x: 1 })).toBe(true);
+  it('condition without field/operator returns false', () => {
+    expect(evaluateCondition({}, { x: 1 })).toBe(false);
   });
 
   it('equals is case-insensitive for strings', () => {
@@ -229,6 +229,76 @@ describe('evaluateCondition', () => {
     expect(evaluateCondition(
       { field: 'x', operator: 'outside_hours', value: range },
       { x: 'ignored' },
+    )).toBe(false);
+  });
+
+  it('within_hours supports structured TimeWindowValue', () => {
+    const now = new Date();
+    const h = now.getUTCHours();
+    const nextH = (h + 2) % 24;
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'within_hours',
+        value: {
+          start: `${String(h).padStart(2, '0')}:00`,
+          end: `${String(nextH).padStart(2, '0')}:00`,
+          timezone: 'UTC',
+        },
+      },
+      { x: now.toISOString() },
+    )).toBe(true);
+  });
+
+  it('outside_hours supports structured TimeWindowValue', () => {
+    const now = new Date();
+    const h = now.getUTCHours();
+    const prevH = (h + 22) % 24;
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'outside_hours',
+        value: {
+          start: `${String(prevH).padStart(2, '0')}:00`,
+          end: `${String(prevH).padStart(2, '0')}:30`,
+          timezone: 'UTC',
+        },
+      },
+      { x: now.toISOString() },
+    )).toBe(true);
+  });
+
+  it('within_hours structured format returns false for invalid timestamp', () => {
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'within_hours',
+        value: {
+          start: '09:00',
+          end: '17:00',
+          timezone: 'UTC',
+        },
+      },
+      { x: 'not-a-date' },
+    )).toBe(false);
+  });
+
+  it('within_hours structured format supports day-of-week filtering', () => {
+    const now = new Date();
+    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const wrongDay = dayNames[(now.getUTCDay() + 1) % 7];
+    expect(evaluateCondition(
+      {
+        field: 'x',
+        operator: 'within_hours',
+        value: {
+          start: '00:00',
+          end: '23:59',
+          timezone: 'UTC',
+          days: [wrongDay],
+        },
+      },
+      { x: now.toISOString() },
     )).toBe(false);
   });
 
@@ -290,6 +360,20 @@ describe('evaluateCondition', () => {
     expect(evaluateCondition(
       { field: 'x', operator: 'less_than', value: 100 },
       { x: '50' },
+    )).toBe(false);
+  });
+
+  it('greater_than rejects Infinity', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'greater_than', value: 100 },
+      { x: Infinity },
+    )).toBe(false);
+  });
+
+  it('less_than rejects -Infinity', () => {
+    expect(evaluateCondition(
+      { field: 'x', operator: 'less_than', value: 100 },
+      { x: -Infinity },
     )).toBe(false);
   });
 
@@ -577,5 +661,68 @@ describe('evaluateRulesLocally', () => {
 
     const result = evaluateRulesLocally(rules, 'any_tool', {});
     expect(result.decision).toBe('deny');
+  });
+});
+
+describe('malformed condition handling', () => {
+  it('returns false when field is missing', () => {
+    expect(evaluateCondition({ field: '', operator: 'equals', value: 'x' } as any, {})).toBe(false);
+  });
+
+  it('returns false when operator is missing', () => {
+    expect(evaluateCondition({ field: 'x', operator: '', value: 'y' } as any, {})).toBe(false);
+  });
+});
+
+describe('in/not_in case insensitivity', () => {
+  it('in operator matches case-insensitively for strings', () => {
+    expect(evaluateCondition(
+      { field: 'role', operator: 'in', value: ['Admin', 'User'] },
+      { role: 'admin' }
+    )).toBe(true);
+  });
+
+  it('not_in operator matches case-insensitively for strings', () => {
+    expect(evaluateCondition(
+      { field: 'role', operator: 'not_in', value: ['Admin', 'User'] },
+      { role: 'admin' }
+    )).toBe(false);
+  });
+
+  it('in operator still works for non-string values', () => {
+    expect(evaluateCondition(
+      { field: 'code', operator: 'in', value: [1, 2, 3] },
+      { code: 2 }
+    )).toBe(true);
+  });
+});
+
+describe('contains/not_contains array case insensitivity', () => {
+  it('contains matches case-insensitively in string arrays', () => {
+    expect(evaluateCondition(
+      { field: 'roles', operator: 'contains', value: 'admin' },
+      { roles: ['Admin', 'User'] }
+    )).toBe(true);
+  });
+
+  it('not_contains matches case-insensitively in string arrays', () => {
+    expect(evaluateCondition(
+      { field: 'roles', operator: 'not_contains', value: 'admin' },
+      { roles: ['Admin', 'User'] }
+    )).toBe(false);
+  });
+});
+
+describe('prototype chain safety', () => {
+  it('resolveFieldPath does not resolve prototype properties', () => {
+    expect(resolveFieldPath('constructor', { name: 'test' })).toBeUndefined();
+  });
+
+  it('resolveFieldPath does not resolve __proto__', () => {
+    expect(resolveFieldPath('__proto__', { name: 'test' })).toBeUndefined();
+  });
+
+  it('resolveFieldPath still resolves own properties', () => {
+    expect(resolveFieldPath('name', { name: 'test' })).toBe('test');
   });
 });

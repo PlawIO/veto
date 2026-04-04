@@ -78,4 +78,18 @@ export interface VetoFromCloudOptions {
   apiKey: string;
   endpoint?: string;
   refreshIntervalMs?: number;
+  mode?: VetoMode;
+  logLevel?: LogLevel;
+  sessionId?: string;
+  agentId?: string;
+  userId?: string;
+  role?: string;
+  validators?: (Validator | NamedValidator)[];
+  onApprovalRequired?: (
+    context: ValidationContext,
+    approvalId: string
+  ) => void | Promise<void>;
+  onDecisionMade?: (result: GuardResult & { toolName: string }) => void | Promise<void>;
+  budget?: BudgetConfig;
+  costs?: ToolCostMap;
 }

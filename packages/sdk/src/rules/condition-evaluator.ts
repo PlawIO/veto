@@ -59,6 +59,7 @@ function resolveDotPath(path: string, source: Record<string, unknown>): unknown 
     if (typeof current !== 'object') {
       return undefined;
     }
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return undefined;
     current = (current as Record<string, unknown>)[part];
   }
 
@@ -243,6 +244,10 @@ function getTimeZoneFormatter(timezone: string): Intl.DateTimeFormat | null {
       minute: '2-digit',
       hour12: false,
     });
+    if (TIMEZONE_FORMATTER_CACHE.size >= 1000) {
+      const firstKey = TIMEZONE_FORMATTER_CACHE.keys().next().value;
+      if (firstKey !== undefined) TIMEZONE_FORMATTER_CACHE.delete(firstKey);
+    }
     TIMEZONE_FORMATTER_CACHE.set(timezone, formatter);
     return formatter;
   } catch {
@@ -299,7 +304,7 @@ function isDayAllowed(day: TimeConditionDay, allowedDays: Set<TimeConditionDay> 
   return allowedDays === null || allowedDays.has(day);
 }
 
-function evaluateTimeWindow(
+export function evaluateTimeWindow(
   fieldValue: unknown,
   expected: unknown
 ): TimeWindowEvaluation | null {
@@ -430,52 +435,68 @@ export function evaluateLegacyCondition(
 
   switch (operator) {
     case 'equals':
+      if (typeof fieldValue === 'string' && typeof expected === 'string') {
+        return fieldValue.toLowerCase() === expected.toLowerCase();
+      }
       return fieldValue === expected;
     case 'not_equals':
+      if (typeof fieldValue === 'string' && typeof expected === 'string') {
+        return fieldValue.toLowerCase() !== expected.toLowerCase();
+      }
       return fieldValue !== expected;
     case 'contains':
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
-        return fieldValue.includes(expected);
+        return fieldValue.toLowerCase().includes(expected.toLowerCase());
       }
       if (Array.isArray(fieldValue)) {
+        if (typeof expected === 'string') {
+          const lower = expected.toLowerCase();
+          return fieldValue.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === expected);
+        }
         return fieldValue.includes(expected);
       }
       if (allowNestedObjectStringSearch && typeof expected === 'string') {
+        const lower = expected.toLowerCase();
         return collectNestedStrings(fieldValue)
-          .some((value) => value.includes(expected));
+          .some((value) => value.toLowerCase().includes(lower));
       }
       return false;
     case 'not_contains':
       if (typeof fieldValue === 'string' && typeof expected === 'string') {
-        return !fieldValue.includes(expected);
+        return !fieldValue.toLowerCase().includes(expected.toLowerCase());
       }
       if (Array.isArray(fieldValue)) {
+        if (typeof expected === 'string') {
+          const lower = expected.toLowerCase();
+          return !fieldValue.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === expected);
+        }
         return !fieldValue.includes(expected);
       }
       if (allowNestedObjectStringSearch && typeof expected === 'string') {
+        const lower = expected.toLowerCase();
         return collectNestedStrings(fieldValue)
-          .every((value) => !value.includes(expected));
+          .every((value) => !value.toLowerCase().includes(lower));
       }
-      return true;
+      return false;
     case 'starts_with':
       return typeof fieldValue === 'string' && typeof expected === 'string'
-        && fieldValue.startsWith(expected);
+        && fieldValue.toLowerCase().startsWith(expected.toLowerCase());
     case 'ends_with':
       return typeof fieldValue === 'string' && typeof expected === 'string'
-        && fieldValue.endsWith(expected);
+        && fieldValue.toLowerCase().endsWith(expected.toLowerCase());
     case 'matches': {
       if (typeof expected !== 'string') {
         return false;
       }
       if (typeof fieldValue === 'string') {
-        return createSafeRegex(expected)?.test(fieldValue) ?? false;
+        return createSafeRegex(expected, 'i')?.test(fieldValue) ?? false;
       }
 
       if (!allowNestedObjectStringSearch) {
         return false;
       }
 
-      const regex = createSafeRegex(expected);
+      const regex = createSafeRegex(expected, 'i');
       if (!regex) {
         return false;
       }
@@ -483,10 +504,14 @@ export function evaluateLegacyCondition(
       return collectNestedStrings(fieldValue)
         .some((value) => regex.test(value));
     }
-    case 'greater_than':
-      return Number(fieldValue) > Number(expected);
-    case 'less_than':
-      return Number(fieldValue) < Number(expected);
+    case 'greater_than': {
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue > expected;
+    }
+    case 'less_than': {
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue < expected;
+    }
     case 'length_greater_than': {
       const fieldLength = getLengthComparableValue(fieldValue);
       if (fieldLength === null) {
@@ -501,9 +526,19 @@ export function evaluateLegacyCondition(
       return fieldLength > expectedLength;
     }
     case 'in':
-      return Array.isArray(expected) && expected.includes(fieldValue);
+      if (!Array.isArray(expected)) return false;
+      if (typeof fieldValue === 'string') {
+        const lower = fieldValue.toLowerCase();
+        return expected.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === fieldValue);
+      }
+      return expected.includes(fieldValue);
     case 'not_in':
-      return Array.isArray(expected) && !expected.includes(fieldValue);
+      if (!Array.isArray(expected)) return false;
+      if (typeof fieldValue === 'string') {
+        const lower = fieldValue.toLowerCase();
+        return !expected.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === fieldValue);
+      }
+      return !expected.includes(fieldValue);
     case 'within_hours': {
       const result = evaluateTimeWindow(fieldValue, expected);
       return result !== null && result.inScope && result.withinWindow;
@@ -550,6 +585,7 @@ export function evaluateCondition(
         Number.isNaN(resolvedFieldValue)
         || Number.isNaN(resolvedExpectedValue)
         || Number.isNaN(resolvedReferenceValue)
+        || resolvedReferenceValue === 0
       ) {
         return false;
       }
@@ -562,7 +598,7 @@ export function evaluateCondition(
     });
   }
 
-  return true;
+  return false;
 }
 
 /**

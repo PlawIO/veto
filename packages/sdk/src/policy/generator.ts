@@ -259,9 +259,11 @@ export function sanitizeGeneratedRules(
   const warnings: string[] = [];
 
   const rules = parsed.rules.map(r => {
-    let id = `local-nl-${r.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`;
+    const baseId = `local-nl-${r.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}`;
+    let id = baseId;
+    let localSuffix = 0;
     while (seenIds.has(id)) {
-      id = `${id}-${Math.random().toString(36).slice(2, 10)}`;
+      id = `${baseId}-${++localSuffix}`;
     }
     seenIds.add(id);
 

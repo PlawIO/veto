@@ -19,7 +19,11 @@
     "test": "echo \"No dedicated veto-cli tests yet\""
   },
   "dependencies": {
-    "veto-sdk": "workspace:*"
+    "veto-sdk": "workspace:*",
+    "@opentui/core": "^0.1.82",
+    "ink": "^5.2.1",
+    "picocolors": "^1.1.1",
+    "react": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
