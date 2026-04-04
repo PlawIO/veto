@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.2.0
+
+### Minor Changes
+
+- [#168](https://github.com/PlawIO/veto/pull/168) [`f2d8948`](https://github.com/PlawIO/veto/commit/f2d89482af05ee0da186d0a4eaa527a4b9f4f0d0) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add content extractor, local rule evaluator, and policy generator utilities upstreamed from the browser extension. New entry points: veto-sdk/extractors, veto-sdk/policy. Add onDecisionMade callback to VetoOptions and VetoBrowserOptions.
+
 ## 2.1.1
 
 ### Patch Changes
