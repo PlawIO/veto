@@ -119,6 +119,32 @@ export const POLICY_IR_V1_SCHEMA = {
           additionalProperties: true,
           description: 'Arbitrary key-value metadata attached to this rule.',
         },
+        rate_limits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['scope', 'max_calls', 'window_seconds'],
+            properties: {
+              scope: { type: 'string', enum: ['agent', 'user', 'session', 'global'] },
+              max_calls: { type: 'number' },
+              window_seconds: { type: 'number' },
+            },
+            additionalProperties: false,
+          },
+          description: 'Sliding-window rate limits evaluated after conditions pass.',
+        },
+        payment: {
+          type: 'object',
+          required: ['protocol', 'amount', 'currency'],
+          properties: {
+            protocol: { type: 'string', enum: ['x402', 'mpp', 'ap2'] },
+            amount: { type: 'number' },
+            currency: { type: 'string' },
+            chain_id: { type: 'number' },
+          },
+          additionalProperties: false,
+          description: 'Payment gate configuration for require_payment action.',
+        },
       },
       additionalProperties: false,
     },
@@ -354,7 +380,7 @@ export const POLICY_IR_V1_SCHEMA = {
     },
     Action: {
       type: 'string',
-      enum: ['block', 'warn', 'log', 'allow', 'require_approval'],
+      enum: ['block', 'warn', 'log', 'allow', 'require_approval', 'require_payment'],
       description: 'Action to take when the rule matches.',
     },
     OutputAction: {

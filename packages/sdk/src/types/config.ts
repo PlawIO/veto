@@ -93,6 +93,7 @@ export interface DecisionExportRecord {
   rule_id: string | null;
   decision: ValidationDecision;
   reason: string | null;
+  chain_hash?: string;
 }
 
 /**

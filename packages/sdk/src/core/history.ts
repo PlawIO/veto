@@ -7,6 +7,9 @@
  * @module core/history
  */
 
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import type {
   DecisionExportFormat,
   DecisionExportRecord,
@@ -14,6 +17,7 @@ import type {
   ValidationResult,
 } from '../types/config.js';
 import type { Logger } from '../utils/logger.js';
+import { computeChainHash, GENESIS_HASH } from '../audit/chain.js';
 
 /**
  * Options for the history tracker.
@@ -23,6 +27,12 @@ export interface HistoryTrackerOptions {
   maxSize: number;
   /** Logger instance */
   logger: Logger;
+  /** Append-only audit log configuration */
+  auditLog?: {
+    enabled: boolean;
+    /** Defaults to .veto/audit.log */
+    path?: string;
+  };
 }
 
 /**
@@ -32,10 +42,25 @@ export class HistoryTracker {
   private readonly entries: ToolCallHistoryEntry[] = [];
   private readonly maxSize: number;
   private readonly logger: Logger;
+  private readonly auditLogPath: string | null;
+  private prevHash: string = GENESIS_HASH;
+  private pendingWrite: Promise<void> = Promise.resolve();
 
   constructor(options: HistoryTrackerOptions) {
     this.maxSize = options.maxSize;
     this.logger = options.logger;
+
+    if (options.auditLog?.enabled) {
+      this.auditLogPath = options.auditLog.path ?? '.veto/audit.log';
+      try {
+        mkdirSync(dirname(this.auditLogPath), { recursive: true });
+      } catch {
+        // If we can't create the dir, writes will fail and be caught per-record.
+      }
+      this.prevHash = this.recoverPrevHash();
+    } else {
+      this.auditLogPath = null;
+    }
   }
 
   /**
@@ -69,6 +94,62 @@ export class HistoryTracker {
       decision: snapshotEntry.validationResult.decision,
       historySize: this.entries.length,
     });
+
+    if (this.auditLogPath !== null) {
+      this.appendAuditRecord(snapshotEntry);
+    }
+  }
+
+  private entryToExportRecord(entry: ToolCallHistoryEntry): DecisionExportRecord {
+    const metadata = entry.validationResult.metadata;
+    return {
+      timestamp: entry.timestamp.toISOString(),
+      tool_name: entry.toolName,
+      arguments: entry.arguments,
+      policy_version: this.extractMetadataString(metadata, ['policyVersion', 'policy_version']),
+      rule_id: this.extractMetadataString(metadata, ['ruleId', 'rule_id']),
+      decision: entry.validationResult.decision,
+      reason: entry.validationResult.reason ?? null,
+    };
+  }
+
+  private appendAuditRecord(entry: ToolCallHistoryEntry): void {
+    const record = this.entryToExportRecord(entry);
+    const hash = computeChainHash(this.prevHash, record);
+    this.prevHash = hash;
+
+    this.pendingWrite = this.pendingWrite.then(() =>
+      appendFile(
+        this.auditLogPath!,
+        JSON.stringify({ ...record, chain_hash: hash }) + '\n',
+        'utf-8',
+      ).catch((err) => {
+        this.logger.warn('Audit log write failed — continuing without audit record', {
+          error: err instanceof Error ? err.message : String(err),
+          path: this.auditLogPath,
+        });
+      }),
+    );
+  }
+
+  /** Await all pending audit log writes. Useful in tests and graceful shutdown. */
+  async flushAuditLog(): Promise<void> {
+    await this.pendingWrite;
+  }
+
+  private recoverPrevHash(): string {
+    if (!this.auditLogPath || !existsSync(this.auditLogPath)) return GENESIS_HASH;
+    try {
+      const content = readFileSync(this.auditLogPath, 'utf-8');
+      const lines = content.trimEnd().split('\n');
+      const lastLine = lines[lines.length - 1];
+      if (!lastLine) return GENESIS_HASH;
+      const parsed = JSON.parse(lastLine) as Record<string, unknown>;
+      if (typeof parsed['chain_hash'] === 'string') return parsed['chain_hash'];
+    } catch {
+      // Corrupted or empty file — start fresh
+    }
+    return GENESIS_HASH;
   }
 
   /**
@@ -239,21 +320,12 @@ export class HistoryTracker {
   }
 
   private toExportRecords(): DecisionExportRecord[] {
+    let prevHash = GENESIS_HASH;
     return this.entries.map((entry) => {
-      const metadata = entry.validationResult.metadata;
-
-      return {
-        timestamp: entry.timestamp.toISOString(),
-        tool_name: entry.toolName,
-        arguments: entry.arguments,
-        policy_version: this.extractMetadataString(metadata, [
-          'policyVersion',
-          'policy_version',
-        ]),
-        rule_id: this.extractMetadataString(metadata, ['ruleId', 'rule_id']),
-        decision: entry.validationResult.decision,
-        reason: entry.validationResult.reason ?? null,
-      };
+      const record = this.entryToExportRecord(entry);
+      const hash = computeChainHash(prevHash, record);
+      prevHash = hash;
+      return { ...record, chain_hash: hash };
     });
   }
 

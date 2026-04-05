@@ -86,6 +86,7 @@ export type {
   OutputRuleAction,
   RuleSeverity,
   ValidationAPIResponse,
+  RateLimitEntry,
 } from './rules/types.js';
 
 // Custom provider types
