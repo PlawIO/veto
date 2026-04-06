@@ -1,5 +1,15 @@
 # veto-sdk
 
+## 2.3.0
+
+### Minor Changes
+
+- [#173](https://github.com/PlawIO/veto/pull/173) [`0e102a8`](https://github.com/PlawIO/veto/commit/0e102a8e1deae477aed8ba78476f486a806959e6) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add rate limiting (in-memory + Redis), audit chain, OTEL tracing, SSE proxy for OpenAI/Anthropic, VetoAdmin client, and YAML test runner. Port rate limiting, audit, OTEL, and test runner to Python SDK. Align cross-SDK behavior for case-insensitive conditions and fail-closed malformed conditions.
+
+### Patch Changes
+
+- [#171](https://github.com/PlawIO/veto/pull/171) [`8c5e643`](https://github.com/PlawIO/veto/commit/8c5e643f7090edeb387ac1d50156d9cac044f20e) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Harden SDK security: fix ReDoS in regex evaluator, fail-closed malformed conditions, prototype chain traversal guards, bounded caches, evaluator consistency alignment, and eliminate all npm audit vulnerabilities
+
 ## 2.2.1
 
 ### Patch Changes
