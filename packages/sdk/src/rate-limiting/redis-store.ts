@@ -31,7 +31,9 @@ redis.call('PEXPIRE', key, windowMs)
 return 1
 `;
 
-export class RedisRateLimitStore {
+import type { RateLimitStore } from './evaluator.js';
+
+export class RedisRateLimitStore implements RateLimitStore {
   private client: RedisClient;
   private scriptSha: string | null = null;
   private keyPrefix: string;
@@ -42,6 +44,12 @@ export class RedisRateLimitStore {
   }
 
   async checkAndRecord(key: string, maxCalls: number, windowMs: number): Promise<boolean> {
+    return this._checkAndRecord(key, maxCalls, windowMs, false);
+  }
+
+  private async _checkAndRecord(
+    key: string, maxCalls: number, windowMs: number, retried: boolean,
+  ): Promise<boolean> {
     const fullKey = this.keyPrefix + key;
     const now = Date.now();
 
@@ -57,9 +65,9 @@ export class RedisRateLimitStore {
 
       return result === 1;
     } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('NOSCRIPT')) {
+      if (!retried && err instanceof Error && err.message.includes('NOSCRIPT')) {
         this.scriptSha = null;
-        return this.checkAndRecord(key, maxCalls, windowMs);
+        return this._checkAndRecord(key, maxCalls, windowMs, true);
       }
       throw err;
     }

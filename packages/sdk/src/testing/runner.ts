@@ -155,7 +155,7 @@ export interface RunTestsOptions {
 // Core runner
 // ---------------------------------------------------------------------------
 
-export async function runTests(options: RunTestsOptions = {}): Promise<VetoTestRunResult & { loadErrors: string[] }> {
+export async function runTests(options: RunTestsOptions = {}): Promise<VetoTestRunResult> {
 	const fixturesPath = options.fixturesPath ?? './veto/tests';
 	const policyPath = options.policyPath ?? './veto';
 	const coverage = options.coverage ?? false;

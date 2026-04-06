@@ -263,6 +263,12 @@ export class VetoAdmin {
 
     params.set('apiKey', this.apiKey);
     const url = this.buildUrl('/events/stream', params);
+    if (typeof EventSource === 'undefined') {
+      throw new VetoAdminError(
+        'onEvent() requires Node.js >= 22 or a browser. Use subscribeEvents() instead.',
+        0
+      );
+    }
     const es = new EventSource(url);
 
     const listener = (e: MessageEvent) => {

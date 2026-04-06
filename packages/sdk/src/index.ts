@@ -255,6 +255,23 @@ export {
 export type { RateLimitStore } from './rate-limiting/evaluator.js';
 export { RedisRateLimitStore } from './rate-limiting/redis-store.js';
 
+// Audit chain
+export { computeChainHash, GENESIS_HASH } from './audit/chain.js';
+
+// Observability
+export { tryLoadOtel, SpanStatusCode } from './observability/otel.js';
+export type { VetoTracer, VetoSpan } from './observability/otel.js';
+
+// Testing
+export { runTests } from './testing/runner.js';
+export type { RunTestsOptions } from './testing/runner.js';
+export type {
+  VetoTestCase,
+  VetoTestSuite,
+  VetoTestResult,
+  VetoTestRunResult,
+} from './testing/types.js';
+
 // CLI init function (for programmatic use)
 export { init, isInitialized } from './cli/init.js';
 

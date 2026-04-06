@@ -35,4 +35,5 @@ export interface VetoTestRunResult {
 	passed: number;
 	failed: number;
 	results: VetoTestResult[];
+	loadErrors?: string[];
 }

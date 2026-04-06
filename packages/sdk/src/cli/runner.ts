@@ -660,7 +660,7 @@ async function runRunTests(
     coverage: flags.coverage ?? false,
     quiet: flags.quiet ?? false,
   });
-  return result.failed === 0 && result.loadErrors.length === 0 ? 0 : 1;
+  return result.failed === 0 && (result.loadErrors?.length ?? 0) === 0 ? 0 : 1;
 }
 
 async function runAuditCommand(

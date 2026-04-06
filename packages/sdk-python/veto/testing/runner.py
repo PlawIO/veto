@@ -147,9 +147,12 @@ def _evaluate_conditions(conditions: list[dict], test_case: VetoTestCase) -> boo
         operator = cond.get("operator", "")
         value = cond.get("value")
 
-        actual = test_case.arguments.get(field)
-        if actual is None and test_case.context:
-            actual = test_case.context.get(field)
+        if field.startswith("arguments."):
+            actual = test_case.arguments.get(field[len("arguments."):])
+        elif field.startswith("context."):
+            actual = (test_case.context or {}).get(field[len("context."):])
+        else:
+            actual = test_case.arguments.get(field)
 
         if operator == "equals" and actual != value:
             return False
