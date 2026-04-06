@@ -6,7 +6,7 @@ loaded from policy YAML files (no LLM, no network).
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -82,9 +82,9 @@ def load_suites(fixtures_path: str) -> tuple[list[VetoTestSuite], list[str]]:
     return suites, errors
 
 
-def load_rules(policy_path: str) -> list[dict]:
+def load_rules(policy_path: str) -> List[Dict[str, Any]]:
     """Load rules from policy YAML files."""
-    rules: list[dict] = []
+    rules: List[Dict[str, Any]] = []
     path = Path(policy_path).resolve()
 
     if path.is_file():
@@ -110,8 +110,8 @@ def load_rules(policy_path: str) -> list[dict]:
 
 
 def evaluate_test_case(
-    rules: list[dict], test_case: VetoTestCase
-) -> tuple[str, Optional[str]]:
+    rules: List[Dict[str, Any]], test_case: VetoTestCase
+) -> Tuple[str, Optional[str]]:
     """Evaluate a test case against rules. Returns (decision, rule_id)."""
     for rule in rules:
         if not rule.get("enabled", True):
@@ -140,7 +140,7 @@ def evaluate_test_case(
     return "allow", None
 
 
-def _evaluate_conditions(conditions: list[dict], test_case: VetoTestCase) -> bool:
+def _evaluate_conditions(conditions: List[Dict[str, Any]], test_case: VetoTestCase) -> bool:
     """Simplified condition evaluator for test fixtures."""
     for cond in conditions:
         field = cond.get("field", "")
@@ -158,11 +158,11 @@ def _evaluate_conditions(conditions: list[dict], test_case: VetoTestCase) -> boo
             return False
         elif operator == "not_equals" and actual == value:
             return False
-        elif operator == "contains" and (actual is None or value not in str(actual)):
+        elif operator == "contains" and (actual is None or str(value) not in str(actual)):
             return False
-        elif operator == "greater_than" and (actual is None or float(actual) <= float(value)):
+        elif operator == "greater_than" and (actual is None or value is None or float(actual) <= float(value)):
             return False
-        elif operator == "less_than" and (actual is None or float(actual) >= float(value)):
+        elif operator == "less_than" and (actual is None or value is None or float(actual) >= float(value)):
             return False
         elif operator == "in" and actual not in (value if isinstance(value, list) else [value]):
             return False
@@ -228,7 +228,7 @@ def run_tests(
                 if error:
                     print(f"       {error}")
 
-    passed = sum(1 for r in results if r.passed)
+    passed: int = sum(1 for r in results if r.passed)
     failed = len(results) - passed
 
     if not quiet:
@@ -240,7 +240,7 @@ def run_tests(
     return VetoTestRunResult(total=len(results), passed=passed, failed=failed, results=results)
 
 
-def _print_coverage(rules: list[dict], results: list[VetoTestResult]) -> None:
+def _print_coverage(rules: List[Dict[str, Any]], results: List[VetoTestResult]) -> None:
     tested_ids = {r.expected.rule_id for r in results if r.expected.rule_id}
     all_ids = [r.get("id") for r in rules if r.get("id")]
     untested = [rid for rid in all_ids if rid not in tested_ids]

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 
 @dataclass
@@ -12,10 +12,10 @@ class TestExpect:
 class VetoTestCase:
     id: str
     tool: str
-    arguments: dict
+    arguments: Dict[str, Any]
     expect: TestExpect
     description: Optional[str] = None
-    context: Optional[dict] = None
+    context: Optional[Dict[str, Any]] = None
 
 
 @dataclass
