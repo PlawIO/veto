@@ -162,7 +162,92 @@ npx veto-cli@latest scan --fail-uncovered  # CI gate: exit 1 on unguarded tools
 - **Human-in-the-loop** — `ask` action routes sensitive decisions to an approval queue instead of auto-blocking.
 - **Audit trail** — Every decision logged with tool name, arguments, rule matched, and outcome. Exportable as JSON or CSV.
 - **Local-first** — No cloud required. Fully offline. Optional [Veto Cloud](https://veto.so) for team sync and dashboard.
+- **Rate limiting** — Per-rule sliding window rate limits. In-memory or Redis-backed for distributed deployments.
 - **Zero-config defaults** — `veto init` generates sensible baseline rules. Production-hardened in under 10 minutes.
+
+## Advanced features
+
+### Rate limiting
+
+Attach sliding window rate limits to any rule. Scopes: `global`, `agent`, `user`, `session`.
+
+```yaml
+rules:
+  - id: rate-limit-api
+    name: Limit API calls
+    action: block
+    tools: [call_api]
+    rate_limits:
+      - scope: user
+        max_calls: 10
+        window_seconds: 60
+```
+
+The default store is in-memory. For distributed deployments, plug in `RedisRateLimitStore`:
+
+```typescript
+import { RedisRateLimitStore } from "veto-sdk";
+const store = new RedisRateLimitStore(redisClient, "veto:rl:");
+```
+
+### Audit chain
+
+Every decision is appended to a tamper-evident hash chain. Each record's SHA-256 hash covers the previous hash plus the record's deterministic JSON serialization. Mutating any historical record invalidates all subsequent hashes.
+
+```typescript
+import { computeChainHash, GENESIS_HASH } from "veto-sdk";
+
+let prevHash = GENESIS_HASH;
+const hash = computeChainHash(prevHash, {
+  tool: "transfer_funds",
+  decision: "allow",
+});
+```
+
+Verify integrity from the CLI:
+
+```bash
+npx veto-cli audit verify
+```
+
+### Policy testing
+
+YAML fixture files validated against your policy with deterministic replay -- no LLM, no network.
+
+```yaml
+# ./veto/tests/transfers.yaml
+suite: Transfer rules
+tests:
+  - id: block-large-transfer
+    tool: transfer_funds
+    arguments: { amount: 5000 }
+    expect:
+      decision: block
+      rule_id: block-large-transfers
+```
+
+```bash
+npx veto-cli test              # run all fixtures
+npx veto-cli test --coverage   # show untested rule IDs
+```
+
+### SSE proxy
+
+Intercept OpenAI and Anthropic streaming responses, validate tool calls against policies before forwarding to the client.
+
+```bash
+npx veto-cli intercept --port 8080 --target https://api.openai.com
+```
+
+Point your application at `http://localhost:8080` instead of the provider URL. Supports auto-detection of OpenAI and Anthropic SSE formats.
+
+### OpenTelemetry
+
+Optional `@opentelemetry/api` peer dependency. When installed, Veto instruments guard checks with spans. When not installed, all tracing functions are no-ops -- zero overhead.
+
+### Webhooks
+
+Send decision events to external systems. Built-in formatters for Slack, PagerDuty, generic JSON, and CEF (ArcSight). Configure webhook endpoints per event type: `tool_call_blocked`, `approval_requested`, `rate_limit_exceeded`, and others.
 
 ## skills.sh skill (coding agents)
 
@@ -186,6 +271,9 @@ The OSS SDK runs entirely local. [Veto Cloud](https://veto.so) adds:
 - Central policy sync across all team repos
 - Dashboard: decisions, blocked calls, pending approvals
 - Approval workflows for human-in-the-loop at scale
+- Rate limiting (in-memory + Redis)
+- Tamper-evident audit chain
+- OpenTelemetry tracing integration
 - SSO, audit export, compliance reporting
 
 ## Contributing

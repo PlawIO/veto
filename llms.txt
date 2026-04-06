@@ -1,0 +1,703 @@
+# Veto
+
+> sudo for AI agents.
+
+Veto is a guardrail system for AI agent tool calls. It sits between the AI model and tool execution, intercepting and validating every tool call before it runs. Policies are defined in YAML. The agent is unaware it is being governed.
+
+- Website: https://veto.so
+- Docs: https://docs.veto.so
+- GitHub: https://github.com/PlawIO/veto
+- License: Apache-2.0
+
+## Installation
+
+### TypeScript SDK
+```bash
+npm install veto-sdk
+```
+
+### Python SDK
+```bash
+pip install veto
+```
+
+### CLI
+```bash
+npm install -g veto-cli
+```
+
+### Initialize a project
+```bash
+npx veto init   # creates ./veto/veto.config.yaml + default rules
+```
+
+## Core API
+
+### TypeScript
+
+```typescript
+import { Veto } from "veto-sdk";
+
+// Initialize from ./veto/veto.config.yaml + rules
+const veto = await Veto.init();
+
+// Wrap tools — types preserved, agent unaware
+const guarded = veto.wrap(tools);
+
+// Wrap a single tool
+const guardedTool = veto.wrapTool(tool);
+
+// Standalone guard check (no tool wrapping)
+const result = await veto.guard("transfer_funds", { amount: 5000 });
+// result.decision: 'allow' | 'deny' | 'require_approval'
+```
+
+### Python
+
+```python
+from veto import Veto
+
+veto = await Veto.init()
+
+# Wrap tools
+guarded = veto.wrap(my_tools)
+
+# Standalone guard check
+result = await veto.guard("transfer_funds", {"amount": 5000})
+```
+
+### Veto.init() options
+
+```typescript
+const veto = await Veto.init({
+  configDir: "./veto",         // path to config directory
+  mode: "strict",              // "strict" | "log" | "shadow"
+  validationMode: "local",     // "local" | "api" | "kernel" | "custom" | "cloud"
+  logLevel: "info",            // "debug" | "info" | "warn" | "error" | "silent"
+});
+```
+
+### GuardContext
+
+Pass per-call context to `guard()`:
+
+```typescript
+const result = await veto.guard("purchase", { item: "GPU" }, {
+  sessionId: "sess-123",
+  agentId: "trading-bot",
+  userId: "user-456",
+  economic: {
+    cost: 42.5,
+    currency: "USD",
+    payer: "team-wallet",
+    protocol: "custom",
+  },
+});
+```
+
+## Configuration: veto.config.yaml
+
+```yaml
+version: "1.0"
+name: my-policy
+description: Production guardrails
+
+settings:
+  default_action: allow    # action when no rules match
+  fail_mode: closed        # "open" (allow on error) or "closed" (block on error)
+
+rules:
+  - id: block-large-transfers
+    name: Block transfers over $1,000
+    enabled: true
+    severity: high
+    action: block
+    tools: [transfer_funds]
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 1000
+
+output_rules:
+  - id: redact-ssn
+    name: Redact SSNs from output
+    enabled: true
+    severity: critical
+    action: redact
+    redact_with: "[REDACTED]"
+    output_conditions:
+      - field: output
+        operator: matches
+        value: "\\d{3}-\\d{2}-\\d{4}"
+```
+
+## Rule YAML format
+
+### Rule fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier |
+| `name` | string | Human-readable name |
+| `description` | string | Optional detailed description |
+| `enabled` | boolean | Whether the rule is active |
+| `severity` | string | `critical` / `high` / `medium` / `low` / `info` |
+| `action` | string | What to do when conditions match (see Actions below) |
+| `tools` | string[] | Tools this rule applies to (empty = all tools) |
+| `agents` | string[] or `{ not: string[] }` | Agent scope filter |
+| `conditions` | RuleCondition[] | AND logic conditions |
+| `condition_groups` | RuleCondition[][] | OR logic between groups |
+| `blocked_by` | SequenceConstraint[] | Trigger if a matching historical call exists |
+| `requires` | SequenceConstraint[] | Trigger if a required historical call is missing |
+| `rate_limits` | RateLimitEntry[] | Sliding window rate limits |
+| `tags` | string[] | Categorization tags |
+| `metadata` | object | Arbitrary metadata |
+
+### Actions
+
+| Action | Behavior |
+|--------|----------|
+| `block` | Deny the tool call with a reason |
+| `allow` | Permit the tool call |
+| `warn` | Allow but log a warning |
+| `log` | Allow and log the decision |
+| `require_approval` | Route to human approval queue (aliased as `ask` in shorthand) |
+| `require_payment` | Gate behind a payment protocol (x402, MPP, AP2) |
+
+### Condition operators
+
+| Operator | Description | Example value |
+|----------|-------------|---------------|
+| `equals` | Exact match | `"production"` |
+| `not_equals` | Not equal | `"staging"` |
+| `contains` | Substring match | `"admin"` |
+| `not_contains` | No substring match | `"test"` |
+| `starts_with` | Prefix match | `"/etc/"` |
+| `ends_with` | Suffix match | `".env"` |
+| `matches` | Regex match | `"\\d{3}-\\d{2}-\\d{4}"` |
+| `greater_than` | Numeric greater than | `1000` |
+| `less_than` | Numeric less than | `0` |
+| `length_greater_than` | String/array length check | `100` |
+| `in` | Value in list | `["main", "master"]` |
+| `not_in` | Value not in list | `["dev", "staging"]` |
+| `within_hours` | Time window (allow during hours) | `{ start: "09:00", end: "17:00", timezone: "America/New_York" }` |
+| `outside_hours` | Time window (block during hours) | `{ start: "22:00", end: "06:00", timezone: "UTC" }` |
+| `percent_of` | Percentage of a reference field | Used with `reference` field |
+
+### Condition examples
+
+```yaml
+conditions:
+  # Simple field comparison
+  - field: arguments.amount
+    operator: greater_than
+    value: 1000
+
+  # List membership
+  - field: arguments.branch
+    operator: in
+    value: ["main", "master", "production"]
+
+  # Regex match
+  - field: arguments.path
+    operator: matches
+    value: "\\.(env|key|pem)$"
+
+  # Time window
+  - field: _time
+    operator: outside_hours
+    value:
+      start: "09:00"
+      end: "17:00"
+      timezone: "America/New_York"
+      days: [mon, tue, wed, thu, fri]
+
+  # Compiled expression (alternative to field/operator/value)
+  - expression: "args.amount > 500 && args.currency == 'USD'"
+```
+
+### Sequence constraints
+
+```yaml
+rules:
+  - id: require-auth-before-transfer
+    name: Must authenticate before transferring
+    action: block
+    tools: [transfer_funds]
+    requires:
+      - tool: authenticate
+        within: 300  # seconds
+        conditions:
+          - field: arguments.status
+            operator: equals
+            value: "success"
+```
+
+## Provider adapters
+
+Convert between Veto's internal tool format and provider-specific formats.
+
+### TypeScript
+
+```typescript
+import {
+  toOpenAITools, fromOpenAI, fromOpenAIToolCall,
+  toAnthropicTools, fromAnthropic, fromAnthropicToolUse,
+  toGoogleTool, fromGoogleFunctionCall,
+  toMCPTools, fromMCP, fromMCPToolCall,
+} from "veto-sdk";
+
+// Convert Veto tool definitions to OpenAI format
+const openaiTools = toOpenAITools(definitions);
+
+// Convert OpenAI tool call back to Veto format
+const vetoCall = fromOpenAIToolCall(openaiToolCall);
+```
+
+### Python
+
+```python
+from veto import (
+    to_openai_tools, from_openai, from_openai_tool_call,
+    to_anthropic_tools, from_anthropic, from_anthropic_tool_use,
+    to_google_tool, from_google_function_call,
+)
+```
+
+Supported providers: OpenAI, Anthropic, Google (Gemini), MCP (Model Context Protocol).
+
+## Rate limiting
+
+Per-rule sliding window rate limits. In-memory by default, Redis-backed for distributed deployments.
+
+### YAML
+
+```yaml
+rules:
+  - id: rate-limit-api-calls
+    name: Limit API calls
+    action: block
+    tools: [call_api]
+    rate_limits:
+      - scope: user       # agent | user | session | global
+        max_calls: 10
+        window_seconds: 60
+```
+
+### Redis store (TypeScript)
+
+```typescript
+import { RedisRateLimitStore } from "veto-sdk";
+import { createClient } from "redis";
+
+const redis = createClient();
+await redis.connect();
+const store = new RedisRateLimitStore(redis, "veto:rl:");
+```
+
+### Python
+
+```python
+from veto import evaluate_rate_limits, RateLimitStore
+```
+
+The `RateLimitStore` interface requires two methods: `checkAndRecord(key, maxCalls, windowMs)` and `clear()`. Implement this interface for any backing store.
+
+## Audit chain
+
+Tamper-evident append-only audit trail. Each record's hash is computed over the previous hash plus the record's deterministic JSON serialization (sorted keys). Mutating any historical record invalidates all subsequent hashes.
+
+### TypeScript
+
+```typescript
+import { computeChainHash, GENESIS_HASH } from "veto-sdk";
+
+let prevHash = GENESIS_HASH; // empty string for first record
+const record = { tool: "transfer_funds", decision: "allow", timestamp: "..." };
+const hash = computeChainHash(prevHash, record);
+// hash is SHA-256 hex digest
+```
+
+### Python
+
+```python
+from veto import compute_chain_hash, GENESIS_HASH
+
+prev_hash = GENESIS_HASH
+record = {"tool": "transfer_funds", "decision": "allow"}
+hash = compute_chain_hash(prev_hash, record)
+```
+
+Verify chain integrity with the CLI:
+
+```bash
+npx veto-cli audit verify
+```
+
+## OpenTelemetry
+
+Optional `@opentelemetry/api` peer dependency. Zero overhead when not installed -- all functions return no-ops.
+
+### TypeScript
+
+```typescript
+import { tryLoadOtel } from "veto-sdk";
+
+const tracer = await tryLoadOtel("my-service");
+const span = tracer.startSpan("veto.guard");
+span.setAttribute("tool", "transfer_funds");
+span.end();
+```
+
+### Python
+
+```python
+from veto import try_load_otel, VetoTracer, VetoSpan
+```
+
+When `@opentelemetry/api` (TS) or `opentelemetry-api` (Python) is installed, Veto automatically instruments guard checks with spans.
+
+## Policy testing
+
+YAML fixture files in `./veto/tests/`. Deterministic replay -- no LLM, no network.
+
+### Fixture format
+
+```yaml
+suite: Transfer rules
+tests:
+  - id: block-large-transfer
+    description: Blocks transfers over $1,000
+    tool: transfer_funds
+    arguments:
+      amount: 5000
+      recipient: "alice"
+    expect:
+      decision: block
+      rule_id: block-large-transfers
+
+  - id: allow-small-transfer
+    description: Allows transfers under $1,000
+    tool: transfer_funds
+    arguments:
+      amount: 100
+    expect:
+      decision: allow
+```
+
+### TypeScript
+
+```typescript
+import { runTests } from "veto-sdk";
+
+const result = await runTests({
+  fixturesPath: "./veto/tests",
+  policyPath: "./veto",
+  coverage: true,
+});
+// result.passed, result.failed, result.results
+```
+
+### Python
+
+```python
+from veto import run_tests
+result = await run_tests(fixtures_path="./veto/tests")
+```
+
+### CLI
+
+```bash
+npx veto-cli test                          # run all fixtures
+npx veto-cli test --coverage              # show untested rule IDs
+npx veto-cli test --fixtures ./custom/dir  # custom fixture path
+```
+
+## SSE proxy
+
+HTTP proxy that intercepts OpenAI and Anthropic streaming (SSE) responses, validates tool calls against Veto policies before forwarding to the client. Supports both OpenAI and Anthropic SSE formats with auto-detection.
+
+### TypeScript
+
+```typescript
+import { startProxyServer } from "veto-sdk/proxy";
+
+const stop = await startProxyServer({
+  port: 8080,
+  target: "https://api.openai.com",
+  configDir: "./veto",
+  format: "auto",        // "openai" | "anthropic" | "auto"
+  maxBufferBytes: 1_048_576,
+});
+```
+
+### CLI
+
+```bash
+npx veto-cli intercept --port 8080 --target https://api.openai.com
+npx veto-cli intercept --target https://api.anthropic.com --format anthropic
+```
+
+Point your application at `http://localhost:8080` instead of the provider URL. Tool calls in streamed responses are buffered, validated, and either forwarded or replaced with a synthetic block event.
+
+## Webhooks
+
+Event notifications for decisions, blocks, and approvals.
+
+### Supported formats
+
+| Format | Function (TS) | Function (Python) |
+|--------|--------------|-------------------|
+| Slack | `formatSlackPayload()` | `format_slack_payload()` |
+| PagerDuty | `formatPagerDutyPayload()` | `format_pagerduty_payload()` |
+| Generic JSON | `formatGenericPayload()` | `format_generic_payload()` |
+| CEF (ArcSight) | `formatCefPayload()` | `format_cef_payload()` |
+
+### Configuration
+
+```typescript
+import { resolveEventWebhookConfig, formatSlackPayload } from "veto-sdk";
+```
+
+Webhook event types: `tool_call_blocked`, `tool_call_allowed`, `approval_requested`, `approval_resolved`, `rate_limit_exceeded`, `budget_exceeded`.
+
+## Output patterns
+
+Built-in regex patterns for detecting sensitive data in tool outputs.
+
+```typescript
+import {
+  OUTPUT_PATTERNS,
+  OUTPUT_PATTERN_SSN,
+  OUTPUT_PATTERN_CREDIT_CARD,
+  OUTPUT_PATTERN_OPENAI_API_KEY,
+  OUTPUT_PATTERN_GITHUB_API_KEY,
+  OUTPUT_PATTERN_AWS_API_KEY,
+  OUTPUT_PATTERN_EMAIL,
+  OUTPUT_PATTERN_US_PHONE,
+} from "veto-sdk";
+```
+
+These are reference patterns, not auto-applied. Use them in output rules:
+
+```yaml
+output_rules:
+  - id: redact-credit-cards
+    name: Redact credit card numbers
+    enabled: true
+    severity: critical
+    action: redact
+    redact_with: "[REDACTED]"
+    output_conditions:
+      - field: output
+        operator: matches
+        value: "\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b"
+```
+
+## VetoAdmin
+
+Management API client for Veto Cloud. Manages policies, decisions, approvals, API keys, and MCP upstreams.
+
+```typescript
+import { VetoAdmin } from "veto-sdk";
+
+const admin = new VetoAdmin({ apiKey: process.env.VETO_API_KEY });
+
+// Policies
+const policies = await admin.listPolicies();
+await admin.createPolicy({ toolName: "transfer_funds", constraints: [...] });
+
+// Decisions
+const decisions = await admin.listDecisions({ tool: "transfer_funds" });
+const stats = await admin.getDecisionStats();
+
+// Approvals
+const pending = await admin.listApprovals({ status: "pending" });
+await admin.resolveApproval(approvalId, { decision: "approve" });
+```
+
+## VetoCloudClient
+
+Validation client for Veto Cloud. Handles tool registration, validation requests, and approval polling.
+
+```typescript
+import { VetoCloudClient } from "veto-sdk";
+
+const client = new VetoCloudClient({
+  apiKey: process.env.VETO_API_KEY,
+  baseUrl: "https://api.veto.so",
+});
+```
+
+```python
+from veto import VetoCloudClient, VetoCloudConfig
+```
+
+## Economic authorization
+
+Cost-aware policy enforcement for agents that spend money.
+
+### Protocol connectors
+
+| Protocol | Connector (TS) | Description |
+|----------|----------------|-------------|
+| x402 | `createX402Connector()` | HTTP 402 / EVM L2 payments |
+| Stripe MPP | `createMPPConnector()` | Stripe Managed Payment Platform |
+| Google AP2 | `createAP2Connector()` | Google Automated Payment Platform |
+
+### Usage
+
+```typescript
+import { createX402Connector, EconomicEvaluator, LocalBudgetEngine } from "veto-sdk";
+
+const connector = createX402Connector({ chainId: 8453, currency: "USDC" });
+const budget = new LocalBudgetEngine();
+const evaluator = new EconomicEvaluator(budget, connector);
+```
+
+### YAML shorthand
+
+```yaml
+extends: "@veto/economic-agent"
+```
+
+### Guard with economic context
+
+```typescript
+const result = await veto.guard("purchase", { item: "GPU" }, {
+  economic: {
+    cost: 42.5,
+    currency: "USD",
+    payer: "team-wallet",
+    protocol: "custom",
+  },
+});
+```
+
+## Compiler
+
+AST-based policy expressions as an alternative to field/operator/value conditions.
+
+```typescript
+import { compile, evaluate, typeCheck } from "veto-sdk";
+
+const ast = compile("args.amount > 500 && args.currency == 'USD'");
+const result = evaluate(ast, { args: { amount: 600, currency: "USD" } });
+// result: true
+```
+
+Use in YAML rules:
+
+```yaml
+conditions:
+  - expression: "args.amount > 500 && args.currency == 'USD'"
+```
+
+## CLI commands
+
+| Command | Description |
+|---------|-------------|
+| `veto init` | Initialize project with config and default rules |
+| `veto studio` | Launch interactive TUI |
+| `veto policy generate` | Generate policy YAML from natural language |
+| `veto policy apply` | Apply a policy file |
+| `veto guard check` | Check a tool call against rules |
+| `veto test` | Run policy test fixtures |
+| `veto scan` | Audit tool coverage, exit 1 on gaps (`--fail-uncovered`) |
+| `veto diff` | Show policy diff between branches/versions |
+| `veto intercept` | Start SSE proxy server |
+| `veto mcp serve` | Serve tools as MCP server |
+| `veto learn` | Learn rules from tool call history |
+| `veto compile` | Compile policy expressions to AST |
+| `veto replay` | Replay recorded tool calls against policies |
+| `veto repl` | Interactive policy REPL |
+| `veto audit verify` | Verify audit chain integrity |
+| `veto cloud login` | Authenticate with Veto Cloud |
+| `veto cloud whoami` | Show current cloud identity |
+| `veto doctor` | Diagnose configuration issues |
+
+## Human-in-the-loop
+
+Route sensitive decisions to human approval instead of auto-blocking.
+
+### YAML
+
+```yaml
+rules:
+  - id: approve-prod-deploy
+    name: Require approval for production deploys
+    action: require_approval    # or "ask" as shorthand
+    tools: [deploy]
+    conditions:
+      - field: arguments.environment
+        operator: equals
+        value: "production"
+```
+
+### Polling for approval
+
+```typescript
+const result = await veto.guard("deploy", { environment: "production" });
+if (result.decision === "require_approval") {
+  // result contains approval metadata
+  // Poll or webhook for resolution
+}
+```
+
+Approval workflows are available locally (CLI studio) and at scale via Veto Cloud dashboard.
+
+## Modes
+
+| Mode | Behavior |
+|------|----------|
+| `strict` | Block tool calls when validation fails |
+| `log` | Log failures but allow all tool calls |
+| `shadow` | Compute real decisions but never block |
+
+## Validation modes
+
+| Mode | Description |
+|------|-------------|
+| `local` | Evaluate YAML rules locally with deterministic checks (default) |
+| `api` | External HTTP API for validation |
+| `kernel` | Local kernel model via Ollama |
+| `custom` | Custom LLM provider (OpenAI, Anthropic, Gemini, OpenRouter) |
+| `cloud` | Veto Cloud API with approval workflow |
+
+## Key types
+
+### TypeScript exports
+
+```
+Veto, ToolCallDeniedError, VetoOptions, VetoMode, ValidationMode,
+WrappedTools, WrappedHandler, GuardContext, GuardResult,
+ToolDefinition, ToolCall, ToolResult, ToolHandler, ExecutableTool,
+Rule, RuleSet, RuleCondition, RuleAction, OutputRule, OutputRuleAction,
+RateLimitEntry, RateLimitStore, RedisRateLimitStore,
+VetoCloudClient, VetoAdmin,
+computeChainHash, GENESIS_HASH,
+tryLoadOtel, SpanStatusCode, VetoTracer, VetoSpan,
+runTests, VetoTestCase, VetoTestSuite, VetoTestResult,
+toOpenAITools, toAnthropicTools, toGoogleTool, toMCPTools,
+fromOpenAI, fromAnthropic, fromGoogleFunctionCall, fromMCP,
+formatSlackPayload, formatPagerDutyPayload, formatCefPayload,
+OUTPUT_PATTERNS, compile, evaluate, typeCheck,
+LocalBudgetEngine, EconomicEvaluator,
+createX402Connector, createMPPConnector, createAP2Connector,
+protect, BudgetTracker, CustomClient
+```
+
+### Python exports
+
+```
+Veto, ToolCallDeniedError, GuardResult, protect,
+VetoCloudClient, VetoCloudConfig, PolicyCache,
+to_openai_tools, to_anthropic_tools, to_google_tool,
+from_openai, from_anthropic, from_google_function_call,
+compute_chain_hash, GENESIS_HASH,
+try_load_otel, VetoTracer, VetoSpan,
+run_tests, VetoTestCase, VetoTestSuite, VetoTestResult,
+evaluate_rate_limits, RateLimitStore, RateLimitEntry,
+format_slack_payload, format_pagerduty_payload, format_cef_payload,
+OUTPUT_PATTERNS, validate_policy_ir, validate_deterministic
+```
