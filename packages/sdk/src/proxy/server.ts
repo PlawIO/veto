@@ -140,9 +140,10 @@ async function handleRequest(
     });
 
     upstreamReq.on('error', (err) => {
+      console.error('[veto intercept] Upstream connection error:', err.message);
       if (!clientRes.headersSent) {
         clientRes.writeHead(502, { 'Content-Type': 'text/plain' });
-        clientRes.end(`Bad Gateway: ${err.message}`);
+        clientRes.end('Bad Gateway');
       }
       reject(err);
     });
@@ -210,8 +211,9 @@ async function interceptNonStreamResponse(
           break;
         }
       } catch (err) {
+        console.error('[veto intercept] Unexpected guard error:', err instanceof Error ? err.message : String(err));
         blocked = true;
-        blockReason = `Validation error: ${err instanceof Error ? err.message : String(err)}`;
+        blockReason = 'Tool call validation failed';
         break;
       }
     }
@@ -339,9 +341,9 @@ async function interceptSSEStream(
               break;
             }
           } catch (err) {
-            // If guard throws unexpectedly, fail-closed
+            console.error('[veto intercept] Unexpected guard error:', err instanceof Error ? err.message : String(err));
             blocked = true;
-            blockReason = `Validation error: ${err instanceof Error ? err.message : String(err)}`;
+            blockReason = 'Tool call validation failed';
             break;
           }
         }
@@ -420,8 +422,9 @@ async function interceptAnthropicNonStreamResponse(
         break;
       }
     } catch (err) {
+      console.error('[veto intercept] Unexpected guard error:', err instanceof Error ? err.message : String(err));
       blocked = true;
-      blockReason = `Validation error: ${err instanceof Error ? err.message : String(err)}`;
+      blockReason = 'Tool call validation failed';
       break;
     }
   }
@@ -568,8 +571,9 @@ async function interceptAnthropicSSEStream(
               break;
             }
           } catch (err) {
+            console.error('[veto intercept] Unexpected guard error:', err instanceof Error ? err.message : String(err));
             blocked = true;
-            blockReason = `Validation error: ${err instanceof Error ? err.message : String(err)}`;
+            blockReason = 'Tool call validation failed';
             break;
           }
         }
