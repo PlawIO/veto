@@ -50,8 +50,6 @@ export async function tryLoadOtel(serviceName = 'veto-sdk'): Promise<VetoTracer>
       },
     };
   } catch {
-     
-    console.debug('veto: @opentelemetry/api not available, tracing disabled');
     return noopTracer;
   }
 }

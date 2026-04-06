@@ -287,12 +287,11 @@ export class VetoAdmin {
   }): AsyncIterable<VetoAdminEvent> {
     const params = new URLSearchParams();
     if (opts?.types?.length) params.set('types', opts.types.join(','));
-    params.set('apiKey', this.apiKey);
 
     const url = this.buildUrl('/events/stream', params);
     const response = await this.fetchWithTimeout(url, {
       method: 'GET',
-      headers: { Accept: 'text/event-stream' },
+      headers: { ...this.getHeaders(), Accept: 'text/event-stream' },
     });
 
     if (!response.ok) {

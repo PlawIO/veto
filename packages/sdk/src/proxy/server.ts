@@ -612,7 +612,9 @@ export async function startProxyServer(config: ProxyConfig): Promise<() => Promi
       handleRequest(req, res, config, veto).catch((err) => {
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end(`Internal proxy error: ${err instanceof Error ? err.message : String(err)}`);
+          const detail = err instanceof Error ? err.message : String(err);
+          console.error('[veto intercept] Internal proxy error:', detail);
+          res.end('Internal proxy error');
         }
       });
     });
