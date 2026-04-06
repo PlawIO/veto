@@ -1645,13 +1645,21 @@ export class Veto {
           this.logger,
           rule.id,
         );
-        if (rateLimitDenial !== null) {
-          if (!firstBlockRule) {
-            firstBlockRule = { ...rule, action: 'block', description: rateLimitDenial };
-          }
+        if (rateLimitDenial === null) {
+          // Rate limit not exceeded — rule doesn't fire yet.
+          continue;
         }
-        // Rate limit gates the action: if limit not exceeded (null), rule doesn't fire.
-        // Either way, skip standard action processing for this rule.
+        // Rate limit exceeded — apply the rule's declared action.
+        const rateLimitedRule = { ...rule, description: rateLimitDenial };
+        if (rateLimitedRule.action === 'block' && !firstBlockRule) {
+          firstBlockRule = rateLimitedRule;
+        } else if (rateLimitedRule.action === 'require_approval' && !firstApprovalRule) {
+          firstApprovalRule = rateLimitedRule;
+        } else if (rateLimitedRule.action === 'allow' && !firstAllowRule) {
+          firstAllowRule = rateLimitedRule;
+        } else if ((rateLimitedRule.action === 'warn' || rateLimitedRule.action === 'log') && !firstNonBlockingRule) {
+          firstNonBlockingRule = rateLimitedRule;
+        }
         continue;
       }
 

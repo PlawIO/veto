@@ -294,6 +294,32 @@ describe('rate_limits + conditions integration via veto.guard()', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('rate limit respects require_approval action instead of forcing block', async () => {
+    const configDir = setupDir(`
+version: "1.0"
+name: test
+rules:
+  - id: approval-gate
+    name: Approval after rate limit
+    enabled: true
+    severity: high
+    action: require_approval
+    tools: [transfer_funds]
+    rate_limits:
+      - scope: global
+        max_calls: 1
+        window_seconds: 60
+`);
+    const veto = await Veto.init({ configDir });
+
+    const r1 = await veto.guard('transfer_funds', {});
+    expect(r1.decision).toBe('allow');
+
+    const r2 = await veto.guard('transfer_funds', {});
+    expect(r2.decision).toBe('require_approval');
+    expect(r2.reason).toMatch(/Rate limit exceeded/);
+  });
+
   it('rate limit applies after condition passes', async () => {
     const configDir = setupDir(`
 version: "1.0"

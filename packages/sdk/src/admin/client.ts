@@ -258,33 +258,55 @@ export class VetoAdmin {
     callback: (event: VetoAdminEvent) => void
   ): EventSubscription {
     const types = Array.isArray(type) ? type.join(',') : type;
-    const params = new URLSearchParams();
-    if (types) params.set('types', types);
+    const controller = new AbortController();
 
-    params.set('apiKey', this.apiKey);
-    const url = this.buildUrl('/events/stream', params);
-    if (typeof EventSource === 'undefined') {
-      throw new VetoAdminError(
-        'onEvent() requires Node.js >= 22 or a browser. Use subscribeEvents() instead.',
-        0
-      );
-    }
-    const es = new EventSource(url);
+    const run = async () => {
+      const params = new URLSearchParams();
+      if (types) params.set('types', types);
+      const url = this.buildUrl('/events/stream', params);
 
-    const listener = (e: MessageEvent) => {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { ...this.getHeaders(), Accept: 'text/event-stream' },
+        signal: controller.signal,
+      });
+
+      if (!response.ok || !response.body) return;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
       try {
-        const data = JSON.parse(e.data) as VetoAdminEvent;
-        callback(data);
-      } catch {
-        // malformed event, skip
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6).trim();
+              if (!payload || payload === ':ping') continue;
+              try {
+                callback(JSON.parse(payload) as VetoAdminEvent);
+              } catch {
+                // malformed JSON, skip
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
       }
     };
 
-    es.addEventListener('message', listener);
-    es.addEventListener('event', listener);
+    run().catch(() => {});
 
     return {
-      unsubscribe: () => es.close(),
+      unsubscribe: () => controller.abort(),
     };
   }
 
