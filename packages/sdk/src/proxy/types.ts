@@ -13,4 +13,6 @@ export interface ProxyConfig {
   maxBufferBytes: number;
   /** Path to veto config directory. Default: ./veto */
   configDir: string;
+  /** SSE format to intercept. 'auto' detects from target URL. Default: 'auto' */
+  format?: 'openai' | 'anthropic' | 'auto';
 }

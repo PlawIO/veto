@@ -43,7 +43,7 @@ validation:
 # Custom LLM provider (for mode: "custom")
 # custom:
 #   provider: "openai"  # openai | anthropic | gemini | openrouter
-#   model: "gpt-4o"
+#   model: "gpt-5.4"
 #   # apiKey: "sk-..."  # Or set OPENAI_API_KEY env var
 #   temperature: 0.1
 #   maxTokens: 500

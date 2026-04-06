@@ -501,12 +501,12 @@ export class Veto {
     };
   }
 
-  private validateLocal(
+  private async validateLocal(
     toolName: string,
     args: Record<string, unknown>,
     context: GuardContext,
     source: 'guard' | 'interceptor'
-  ): ValidationResult {
+  ): Promise<ValidationResult> {
     const rules = this.getRulesForTool(toolName);
 
     if (rules.length === 0) {
@@ -535,7 +535,7 @@ export class Veto {
       if (!matches) continue;
 
       if (rule.rate_limits && rule.rate_limits.length > 0) {
-        const rateLimitDenial = evaluateRateLimits(
+        const rateLimitDenial = await evaluateRateLimits(
           rule.rate_limits,
           {
             agentId: this.resolveAgentId(context),
@@ -757,7 +757,7 @@ export class Veto {
       source: 'guard',
     };
 
-    let result = this.validateLocal(toolName, args, context, 'guard');
+    let result = await this.validateLocal(toolName, args, context, 'guard');
     const validatorResult = await this.runValidators(validationContext);
     if (validatorResult) {
       result = validatorResult;

@@ -115,7 +115,7 @@ interface OpenAICompletionResponse {
 
 const DEFAULT_CLOUD_BASE_URL = 'https://api.veto.so';
 const DEFAULT_TIMEOUT_MS = 20000;
-const DEFAULT_SELF_HOSTED_MODEL = 'gpt-4o';
+const DEFAULT_SELF_HOSTED_MODEL = 'gpt-5.4';
 const DEFAULT_KERNEL_BASE_URL = 'http://localhost:11434/v1';
 const DEFAULT_KERNEL_MODEL = 'hf.co/ycaleb/veto-warden-4b-GGUF:Q4_K_M';
 const DEFAULT_TEMPERATURE = 0.1;

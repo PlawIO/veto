@@ -15,7 +15,7 @@ export type CustomProvider = 'gemini' | 'openrouter' | 'openai' | 'anthropic';
 export interface CustomConfig {
   /** LLM provider to use */
   provider: CustomProvider;
-  /** Model identifier (e.g., 'gpt-4o', 'claude-3-5-sonnet-20241022') */
+  /** Model identifier (e.g., 'gpt-5.4', 'claude-3-5-sonnet-20241022') */
   model: string;
   /** API key for authentication (or env var name) */
   apiKey?: string;

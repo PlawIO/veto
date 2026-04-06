@@ -1638,7 +1638,7 @@ export class Veto {
       }
 
       if (rule.rate_limits && rule.rate_limits.length > 0) {
-        const rateLimitDenial = evaluateRateLimits(
+        const rateLimitDenial = await evaluateRateLimits(
           rule.rate_limits,
           context,
           context.toolName,
@@ -3310,7 +3310,7 @@ export class Veto {
    * const wrappedTools = veto.wrap(tools);
    *
    * const agent = createAgent({
-   *   model: 'openai:gpt-4o',
+   *   model: 'openai:gpt-5.4',
    *   tools: wrappedTools, // Same type as input!
    * });
    * ```

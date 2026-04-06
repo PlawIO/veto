@@ -1,7 +1,12 @@
 import type { RateLimitEntry } from './types.js';
 import type { ValidationContext } from '../types/config.js';
-import { checkAndRecord } from './store.js';
+import { checkAndRecord as memoryCheckAndRecord } from './store.js';
 import type { Logger } from '../utils/logger.js';
+
+export interface RateLimitStore {
+  checkAndRecord(key: string, maxCalls: number, windowMs: number): boolean | Promise<boolean>;
+  clear(): void | Promise<void>;
+}
 
 export function buildScopeKey(
   entry: RateLimitEntry,
@@ -30,19 +35,25 @@ export function buildScopeKey(
 /**
  * Evaluate rate limits for a tool call.
  * Returns null if all limits pass, or a denial reason string if any limit is exceeded.
+ *
+ * When no store is provided, falls back to the built-in in-memory sliding window store.
+ * Accepts async stores (e.g. Redis) — callers must await the result.
  */
-export function evaluateRateLimits(
+export async function evaluateRateLimits(
   rateLimits: RateLimitEntry[],
   ctx: Pick<ValidationContext, 'agentId' | 'userId' | 'sessionId'>,
   toolName: string,
   logger: Logger,
   ruleId?: string,
-): string | null {
+  store?: RateLimitStore,
+): Promise<string | null> {
+  const check = store ? store.checkAndRecord.bind(store) : memoryCheckAndRecord;
   for (const entry of rateLimits) {
     const key = buildScopeKey(entry, ctx, toolName, logger, ruleId);
     const windowMs = entry.window_seconds * 1000;
     try {
-      if (!checkAndRecord(key, entry.max_calls, windowMs)) {
+      const allowed = await check(key, entry.max_calls, windowMs);
+      if (!allowed) {
         return `Rate limit exceeded: max ${entry.max_calls} calls per ${entry.window_seconds}s (scope: ${entry.scope})`;
       }
     } catch (err) {

@@ -165,6 +165,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: upstream.url,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     try {
@@ -189,6 +190,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: upstream.url,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     try {
@@ -211,6 +213,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: upstream.url,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     try {
@@ -234,6 +237,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: `http://127.0.0.1:${deadPort}`,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     try {
@@ -271,6 +275,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: upstream.url,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     try {
@@ -362,6 +367,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: nonStreamUpstream.url,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     try {
@@ -402,6 +408,7 @@ describe('veto intercept proxy — end-to-end', () => {
       target: upstream.url,
       maxBufferBytes: 1024 * 1024,
       configDir,
+      format: 'openai',
     });
 
     // Server is running — verify a request works

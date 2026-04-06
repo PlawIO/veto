@@ -87,7 +87,7 @@ importers:
         version: 1.34.0
       "@langchain/core":
         specifier: 0.3.80
-        version: 0.3.80(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
+        version: 0.3.80(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
       "@opentui/core":
         specifier: ^0.1.0
         version: 0.1.82(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)
@@ -101,11 +101,14 @@ importers:
         specifier: ^5.0.0
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
       picocolors:
-        specifier: ^1.0.0
+        specifier: ^1.1.1
         version: 1.1.1
       react:
         specifier: ^18.0.0
         version: 18.3.1
+      redis:
+        specifier: ^4.0.0
+        version: 4.7.1
       yaml:
         specifier: 2.8.3
         version: 2.8.3
@@ -1332,6 +1335,53 @@ packages:
       }
     engines: { node: ">=14" }
 
+  "@redis/bloom@1.2.0":
+    resolution:
+      {
+        integrity: sha512-HG2DFjYKbpNmVXsa0keLHp/3leGJz1mjh09f2RLGGLQZzSHpkmZWuwJbAvo3QcRY8p80m5+ZdXZdYOSBLlp7Cg==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/client@1.6.1":
+    resolution:
+      {
+        integrity: sha512-/KCsg3xSlR+nCK8/8ZYSknYxvXHwubJrU82F3Lm1Fp6789VQ0/3RJKfsmRXjqfaTA++23CvC3hqmqe/2GEt6Kw==,
+      }
+    engines: { node: ">=14" }
+
+  "@redis/graph@1.1.1":
+    resolution:
+      {
+        integrity: sha512-FEMTcTHZozZciLRl6GiiIB4zGm5z5F3F6a6FZCyrfxdKOhFlGkiAqlexWMBzCi4DcRoyiOsuLfW+cjlGWyExOw==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/json@1.0.7":
+    resolution:
+      {
+        integrity: sha512-6UyXfjVaTBTJtKNG4/9Z8PSpKE6XgSyEb8iwaqDcy+uKrd/DGYHTWkUdnQDyzm727V7p21WUMhsqz5oy65kPcQ==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/search@1.2.0":
+    resolution:
+      {
+        integrity: sha512-tYoDBbtqOVigEDMAcTGsRlMycIIjwMCgD8eR2t0NANeQmgK/lvxNAvYyb6bZDD4frHRhIHkJu2TBRvB0ERkOmw==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/time-series@1.1.0":
+    resolution:
+      {
+        integrity: sha512-c1Q99M5ljsIuc4YdaCwfUEXsofakb9c8+Zse2qxTadu8TalLXuAESzLvFAvNVbkmSlvlzIQOLpBCmWI9wTOt+g==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
   "@rollup/rollup-android-arm-eabi@4.59.0":
     resolution:
       {
@@ -2164,6 +2214,13 @@ packages:
       }
     engines: { node: ">=20" }
 
+  cluster-key-slot@1.1.2:
+    resolution:
+      {
+        integrity: sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==,
+      }
+    engines: { node: ">=0.10.0" }
+
   code-excerpt@4.0.0:
     resolution:
       {
@@ -2764,6 +2821,13 @@ packages:
         integrity: sha512-zV/5HKTfCeKWnxG0Dmrw51hEWFGfcF2xiXqcA3+J90WDuP0SvoiSO5ORvcBsifmx/FoIjgQN3oNOGaQ5PhLFkg==,
       }
     engines: { node: ">=18" }
+
+  generic-pool@3.9.0:
+    resolution:
+      {
+        integrity: sha512-hymDOu5B53XvN4QT9dBmZxPX4CWhBPPLguTZ9MMFeFa/Kg0xWVfylOVNlJji/E7yTZWFd/q9GO5TxDLq156D7g==,
+      }
+    engines: { node: ">= 4" }
 
   get-east-asian-width@1.4.0:
     resolution:
@@ -3870,6 +3934,12 @@ packages:
       }
     engines: { node: ">=6" }
 
+  redis@4.7.1:
+    resolution:
+      {
+        integrity: sha512-S1bJDnqLftzHXHP8JsT5II/CtHWQrASX5K96REjWjlmWKrviSOLWmM7QnRLstAWsu1VBBV1ffV6DzCvxNP0UJQ==,
+      }
+
   require-from-string@2.0.2:
     resolution:
       {
@@ -4693,6 +4763,12 @@ packages:
         integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==,
       }
 
+  yallist@4.0.0:
+    resolution:
+      {
+        integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==,
+      }
+
   yaml@2.8.3:
     resolution:
       {
@@ -5452,14 +5528,14 @@ snapshots:
       "@jridgewell/resolve-uri": 3.1.2
       "@jridgewell/sourcemap-codec": 1.5.5
 
-  "@langchain/core@0.3.80(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))":
+  "@langchain/core@0.3.80(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))":
     dependencies:
       "@cfworker/json-schema": 4.1.1
       ansi-styles: 5.2.0
       camelcase: 6.3.0
       decamelize: 1.2.0
       js-tiktoken: 1.0.21
-      langsmith: 0.4.6(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
+      langsmith: 0.4.6(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
       mustache: 4.2.0
       p-queue: 6.6.2
       p-retry: 4.6.2
@@ -5548,6 +5624,32 @@ snapshots:
 
   "@pkgjs/parseargs@0.11.0":
     optional: true
+
+  "@redis/bloom@1.2.0(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/client@1.6.1":
+    dependencies:
+      cluster-key-slot: 1.1.2
+      generic-pool: 3.9.0
+      yallist: 4.0.0
+
+  "@redis/graph@1.1.1(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/json@1.0.7(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/search@1.2.0(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/time-series@1.1.0(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
 
   "@rollup/rollup-android-arm-eabi@4.59.0":
     optional: true
@@ -6007,6 +6109,8 @@ snapshots:
       slice-ansi: 7.1.2
       string-width: 8.1.0
 
+  cluster-key-slot@1.1.2: {}
+
   code-excerpt@4.0.0:
     dependencies:
       convert-to-spaces: 2.0.1
@@ -6398,6 +6502,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  generic-pool@3.9.0: {}
+
   get-east-asian-width@1.4.0: {}
 
   get-intrinsic@1.3.0:
@@ -6755,7 +6861,7 @@ snapshots:
     dependencies:
       json-buffer: 3.0.1
 
-  langsmith@0.4.6(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76)):
+  langsmith@0.4.6(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76)):
     dependencies:
       "@types/uuid": 10.0.0
       chalk: 4.1.2
@@ -6764,7 +6870,7 @@ snapshots:
       semver: 7.7.3
       uuid: 10.0.0
     optionalDependencies:
-      "@opentelemetry/api": 1.9.0
+      "@opentelemetry/api": 1.9.1
       openai: 4.104.0(ws@8.19.0)(zod@3.25.76)
 
   levn@0.4.1:
@@ -7065,6 +7171,15 @@ snapshots:
       js-yaml: 3.14.2
       pify: 4.0.1
       strip-bom: 3.0.0
+
+  redis@4.7.1:
+    dependencies:
+      "@redis/bloom": 1.2.0(@redis/client@1.6.1)
+      "@redis/client": 1.6.1
+      "@redis/graph": 1.1.1(@redis/client@1.6.1)
+      "@redis/json": 1.0.7(@redis/client@1.6.1)
+      "@redis/search": 1.2.0(@redis/client@1.6.1)
+      "@redis/time-series": 1.1.0(@redis/client@1.6.1)
 
   require-from-string@2.0.2: {}
 
@@ -7509,6 +7624,8 @@ snapshots:
 
   xmlchars@2.2.0:
     optional: true
+
+  yallist@4.0.0: {}
 
   yaml@2.8.3: {}
 

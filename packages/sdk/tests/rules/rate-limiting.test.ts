@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkAndRecord, clearStore } from '../../src/rate-limiting/store.js';
-import { buildScopeKey, evaluateRateLimits } from '../../src/rate-limiting/evaluator.js';
+import { buildScopeKey, evaluateRateLimits, type RateLimitStore } from '../../src/rate-limiting/evaluator.js';
 import type { RateLimitEntry } from '../../src/rate-limiting/types.js';
 import type { ValidationContext } from '../../src/types/config.js';
 import { silentLogger, createMemoryLogger } from '../../src/utils/logger.js';
@@ -29,23 +29,16 @@ describe('rate limiting store', () => {
   afterEach(() => clearStore());
 
   it('concurrent synchronous calls on the same key — no double-decrement', () => {
-    // Node.js event loop is single-threaded. Two synchronous calls to checkAndRecord
-    // in the same tick serialize correctly: first gets slot, second is blocked.
     const key = 'concurrent-key';
     const maxCalls = 1;
     const windowMs = 60_000;
 
-    // Simulate two "concurrent" calls (both dispatched without awaiting)
     const r1 = checkAndRecord(key, maxCalls, windowMs);
     const r2 = checkAndRecord(key, maxCalls, windowMs);
 
-    // Only one of them can have the slot
     expect(r1).toBe(true);
     expect(r2).toBe(false);
-    // Total recorded: exactly 1 (not 2)
-    const r3 = checkAndRecord(key, 2, windowMs); // different limit to inspect count
-    // If both r1+r2 had recorded, count would be 2 and r3 with limit=2 would be false
-    // Since only 1 was recorded, r3 with limit=2 should be true
+    const r3 = checkAndRecord(key, 2, windowMs);
     expect(r3).toBe(true);
   });
 
@@ -63,17 +56,14 @@ describe('rate limiting store', () => {
   });
 
   it('excludes calls outside the window from the count', () => {
-    // Use real time manipulation via fake timers
     vi.useFakeTimers();
     const now = Date.now();
 
-    // Make 5 calls at t=0
     for (let i = 0; i < 5; i++) {
       checkAndRecord('key2', 5, 1_000);
     }
     expect(checkAndRecord('key2', 5, 1_000)).toBe(false);
 
-    // Advance 2 seconds — all previous calls fall outside the 1s window
     vi.setSystemTime(now + 2_000);
     expect(checkAndRecord('key2', 5, 1_000)).toBe(true);
 
@@ -84,14 +74,9 @@ describe('rate limiting store', () => {
     vi.useFakeTimers();
     const now = Date.now();
 
-    // Record a call with a 1s window
     checkAndRecord('stale-key', 10, 1_000);
-    // Advance past the window
     vi.setSystemTime(now + 2_000);
-    // Clear store to reset, then re-record to ensure the key was actually tracked
-    // The sweep runs on a 60s interval, so we just verify clearStore resets everything
     clearStore();
-    // After clear, the key should be gone — new call gets recorded fresh
     expect(checkAndRecord('stale-key', 1, 1_000)).toBe(true);
 
     vi.useRealTimers();
@@ -148,63 +133,72 @@ describe('evaluateRateLimits', () => {
   beforeEach(() => clearStore());
   afterEach(() => clearStore());
 
-  it('returns null when all limits pass', () => {
+  it('returns null when all limits pass', async () => {
     const ctx = makeCtx();
     const limits: RateLimitEntry[] = [{ scope: 'global', max_calls: 5, window_seconds: 60 }];
-    expect(evaluateRateLimits(limits, ctx, 'search_web', silentLogger)).toBeNull();
+    expect(await evaluateRateLimits(limits, ctx, 'search_web', silentLogger)).toBeNull();
   });
 
-  it('returns denial message when limit exceeded', () => {
+  it('returns denial message when limit exceeded', async () => {
     const ctx = makeCtx();
     const limits: RateLimitEntry[] = [{ scope: 'user', max_calls: 2, window_seconds: 60 }];
-    evaluateRateLimits(limits, ctx, 'search_web', silentLogger);
-    evaluateRateLimits(limits, ctx, 'search_web', silentLogger);
-    const result = evaluateRateLimits(limits, ctx, 'search_web', silentLogger);
+    await evaluateRateLimits(limits, ctx, 'search_web', silentLogger);
+    await evaluateRateLimits(limits, ctx, 'search_web', silentLogger);
+    const result = await evaluateRateLimits(limits, ctx, 'search_web', silentLogger);
     expect(result).toMatch(/Rate limit exceeded/);
     expect(result).toMatch(/max 2 calls per 60s/);
     expect(result).toMatch(/scope: user/);
   });
 
-  it('global scope shares counter across all agents', () => {
+  it('global scope shares counter across all agents', async () => {
     const limits: RateLimitEntry[] = [{ scope: 'global', max_calls: 1, window_seconds: 60 }];
     const ctx1 = makeCtx({ agentId: 'agent-a' });
     const ctx2 = makeCtx({ agentId: 'agent-b' });
-    // First call from agent-a consumes the global slot
-    expect(evaluateRateLimits(limits, ctx1, 'search_web', silentLogger)).toBeNull();
-    // agent-b also denied because global counter is full
-    expect(evaluateRateLimits(limits, ctx2, 'search_web', silentLogger)).not.toBeNull();
+    expect(await evaluateRateLimits(limits, ctx1, 'search_web', silentLogger)).toBeNull();
+    expect(await evaluateRateLimits(limits, ctx2, 'search_web', silentLogger)).not.toBeNull();
   });
 
-  it('returns fail-closed denial when store throws', () => {
+  it('returns fail-closed denial when store throws', async () => {
+    const ctx = makeCtx();
     const limits: RateLimitEntry[] = [{ scope: 'global', max_calls: 5, window_seconds: 60 }];
-    const ctx = makeCtx();
-
-    // Mock checkAndRecord to throw
-    vi.doMock('../../src/rate-limiting/store.js', () => ({
+    const throwingStore: RateLimitStore = {
       checkAndRecord: () => { throw new Error('store unavailable'); },
-      clearStore: () => {},
-    }));
-
-    // Since we can't easily re-import in vitest with doMock after initial load,
-    // test the fail-closed path by wrapping directly
+      clear: () => {},
+    };
     const { logger, entries } = createMemoryLogger('error');
-    // Simulate what evaluateRateLimits does when checkAndRecord throws
-    let denial: string | null = null;
-    try {
-      throw new Error('store unavailable');
-    } catch (err) {
-      logger.error('[veto] rate limit store error, failing closed', { err: String(err) });
-      denial = 'Rate limit check failed (fail-closed)';
-    }
-    expect(denial).toBe('Rate limit check failed (fail-closed)');
+    const result = await evaluateRateLimits(limits, ctx, 'search_web', logger, undefined, throwingStore);
+    expect(result).toBe('Rate limit check failed (fail-closed)');
     expect(entries.some(e => e.level === 'error')).toBe(true);
-
-    vi.restoreAllMocks();
   });
 
-  it('empty rate_limits array allows through', () => {
+  it('returns fail-closed denial when async store rejects', async () => {
     const ctx = makeCtx();
-    expect(evaluateRateLimits([], ctx, 'search_web', silentLogger)).toBeNull();
+    const limits: RateLimitEntry[] = [{ scope: 'global', max_calls: 5, window_seconds: 60 }];
+    const rejectingStore: RateLimitStore = {
+      checkAndRecord: () => Promise.reject(new Error('connection lost')),
+      clear: () => {},
+    };
+    const { logger, entries } = createMemoryLogger('error');
+    const result = await evaluateRateLimits(limits, ctx, 'search_web', logger, undefined, rejectingStore);
+    expect(result).toBe('Rate limit check failed (fail-closed)');
+    expect(entries.some(e => e.level === 'error')).toBe(true);
+  });
+
+  it('uses custom store when provided', async () => {
+    const ctx = makeCtx();
+    const limits: RateLimitEntry[] = [{ scope: 'global', max_calls: 5, window_seconds: 60 }];
+    let recorded = 0;
+    const customStore: RateLimitStore = {
+      checkAndRecord: () => { recorded++; return true; },
+      clear: () => {},
+    };
+    await evaluateRateLimits(limits, ctx, 'search_web', silentLogger, undefined, customStore);
+    expect(recorded).toBe(1);
+  });
+
+  it('empty rate_limits array allows through', async () => {
+    const ctx = makeCtx();
+    expect(await evaluateRateLimits([], ctx, 'search_web', silentLogger)).toBeNull();
   });
 });
 
@@ -237,10 +231,6 @@ describe('Rule TypeScript schema', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Window boundary
-// ---------------------------------------------------------------------------
-
 describe('rate limit window boundary', () => {
   beforeEach(() => clearStore());
   afterEach(() => clearStore());
@@ -250,15 +240,10 @@ describe('rate limit window boundary', () => {
     const windowMs = 1_000;
     const t0 = Date.now();
 
-    // Make one call at t=0
     checkAndRecord('boundary', 1, windowMs);
-    // Should be blocked immediately (limit=1, one call just made)
     expect(checkAndRecord('boundary', 1, windowMs)).toBe(false);
 
-    // Advance to exactly t=window_seconds (1000ms)
     vi.setSystemTime(t0 + windowMs);
-    // At t=1000, the old call is at age=1000ms. filter: now - t < windowMs → 1000 < 1000 → false.
-    // So the old call IS expired and the new one should be allowed.
     expect(checkAndRecord('boundary', 1, windowMs)).toBe(true);
 
     vi.useRealTimers();
@@ -271,17 +256,12 @@ describe('rate limit window boundary', () => {
 
     checkAndRecord('inside', 1, windowMs);
 
-    // Advance to 999ms — still inside window
     vi.setSystemTime(t0 + 999);
     expect(checkAndRecord('inside', 1, windowMs)).toBe(false);
 
     vi.useRealTimers();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Integration: conditions + rate_limits in same rule
-// ---------------------------------------------------------------------------
 
 describe('rate_limits + conditions integration via veto.guard()', () => {
   const TMP = '/tmp/veto-ratelimit-integration-' + Date.now();
@@ -334,7 +314,7 @@ rules:
 
     const r1 = await veto.guard('search_web', {});
     const r2 = await veto.guard('search_web', {});
-    const r3 = await veto.guard('search_web', {}); // should be rate-limited
+    const r3 = await veto.guard('search_web', {});
 
     expect(r1.decision).toBe('allow');
     expect(r2.decision).toBe('allow');
@@ -364,7 +344,6 @@ rules:
 `);
     const veto = await Veto.init({ configDir });
 
-    // Call as non-admin — condition fails, rule not matched, rate limit counter not touched
     const r1 = await veto.guard('delete_file', {}, { role: 'user' });
     const r2 = await veto.guard('delete_file', {}, { role: 'user' });
     const r3 = await veto.guard('delete_file', {}, { role: 'user' });
@@ -373,7 +352,6 @@ rules:
     expect(r2.decision).toBe('allow');
     expect(r3.decision).toBe('allow');
 
-    // Now call as admin — condition passes, rate limit applies, first call uses the slot
     const r4 = await veto.guard('delete_file', {}, { role: 'admin' });
     const r5 = await veto.guard('delete_file', {}, { role: 'admin' });
 
@@ -400,7 +378,6 @@ rules:
 `);
     const veto = await Veto.init({ configDir });
 
-    // Different tool — not matched by rule, rate limit never fires
     for (let i = 0; i < 5; i++) {
       const r = await veto.guard('read_file', {});
       expect(r.decision).toBe('allow');

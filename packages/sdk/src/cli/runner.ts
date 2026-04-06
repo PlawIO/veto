@@ -116,8 +116,9 @@ Examples:
   veto replay --policy financial.yaml --log calls.jsonl --diff
   veto replay --policy ./veto/ --log calls.jsonl --format json
   veto doctor
-  veto run-tests [path]               # policy unit tests (YAML fixtures)
-  veto run-tests --coverage           # report rule IDs with/without tests
+  veto test [path]                     # policy unit tests (YAML fixtures)
+  veto test --coverage                # report rule IDs with/without tests
+  veto test --gaps                    # adversarial gap analysis
   veto audit verify [file]            # verify tamper-evident audit chain
   veto intercept [--port 8080]        # zero-code proxy for OpenAI agents
 `);
@@ -168,6 +169,8 @@ function parseArgs(args: string[]): ParsedArgs {
     'api-key',
     'policy-server',
     'timeout-ms',
+    'port',
+    'max-buffer',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -732,27 +735,31 @@ async function runInterceptCommand(
   const target = values.target ?? 'https://api.openai.com';
   const configDir = values.config ?? './veto';
   const maxBufferBytes = parseInt(values['max-buffer'] ?? String(1024 * 1024), 10);
+  const format = (values.format ?? 'auto') as 'openai' | 'anthropic' | 'auto';
 
   if (flags.help) {
     console.log('Usage: veto intercept [options]');
     console.log('');
-    console.log('Start a local HTTP proxy that intercepts OpenAI API requests and');
+    console.log('Start a local HTTP proxy that intercepts API requests and');
     console.log('validates tool calls against your Veto policies before forwarding.');
     console.log('');
     console.log('Options:');
     console.log('  --port <port>         Proxy listen port (default: 8080)');
     console.log('  --target <url>        Upstream API base URL (default: https://api.openai.com)');
+    console.log('  --format <fmt>        API format: openai, anthropic, or auto (default: auto)');
     console.log('  --config <dir>        Veto config directory (default: ./veto)');
     console.log('  --max-buffer <bytes>  Buffer limit per response in bytes (default: 1048576)');
     console.log('');
     console.log('Usage with your agent:');
     console.log('  OPENAI_BASE_URL=http://localhost:8080 node your-agent.js');
+    console.log('  ANTHROPIC_BASE_URL=http://localhost:8080 node your-agent.js');
     return 0;
   }
 
   console.log(colors.bold(`veto intercept`));
   console.log(`  Proxy: http://127.0.0.1:${port} (localhost only)`);
   console.log(`  Target: ${target}`);
+  console.log(`  Format: ${format}`);
   console.log(`  Config: ${configDir}`);
   console.log('');
   console.log(colors.dim('Point your agent at the proxy:'));
@@ -760,7 +767,7 @@ async function runInterceptCommand(
   console.log('');
   console.log(colors.dim('Press Ctrl+C to stop.'));
 
-  const stopServer = await startProxyServer({ port, target, configDir, maxBufferBytes });
+  const stopServer = await startProxyServer({ port, target, configDir, maxBufferBytes, format });
 
   // Keep running until SIGINT/SIGTERM
   await new Promise<void>((resolve) => {
@@ -914,13 +921,16 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return result.success ? 0 : 1;
     }
     case 'test': {
-      const result = await test({
-        policy: values.policy,
-        output: values.output,
-        quiet: flags.quiet,
-        format: (values.format as 'text' | 'json') ?? undefined,
-      });
-      return result.success ? 0 : 1;
+      if (flags.gaps) {
+        const result = await test({
+          policy: values.policy,
+          output: values.output,
+          quiet: flags.quiet,
+          format: (values.format as 'text' | 'json') ?? undefined,
+        });
+        return result.success ? 0 : 1;
+      }
+      return await runRunTests(positionals, flags, values);
     }
     case 'scan': {
       const result = await scan({
@@ -965,6 +975,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return result.success ? 0 : 1;
     }
     case 'run-tests':
+      console.error('Warning: `veto run-tests` is deprecated. Use `veto test` instead.');
       return await runRunTests(positionals, flags, values);
     case 'audit':
       return await runAuditCommand(positionals, flags, values);

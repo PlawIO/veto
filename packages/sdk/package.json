@@ -54,8 +54,8 @@
     "ai": ">=3.0.0",
     "ink": "^5.0.0",
     "openai": "^4.0.0",
-    "picocolors": "^1.0.0",
     "react": "^18.0.0",
+    "redis": "^4.0.0",
     "zod": "^3.22.0"
   },
   "peerDependenciesMeta": {
@@ -69,6 +69,9 @@
       "optional": true
     },
     "@google/genai": {
+      "optional": true
+    },
+    "redis": {
       "optional": true
     },
     "zod": {
@@ -88,10 +91,12 @@
     },
     "@opentui/core": {
       "optional": true
-    },
-    "picocolors": {
-      "optional": true
     }
+  },
+  "dependencies": {
+    "ajv": "^8.18.0",
+    "picocolors": "^1.1.1",
+    "yaml": "^2.8.2"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -174,9 +179,5 @@
       "types": "./dist/policy/index.d.ts",
       "import": "./dist/policy/index.js"
     }
-  },
-  "dependencies": {
-    "ajv": "^8.18.0",
-    "yaml": "^2.8.2"
   }
 }

@@ -1,12 +1,12 @@
 /**
- * veto intercept — HTTP proxy for OpenAI-compatible streaming APIs.
+ * veto intercept — HTTP proxy for OpenAI and Anthropic streaming APIs.
  *
  * Intercepts tool calls in streaming responses (SSE format) and validates
  * them against Veto policies before forwarding to the client.
  *
  * Architecture — full buffering:
  *   1. Non-tool-call responses → passthrough chunks as they arrive
- *   2. Tool-call responses → buffer all chunks until finish_reason: tool_calls
+ *   2. Tool-call responses → buffer all chunks until stream signals completion
  *   3. Validate assembled tool call → allow (flush buffer) or block (synthetic error)
  *   4. Buffer overflow (> maxBufferBytes) → flush + passthrough, skip validation
  *
@@ -24,9 +24,22 @@ import {
   synthBlockedEvent,
   type PendingToolCall,
 } from './interceptor.js';
+import {
+  finalizeAnthropicToolUse,
+  mergeAnthropicToolUseDelta,
+  parseAnthropicSSELines,
+  synthAnthropicBlockedEvent,
+  type AnthropicPendingToolUse,
+} from './anthropic-interceptor.js';
 import { Veto } from '../core/veto.js';
 
 const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function resolveFormat(config: ProxyConfig): 'openai' | 'anthropic' {
+  const fmt = config.format ?? 'auto';
+  if (fmt === 'openai' || fmt === 'anthropic') return fmt;
+  return config.target.includes('anthropic') ? 'anthropic' : 'openai';
+}
 
 /**
  * Handle one proxied request.
@@ -39,9 +52,12 @@ async function handleRequest(
 ): Promise<void> {
   const target = new URL(config.target);
   const reqUrl = clientReq.url ?? '/';
+  const format = resolveFormat(config);
 
-  // Only intercept chat completions — stream everything else verbatim
-  const isChatCompletion = reqUrl.includes('/chat/completions');
+  const isInterceptTarget =
+    format === 'anthropic'
+      ? reqUrl.includes('/v1/messages')
+      : reqUrl.includes('/chat/completions');
 
   // Forward request headers, replacing host
   const headers: Record<string, string | string[] | undefined> = {
@@ -73,7 +89,7 @@ async function handleRequest(
   const body = Buffer.concat(bodyChunks);
 
   let parsedBody: Record<string, unknown> | null = null;
-  if (isChatCompletion) {
+  if (isInterceptTarget) {
     try {
       parsedBody = JSON.parse(body.toString('utf-8')) as Record<string, unknown>;
     } catch {
@@ -98,8 +114,7 @@ async function handleRequest(
 
   await new Promise<void>((resolve, reject) => {
     const upstreamReq = upstreamLib.request(upstreamOptions, (upstreamRes) => {
-      if (!isChatCompletion) {
-        // Non-chat endpoint: passthrough
+      if (!isInterceptTarget) {
         clientRes.writeHead(upstreamRes.statusCode ?? 200, upstreamRes.headers);
         upstreamRes.pipe(clientRes);
         upstreamRes.on('end', resolve);
@@ -107,13 +122,20 @@ async function handleRequest(
         return;
       }
 
-      if (isStream) {
-        // Streaming: intercept SSE
-        clientRes.writeHead(upstreamRes.statusCode ?? 200, upstreamRes.headers);
-        interceptSSEStream(upstreamRes, clientRes, config, veto).then(resolve).catch(reject);
+      if (format === 'anthropic') {
+        if (isStream) {
+          clientRes.writeHead(upstreamRes.statusCode ?? 200, upstreamRes.headers);
+          interceptAnthropicSSEStream(upstreamRes, clientRes, config, veto).then(resolve).catch(reject);
+        } else {
+          interceptAnthropicNonStreamResponse(upstreamRes, clientRes, veto).then(resolve).catch(reject);
+        }
       } else {
-        // Non-streaming chat completion: buffer full response, validate tool calls
-        interceptNonStreamResponse(upstreamRes, clientRes, veto).then(resolve).catch(reject);
+        if (isStream) {
+          clientRes.writeHead(upstreamRes.statusCode ?? 200, upstreamRes.headers);
+          interceptSSEStream(upstreamRes, clientRes, config, veto).then(resolve).catch(reject);
+        } else {
+          interceptNonStreamResponse(upstreamRes, clientRes, veto).then(resolve).catch(reject);
+        }
       }
     });
 
@@ -345,6 +367,233 @@ async function interceptSSEStream(
 
   if (mode === 'buffer' && !bufferOverflowed) {
     // Stream ended mid-buffer (connection closed?) — flush what we have
+    flushBuffer();
+  }
+
+  clientRes.end();
+}
+
+/**
+ * Intercept a non-streaming Anthropic Messages response.
+ * Tool calls are content blocks with type "tool_use", where input is an object (not stringified).
+ */
+async function interceptAnthropicNonStreamResponse(
+  upstream: http.IncomingMessage,
+  clientRes: http.ServerResponse,
+  veto: Veto,
+): Promise<void> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of upstream) {
+    chunks.push(chunk as Buffer);
+  }
+  const responseBody = Buffer.concat(chunks).toString('utf-8');
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(responseBody) as Record<string, unknown>;
+  } catch {
+    clientRes.writeHead(upstream.statusCode ?? 200, upstream.headers);
+    clientRes.end(responseBody);
+    return;
+  }
+
+  const content = Array.isArray(parsed['content']) ? parsed['content'] : [];
+  let blocked = false;
+  let blockReason = 'Tool call blocked by veto policy';
+
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const b = block as Record<string, unknown>;
+    if (b['type'] !== 'tool_use') continue;
+
+    const name = typeof b['name'] === 'string' ? b['name'] : '';
+    let args: Record<string, unknown> = {};
+    if (b['input'] && typeof b['input'] === 'object' && !Array.isArray(b['input'])) {
+      args = b['input'] as Record<string, unknown>;
+    }
+
+    try {
+      const result = await veto.guard(name, args);
+      if (result.decision !== 'allow') {
+        blocked = true;
+        blockReason = result.reason ?? `Tool call '${name}' blocked`;
+        break;
+      }
+    } catch (err) {
+      blocked = true;
+      blockReason = `Validation error: ${err instanceof Error ? err.message : String(err)}`;
+      break;
+    }
+  }
+
+  if (blocked) {
+    const blockedResponse = {
+      ...parsed,
+      content: [{ type: 'text', text: `[BLOCKED by veto] ${blockReason}` }],
+      stop_reason: 'end_turn',
+    };
+    const body = JSON.stringify(blockedResponse);
+    const headers = { ...upstream.headers };
+    headers['content-length'] = Buffer.byteLength(body).toString();
+    clientRes.writeHead(200, headers);
+    clientRes.end(body);
+  } else {
+    clientRes.writeHead(upstream.statusCode ?? 200, upstream.headers);
+    clientRes.end(responseBody);
+  }
+}
+
+/**
+ * Intercept an Anthropic SSE stream.
+ *
+ * Anthropic events come as `event: <type>\ndata: <json>\n\n` pairs.
+ * Tool calls span content_block_start → content_block_delta(s) → content_block_stop.
+ * We buffer from the first tool_use block start until message_stop, then validate.
+ */
+async function interceptAnthropicSSEStream(
+  upstream: http.IncomingMessage,
+  clientRes: http.ServerResponse,
+  config: ProxyConfig,
+  veto: Veto,
+): Promise<void> {
+  const maxBufferBytes = config.maxBufferBytes;
+
+  let partial = '';
+  const pendingToolUses = new Map<number, AnthropicPendingToolUse>();
+  let bufferedChunks: string[] = [];
+  let bufferedBytes = 0;
+  let mode: 'passthrough' | 'buffer' | 'overflow' = 'passthrough';
+  let bufferOverflowed = false;
+  // Track which content block indexes are tool_use blocks
+  const toolUseIndexes = new Set<number>();
+
+  // Accumulate event: + data: line pairs
+  let eventLineBuf: string[] = [];
+
+  const flushBuffer = () => {
+    for (const chunk of bufferedChunks) {
+      clientRes.write(chunk);
+    }
+    bufferedChunks = [];
+    bufferedBytes = 0;
+  };
+
+  for await (const rawChunk of upstream) {
+    const chunk = (rawChunk as Buffer).toString('utf-8');
+    partial += chunk;
+
+    const lines = partial.split('\n');
+    partial = lines.pop() ?? '';
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, '');
+
+      // Accumulate event: + data: pairs; empty line signals end of an SSE event
+      if (line !== '') {
+        eventLineBuf.push(line);
+        continue;
+      }
+
+      // Empty line = end of SSE event
+      if (eventLineBuf.length === 0) {
+        if (mode === 'passthrough') clientRes.write('\n');
+        continue;
+      }
+
+      const sseBlock = eventLineBuf.join('\n') + '\n\n';
+      const parsed = parseAnthropicSSELines(eventLineBuf);
+      eventLineBuf = [];
+
+      // Track tool_use block indexes
+      if (parsed.eventType === 'content_block_start' && parsed.data) {
+        const block = parsed.data['content_block'] as Record<string, unknown> | undefined;
+        if (block && block['type'] === 'tool_use') {
+          const idx = typeof parsed.data['index'] === 'number' ? parsed.data['index'] : 0;
+          toolUseIndexes.add(idx);
+        }
+      }
+
+      // Determine if this event relates to a tool_use block
+      const isToolUseEvent = parsed.hasToolUse
+        || (parsed.toolUseStop && parsed.data && toolUseIndexes.has(
+          typeof parsed.data['index'] === 'number' ? parsed.data['index'] : -1,
+        ));
+
+      if (mode === 'overflow') {
+        clientRes.write(sseBlock);
+        continue;
+      }
+
+      if (mode === 'passthrough') {
+        if (isToolUseEvent) {
+          mode = 'buffer';
+        } else if (parsed.messageStop) {
+          clientRes.write(sseBlock);
+          continue;
+        } else {
+          clientRes.write(sseBlock);
+          continue;
+        }
+      }
+
+      // Buffer mode
+      if (parsed.data && parsed.eventType) {
+        mergeAnthropicToolUseDelta(pendingToolUses, parsed.data, parsed.eventType);
+      }
+
+      const blockBytes = Buffer.byteLength(sseBlock, 'utf-8');
+      bufferedBytes += blockBytes;
+      bufferedChunks.push(sseBlock);
+
+      if (bufferedBytes > maxBufferBytes) {
+        bufferOverflowed = true;
+        mode = 'overflow';
+        flushBuffer();
+        console.warn('[veto intercept] Buffer limit exceeded — flushing without validation');
+        continue;
+      }
+
+      if (parsed.messageStop) {
+        // Validate all assembled tool uses
+        let blocked = false;
+        let blockReason = 'Tool call blocked by veto policy';
+
+        for (const [, tc] of pendingToolUses) {
+          const finalized = finalizeAnthropicToolUse(tc);
+          try {
+            const result = await veto.guard(finalized.name, finalized.arguments);
+            if (result.decision !== 'allow') {
+              blocked = true;
+              blockReason = result.reason ?? `Tool call '${finalized.name}' blocked`;
+              break;
+            }
+          } catch (err) {
+            blocked = true;
+            blockReason = `Validation error: ${err instanceof Error ? err.message : String(err)}`;
+            break;
+          }
+        }
+
+        if (blocked) {
+          bufferedChunks = [];
+          clientRes.write(synthAnthropicBlockedEvent(blockReason));
+        } else {
+          flushBuffer();
+        }
+
+        mode = 'passthrough';
+        pendingToolUses.clear();
+        toolUseIndexes.clear();
+      }
+    }
+  }
+
+  // Flush remaining partial event lines
+  if (partial.trim()) {
+    clientRes.write(partial + '\n');
+  }
+
+  if (mode === 'buffer' && !bufferOverflowed) {
     flushBuffer();
   }
 
