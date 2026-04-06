@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 # Default API base URL
-DEFAULT_BASE_URL = "https://api.runveto.com"
+DEFAULT_BASE_URL = "https://api.veto.so"
 
 
 @dataclass

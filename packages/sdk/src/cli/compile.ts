@@ -135,10 +135,10 @@ function detectProvider(): CustomProvider | null {
 
 function defaultModel(provider: CustomProvider): string {
   switch (provider) {
-    case 'openai': return 'gpt-4o';
+    case 'openai': return 'gpt-5.4';
     case 'anthropic': return 'claude-sonnet-4-5-20250929';
     case 'gemini': return 'gemini-2.0-flash';
-    case 'openrouter': return 'openai/gpt-4o';
+    case 'openrouter': return 'openai/gpt-5.4';
     default: throw new CompileError(`Unsupported provider: ${provider}`);
   }
 }

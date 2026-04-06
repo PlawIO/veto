@@ -8,6 +8,7 @@ import type { OutputRule, Rule, RuleSeverity } from '../rules/types.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
 import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
+import { evaluateRateLimits } from '../rate-limiting/evaluator.js';
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { HistoryTracker, type HistoryStats } from '../core/history.js';
@@ -500,12 +501,12 @@ export class Veto {
     };
   }
 
-  private validateLocal(
+  private async validateLocal(
     toolName: string,
     args: Record<string, unknown>,
     context: GuardContext,
     source: 'guard' | 'interceptor'
-  ): ValidationResult {
+  ): Promise<ValidationResult> {
     const rules = this.getRulesForTool(toolName);
 
     if (rules.length === 0) {
@@ -532,6 +533,33 @@ export class Veto {
       );
 
       if (!matches) continue;
+
+      if (rule.rate_limits && rule.rate_limits.length > 0) {
+        const rateLimitDenial = await evaluateRateLimits(
+          rule.rate_limits,
+          {
+            agentId: this.resolveAgentId(context),
+            userId: this.resolveUserId(context),
+            sessionId: this.resolveSessionId(context),
+          },
+          toolName,
+          this.logger,
+        );
+        if (rateLimitDenial !== null) {
+          const rlMetadata = this.toRuleMetadata(rule);
+          if (this.shouldApplyLogOverride(source)) {
+            if (this.mode === 'shadow') {
+              return this.applyShadowOverride(toolName, 'deny', rateLimitDenial, rlMetadata, rule.id);
+            }
+            return {
+              decision: 'allow',
+              reason: `[LOG MODE] Would block: ${rateLimitDenial}`,
+              metadata: { ...rlMetadata, blocked_in_strict_mode: true },
+            };
+          }
+          return { decision: 'deny', reason: rateLimitDenial, metadata: rlMetadata };
+        }
+      }
 
       const reason = rule.description ?? `Matched rule: ${rule.name}`;
       const metadata = this.toRuleMetadata(rule);
@@ -729,7 +757,7 @@ export class Veto {
       source: 'guard',
     };
 
-    let result = this.validateLocal(toolName, args, context, 'guard');
+    let result = await this.validateLocal(toolName, args, context, 'guard');
     const validatorResult = await this.runValidators(validationContext);
     if (validatorResult) {
       result = validatorResult;

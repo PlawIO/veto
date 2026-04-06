@@ -377,6 +377,8 @@ export class RuleLoader {
       requires: ruleData.requires as Rule['requires'],
       tags: ruleData.tags as string[] | undefined,
       metadata: ruleData.metadata as Record<string, unknown> | undefined,
+      rate_limits: ruleData.rate_limits as Rule['rate_limits'],
+      payment: ruleData.payment as Rule['payment'],
     };
   }
 

@@ -42,7 +42,7 @@ export interface VetoLangChainMiddlewareOptions {
  * const veto = await Veto.init();
  *
  * const agent = createAgent({
- *   model: 'openai:gpt-4o',
+ *   model: 'openai:gpt-5.4',
  *   tools: [searchTool, emailTool],
  *   middleware: [createVetoLangChainMiddleware(veto)],
  * });

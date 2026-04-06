@@ -46,6 +46,7 @@ import type {
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
+import { evaluateRateLimits } from '../rate-limiting/evaluator.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import type { KernelClient as KernelClientType } from '../kernel/client.js';
 import type { CustomConfig, CustomToolCall, CustomResponse } from '../custom/types.js';
@@ -66,6 +67,7 @@ import {
   type VetoWebhookEvent,
   type VetoWebhookEventType,
 } from './events.js';
+import { tryLoadOtel, type VetoTracer } from '../observability/otel.js';
 
 /**
  * Veto operating mode.
@@ -210,6 +212,13 @@ interface VetoConfigFile {
   };
   /** Economic authorization policy (x402, MPP, AP2 support) */
   economic?: EconomicPolicyConfig;
+  /** Tamper-evident append-only audit log configuration */
+  audit?: {
+    /** Enable the audit log. Defaults to false. */
+    enabled?: boolean;
+    /** Path for the audit log file. Defaults to .veto/audit.log */
+    path?: string;
+  };
 }
 
 /**
@@ -357,6 +366,32 @@ export interface VetoOptions {
 
   /** Callback fired after every guard() invocation. Enables UI logging, audit trails, analytics. */
   onDecisionMade?: (result: GuardResult & { toolName: string }) => void;
+
+  /**
+   * OpenTelemetry integration options.
+   * Requires @opentelemetry/api as an optional peer dependency.
+   * When @opentelemetry/api is not installed, all spans are no-ops.
+   */
+  telemetry?: {
+    /** Set to false to disable OTEL instrumentation entirely. Defaults to true (auto-detect). */
+    enabled?: boolean;
+    /** Service name reported to the tracer. Defaults to 'veto-sdk'. */
+    serviceName?: string;
+  };
+
+  /**
+   * Tamper-evident append-only audit log. Each decision is hashed and chained.
+   * Verify with `veto audit verify`.
+   */
+  audit?: {
+    /** Enable the audit log. Defaults to false. */
+    enabled?: boolean;
+    /** Path for the audit log file. Defaults to .veto/audit.log */
+    path?: string;
+  };
+
+  /** @internal Pre-resolved tracer injected by init() after async OTEL load. */
+  _otelTracer?: VetoTracer | null;
 }
 
 export type VetoBrowserOptions = SharedVetoBrowserOptions<VetoCloudClient> & {
@@ -451,6 +486,7 @@ export class Veto {
   private readonly browserMode: boolean;
   private readonly compiledExpressionCache = new Map<string, ASTNode>();
   private refreshIntervalId: ReturnType<typeof setInterval> | null = null;
+  private otelTracer: VetoTracer | null = null;
 
   private constructor(
     options: VetoOptions,
@@ -467,6 +503,7 @@ export class Veto {
     this.localRulesDir = localRulesSource?.dir;
     this.localRulesRecursive = localRulesSource?.recursive ?? true;
     this.browserMode = browserMode;
+    this.otelTracer = options._otelTracer ?? null;
 
     const envMode = this.browserMode
       ? undefined
@@ -657,6 +694,7 @@ export class Veto {
     this.validationEngine = new ValidationEngine({
       logger: this.logger,
       defaultDecision,
+      otelTracer: this.otelTracer,
     });
 
     // Add the rule validator based on validation mode
@@ -695,9 +733,13 @@ export class Veto {
     }
 
     // Initialize history tracker
+    const auditCfg = options.audit ?? (config.audit?.enabled ? config.audit : undefined);
     this.historyTracker = new HistoryTracker({
       maxSize: 100,
       logger: this.logger,
+      auditLog: auditCfg?.enabled
+        ? { enabled: true, path: auditCfg.path }
+        : undefined,
     });
 
     // Initialize budget tracker (if configured)
@@ -837,8 +879,14 @@ export class Veto {
       parseYaml
     );
 
+    // Load OTEL tracer before constructing so the validation engine receives it.
+    let otelTracer: VetoTracer | null = null;
+    if (options.telemetry?.enabled !== false) {
+      otelTracer = await tryLoadOtel(options.telemetry?.serviceName);
+    }
+
     return new Veto(
-      { ...options, configDir },
+      { ...options, configDir, _otelTracer: otelTracer },
       config,
       rules.state,
       logger,
@@ -1586,6 +1634,76 @@ export class Veto {
 
     for (const rule of rules) {
       if (!this.matchesLocalRule(rule, context, localContext)) {
+        continue;
+      }
+
+      if (rule.rate_limits && rule.rate_limits.length > 0) {
+        const rateLimitDenial = await evaluateRateLimits(
+          rule.rate_limits,
+          context,
+          context.toolName,
+          this.logger,
+          rule.id,
+        );
+        if (rateLimitDenial === null) {
+          // Rate limit not exceeded — rule doesn't fire yet.
+          continue;
+        }
+        // Rate limit exceeded — apply the rule's declared action.
+        const rateLimitedRule = { ...rule, description: rateLimitDenial };
+        if (rateLimitedRule.action === 'block' && !firstBlockRule) {
+          firstBlockRule = rateLimitedRule;
+        } else if (rateLimitedRule.action === 'require_approval' && !firstApprovalRule) {
+          firstApprovalRule = rateLimitedRule;
+        } else if (rateLimitedRule.action === 'allow' && !firstAllowRule) {
+          firstAllowRule = rateLimitedRule;
+        } else if ((rateLimitedRule.action === 'warn' || rateLimitedRule.action === 'log') && !firstNonBlockingRule) {
+          firstNonBlockingRule = rateLimitedRule;
+        }
+        continue;
+      }
+
+      if (rule.action === 'require_payment') {
+        const paymentCfg = rule.payment;
+        if (!paymentCfg) {
+          this.logger.warn('[veto] require_payment rule has no payment config — treating as block', {
+            ruleId: rule.id,
+          });
+          if (!firstBlockRule) firstBlockRule = { ...rule, action: 'block' };
+          continue;
+        }
+        if (paymentCfg.protocol === 'ap2') {
+          this.logger.warn(
+            '[veto] AP2 mandate signature verification not yet implemented. ' +
+            'Use x402 or MPP for production payment gates.',
+          );
+        }
+        if (!this.economicEvaluator) {
+          this.logger.warn('[veto] require_payment rule matched but no economic evaluator configured — failing closed', {
+            ruleId: rule.id,
+          });
+          if (!firstBlockRule) firstBlockRule = { ...rule, action: 'block', description: 'Payment required but no payment provider configured' };
+          continue;
+        }
+        const econCtx = {
+          cost: paymentCfg.amount,
+          currency: paymentCfg.currency,
+          protocol: paymentCfg.protocol as import('../economic/types.js').EconomicProtocol,
+          protocol_metadata: paymentCfg.chain_id !== undefined ? { chain_id: paymentCfg.chain_id } : undefined,
+        };
+        const payResult = this.economicEvaluator.evaluate(econCtx);
+        if (payResult.decision !== 'allow') {
+          if (!firstBlockRule) {
+            firstBlockRule = {
+              ...rule,
+              action: 'block',
+              description: payResult.denial?.reason ?? 'Payment required',
+            };
+          }
+          continue;
+        }
+        // Payment passed — treat as allow
+        if (!firstAllowRule) firstAllowRule = rule;
         continue;
       }
 
@@ -3200,7 +3318,7 @@ export class Veto {
    * const wrappedTools = veto.wrap(tools);
    *
    * const agent = createAgent({
-   *   model: 'openai:gpt-4o',
+   *   model: 'openai:gpt-5.4',
    *   tools: wrappedTools, // Same type as input!
    * });
    * ```
@@ -3587,13 +3705,6 @@ export class Veto {
     const aggregatedResult = await this.validationEngine.validate(validationContext);
     const validationResult = aggregatedResult.finalResult;
 
-    this.historyTracker.record(
-      toolName,
-      args,
-      validationResult,
-      aggregatedResult.totalDurationMs
-    );
-
     this.emitDecisionEvent(validationContext, validationResult);
     this.logClientDecision(
       validationContext,
@@ -3618,12 +3729,19 @@ export class Veto {
       );
       if (reserveResult.decision !== 'allow') {
         this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic);
-        const result: GuardResult = {
-          ...behavioralResult,
-          decision: reserveResult.decision,
+        const econDenialResult: ValidationResult = {
+          ...validationResult,
+          decision: reserveResult.decision === 'deny' ? 'deny' : validationResult.decision,
           reason: reserveResult.denial
             ? `Economic: ${reserveResult.denial.reason}`
             : 'Budget reservation failed',
+        };
+        // Record the FINAL decision (economic denial), not the behavioral allow
+        this.historyTracker.record(toolName, args, econDenialResult, aggregatedResult.totalDurationMs);
+        const result: GuardResult = {
+          ...behavioralResult,
+          decision: reserveResult.decision,
+          reason: econDenialResult.reason,
           economicDenial: reserveResult.denial,
         };
         this.notifyDecisionMade(result, toolName);
@@ -3632,6 +3750,14 @@ export class Veto {
       // Emit spend_committed event on successful reservation
       this.emitEconomicEvent(toolName, args, reserveResult, effectiveEconomic, 'spend_committed');
     }
+
+    // Record history AFTER economic check so audit log reflects the actual outcome
+    this.historyTracker.record(
+      toolName,
+      args,
+      validationResult,
+      aggregatedResult.totalDurationMs
+    );
 
     this.notifyDecisionMade(behavioralResult, toolName);
     return behavioralResult;
@@ -3814,6 +3940,11 @@ export class Veto {
       clearInterval(this.refreshIntervalId);
       this.refreshIntervalId = null;
     }
+  }
+
+  /** Await pending async audit log writes. Call before reading the log in tests or on shutdown. */
+  async flushAuditLog(): Promise<void> {
+    await this.historyTracker.flushAuditLog();
   }
 }
 

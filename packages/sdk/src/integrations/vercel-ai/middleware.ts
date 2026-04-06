@@ -86,7 +86,7 @@ export interface CreateVetoMiddlewareOptions {
  *
  * const veto = await Veto.init();
  * const model = wrapLanguageModel({
- *   model: openai('gpt-4o'),
+ *   model: openai('gpt-5.4'),
  *   middleware: createVetoMiddleware(veto),
  * });
  *

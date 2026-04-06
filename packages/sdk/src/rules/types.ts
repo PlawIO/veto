@@ -7,6 +7,9 @@
  * @module rules/types
  */
 
+import type { RateLimitEntry } from '../rate-limiting/types.js';
+export type { RateLimitEntry };
+
 /**
  * Condition operators for rule matching.
  */
@@ -85,7 +88,21 @@ export interface RuleSequenceConstraint {
 /**
  * Action to take when a rule matches.
  */
-export type RuleAction = 'block' | 'warn' | 'log' | 'allow' | 'require_approval';
+export type RuleAction = 'block' | 'warn' | 'log' | 'allow' | 'require_approval' | 'require_payment';
+
+/**
+ * Payment configuration for the `require_payment` action.
+ */
+export interface PaymentConfig {
+  /** Payment protocol: x402 (EVM L2), mpp (Stripe), or ap2 (Google) */
+  protocol: 'x402' | 'mpp' | 'ap2';
+  /** Amount to charge */
+  amount: number;
+  /** Currency code (e.g. USDC, USD) */
+  currency: string;
+  /** Chain ID for EVM-based protocols (e.g. 8453 for Base) */
+  chain_id?: number;
+}
 
 /**
  * Action to take when an output rule matches.
@@ -136,6 +153,10 @@ export interface Rule {
   tags?: string[];
   /** Additional metadata */
   metadata?: Record<string, unknown>;
+  /** Dynamic sliding-window rate limits evaluated after conditions pass. */
+  rate_limits?: RateLimitEntry[];
+  /** Payment gate configuration for `require_payment` action. */
+  payment?: PaymentConfig;
 }
 
 /**

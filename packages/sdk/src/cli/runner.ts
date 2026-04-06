@@ -1,7 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { init } from './init.js';
 import { Observer, PolicyGenerator, parseDuration, policiesToYaml } from './learn.js';
+import { runTests } from '../testing/runner.js';
+import { computeChainHash, GENESIS_HASH } from '../audit/chain.js';
+import { colors } from './colors.js';
 import type { StopCondition } from './learn.js';
 import { compile } from './compile.js';
 import { test } from './test.js';
@@ -27,6 +30,7 @@ import {
 } from './headless.js';
 import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } from './agent.js';
 import { runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
+import { startProxyServer } from '../proxy/server.js';
 
 const VERSION = getCliVersion();
 
@@ -112,6 +116,11 @@ Examples:
   veto replay --policy financial.yaml --log calls.jsonl --diff
   veto replay --policy ./veto/ --log calls.jsonl --format json
   veto doctor
+  veto test [path]                     # policy unit tests (YAML fixtures)
+  veto test --coverage                # report rule IDs with/without tests
+  veto test --gaps                    # adversarial gap analysis
+  veto audit verify [file]            # verify tamper-evident audit chain
+  veto intercept [--port 8080]        # zero-code proxy for OpenAI agents
 `);
 }
 
@@ -160,6 +169,8 @@ function parseArgs(args: string[]): ParsedArgs {
     'api-key',
     'policy-server',
     'timeout-ms',
+    'port',
+    'max-buffer',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -636,6 +647,138 @@ async function runMcpCommand(
   throw new Error(`Unknown mcp command: ${subCommand}`);
 }
 
+async function runRunTests(
+  positionals: string[],
+  flags: Record<string, boolean>,
+  values: Record<string, string>,
+): Promise<number> {
+  const fixturesPath = positionals[0] ?? './veto/tests';
+  const policyPath = values.policy ?? './veto';
+  const result = await runTests({
+    fixturesPath,
+    policyPath,
+    coverage: flags.coverage ?? false,
+    quiet: flags.quiet ?? false,
+  });
+  return result.failed === 0 && (result.loadErrors?.length ?? 0) === 0 ? 0 : 1;
+}
+
+async function runAuditCommand(
+  positionals: string[],
+  _flags: Record<string, boolean>,
+  _values: Record<string, string>,
+): Promise<number> {
+  const subCommand = positionals[0] ?? 'help';
+
+  if (subCommand === 'verify') {
+    const logFile = positionals[1] ?? '.veto/audit.log';
+    const resolvedLog = resolve(logFile);
+
+    if (!existsSync(resolvedLog)) {
+      console.error(colors.error(`Audit log not found: ${resolvedLog}`));
+      return 1;
+    }
+
+    const content = readFileSync(resolvedLog, 'utf-8');
+    const lines = content.split('\n').filter((l) => l.trim().length > 0);
+
+    let prevHash = GENESIS_HASH;
+    let index = 0;
+
+    for (const line of lines) {
+      index += 1;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        console.error(colors.error(`  Invalid JSON at record ${index}: ${line.slice(0, 80)}`));
+        return 1;
+      }
+
+      const storedHash = parsed['chain_hash'] as string | undefined;
+      if (!storedHash) {
+        console.error(colors.error(`  Missing chain_hash at record ${index}`));
+        return 1;
+      }
+
+      const { chain_hash: _, ...recordWithoutHash } = parsed;
+      const expected = computeChainHash(prevHash, recordWithoutHash);
+
+      if (expected !== storedHash) {
+        console.error(
+          colors.error(`Chain broken at record ${index}: expected ${expected} got ${storedHash}`),
+        );
+        return 1;
+      }
+
+      prevHash = storedHash;
+    }
+
+    console.log(colors.success(`Audit log verified: ${index} records, chain intact`));
+    return 0;
+  }
+
+  if (subCommand === 'help') {
+    console.log('Usage:');
+    console.log('  veto audit verify [file]   # default: .veto/audit.log');
+    return 0;
+  }
+
+  throw new Error(`Unknown audit command: ${subCommand}`);
+}
+
+async function runInterceptCommand(
+  flags: Record<string, boolean>,
+  values: Record<string, string>,
+): Promise<number> {
+  const port = parseInt(values.port ?? '8080', 10);
+  const target = values.target ?? 'https://api.openai.com';
+  const configDir = values.config ?? './veto';
+  const maxBufferBytes = parseInt(values['max-buffer'] ?? String(1024 * 1024), 10);
+  const format = (values.format ?? 'auto') as 'openai' | 'anthropic' | 'auto';
+
+  if (flags.help) {
+    console.log('Usage: veto intercept [options]');
+    console.log('');
+    console.log('Start a local HTTP proxy that intercepts API requests and');
+    console.log('validates tool calls against your Veto policies before forwarding.');
+    console.log('');
+    console.log('Options:');
+    console.log('  --port <port>         Proxy listen port (default: 8080)');
+    console.log('  --target <url>        Upstream API base URL (default: https://api.openai.com)');
+    console.log('  --format <fmt>        API format: openai, anthropic, or auto (default: auto)');
+    console.log('  --config <dir>        Veto config directory (default: ./veto)');
+    console.log('  --max-buffer <bytes>  Buffer limit per response in bytes (default: 1048576)');
+    console.log('');
+    console.log('Usage with your agent:');
+    console.log('  OPENAI_BASE_URL=http://localhost:8080 node your-agent.js');
+    console.log('  ANTHROPIC_BASE_URL=http://localhost:8080 node your-agent.js');
+    return 0;
+  }
+
+  console.log(colors.bold(`veto intercept`));
+  console.log(`  Proxy: http://127.0.0.1:${port} (localhost only)`);
+  console.log(`  Target: ${target}`);
+  console.log(`  Format: ${format}`);
+  console.log(`  Config: ${configDir}`);
+  console.log('');
+  console.log(colors.dim('Point your agent at the proxy:'));
+  console.log(colors.bold(`  OPENAI_BASE_URL=http://localhost:${port} <your-command>`));
+  console.log('');
+  console.log(colors.dim('Press Ctrl+C to stop.'));
+
+  const stopServer = await startProxyServer({ port, target, configDir, maxBufferBytes, format });
+
+  // Keep running until SIGINT/SIGTERM
+  await new Promise<void>((resolve) => {
+    process.on('SIGINT', () => resolve());
+    process.on('SIGTERM', () => resolve());
+  });
+
+  await stopServer();
+  return 0;
+}
+
 async function runAgentCompatibility(
   positionals: string[],
   values: Record<string, string>
@@ -778,13 +921,16 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return result.success ? 0 : 1;
     }
     case 'test': {
-      const result = await test({
-        policy: values.policy,
-        output: values.output,
-        quiet: flags.quiet,
-        format: (values.format as 'text' | 'json') ?? undefined,
-      });
-      return result.success ? 0 : 1;
+      if (flags.gaps) {
+        const result = await test({
+          policy: values.policy,
+          output: values.output,
+          quiet: flags.quiet,
+          format: (values.format as 'text' | 'json') ?? undefined,
+        });
+        return result.success ? 0 : 1;
+      }
+      return await runRunTests(positionals, flags, values);
     }
     case 'scan': {
       const result = await scan({
@@ -828,6 +974,13 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       }
       return result.success ? 0 : 1;
     }
+    case 'run-tests':
+      console.error('Warning: `veto run-tests` is deprecated. Use `veto test` instead.');
+      return await runRunTests(positionals, flags, values);
+    case 'audit':
+      return await runAuditCommand(positionals, flags, values);
+    case 'intercept':
+      return await runInterceptCommand(flags, values);
     case 'agent':
       return await runAgentCompatibility(positionals, values);
     default:

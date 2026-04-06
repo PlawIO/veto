@@ -226,37 +226,41 @@ def _length_comparable_size(value: Any) -> Optional[int]:
 def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) -> bool:
     """Evaluate a single legacy field/operator/value condition."""
     if operator == "equals":
+        if isinstance(field_value, str) and isinstance(expected, str):
+            return field_value.lower() == expected.lower()
         return bool(field_value == expected)
     if operator == "not_equals":
+        if isinstance(field_value, str) and isinstance(expected, str):
+            return field_value.lower() != expected.lower()
         return bool(field_value != expected)
     if operator == "contains":
         if isinstance(field_value, str) and isinstance(expected, str):
-            return expected in field_value
+            return expected.lower() in field_value.lower()
         if isinstance(field_value, list):
             return expected in field_value
         return False
     if operator == "not_contains":
         if isinstance(field_value, str) and isinstance(expected, str):
-            return expected not in field_value
+            return expected.lower() not in field_value.lower()
         if isinstance(field_value, list):
             return expected not in field_value
-        return True
+        return False
     if operator == "starts_with":
         return (
             isinstance(field_value, str)
             and isinstance(expected, str)
-            and field_value.startswith(expected)
+            and field_value.lower().startswith(expected.lower())
         )
     if operator == "ends_with":
         return (
             isinstance(field_value, str)
             and isinstance(expected, str)
-            and field_value.endswith(expected)
+            and field_value.lower().endswith(expected.lower())
         )
     if operator == "matches":
         if not isinstance(field_value, str) or not isinstance(expected, str):
             return False
-        regex = create_safe_regex(expected)
+        regex = create_safe_regex(expected, flags=re.IGNORECASE)
         if regex is None:
             return False
         return regex.search(field_value) is not None
@@ -282,9 +286,19 @@ def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) ->
 
         return float(size) > expected_size
     if operator == "in":
-        return isinstance(expected, list) and field_value in expected
+        if not isinstance(expected, list):
+            return False
+        if isinstance(field_value, str):
+            lower = field_value.lower()
+            return any(e.lower() == lower if isinstance(e, str) else e == field_value for e in expected)
+        return field_value in expected
     if operator == "not_in":
-        return isinstance(expected, list) and field_value not in expected
+        if not isinstance(expected, list):
+            return False
+        if isinstance(field_value, str):
+            lower = field_value.lower()
+            return not any(e.lower() == lower if isinstance(e, str) else e == field_value for e in expected)
+        return field_value not in expected
     if operator == "within_hours":
         result = _evaluate_time_window(field_value, expected)
         return bool(result and result[0] and result[1])
@@ -316,7 +330,7 @@ def evaluate_condition(
         expected = condition.get("value")
         return evaluate_legacy_condition(field_value, operator, expected)
 
-    return True
+    return False
 
 
 def evaluate_condition_collections(

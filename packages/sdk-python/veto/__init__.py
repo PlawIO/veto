@@ -135,6 +135,32 @@ from veto.providers.types import (
     GoogleFunctionCall,
 )
 
+# Rate limiting
+from veto.rate_limiting.types import RateLimitEntry
+from veto.rate_limiting.store import check_and_record, clear_store
+from veto.rate_limiting.evaluator import evaluate_rate_limits, RateLimitStore
+
+# Audit
+from veto.audit.chain import compute_chain_hash, GENESIS_HASH
+
+# Observability
+from veto.observability.otel import (
+    try_load_otel,
+    VetoTracer,
+    VetoSpan,
+    SPAN_STATUS_OK,
+    SPAN_STATUS_ERROR,
+)
+
+# Testing
+from veto.testing.runner import run_tests
+from veto.testing.types import (
+    VetoTestCase,
+    VetoTestSuite,
+    VetoTestResult,
+    VetoTestRunResult,
+)
+
 __all__ = [
     # Main
     "Veto",
@@ -229,6 +255,27 @@ __all__ = [
     "OUTPUT_PATTERN_AWS_API_KEY",
     "OUTPUT_PATTERN_EMAIL",
     "OUTPUT_PATTERN_US_PHONE",
+    # Rate limiting
+    "RateLimitEntry",
+    "check_and_record",
+    "clear_store",
+    "evaluate_rate_limits",
+    "RateLimitStore",
+    # Audit
+    "compute_chain_hash",
+    "GENESIS_HASH",
+    # Observability
+    "try_load_otel",
+    "VetoTracer",
+    "VetoSpan",
+    "SPAN_STATUS_OK",
+    "SPAN_STATUS_ERROR",
+    # Testing
+    "run_tests",
+    "VetoTestCase",
+    "VetoTestSuite",
+    "VetoTestResult",
+    "VetoTestRunResult",
 ]
 
 # Framework integrations (imported on demand to avoid hard dependencies):

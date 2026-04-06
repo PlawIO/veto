@@ -87,7 +87,7 @@ importers:
         version: 1.34.0
       "@langchain/core":
         specifier: 0.3.80
-        version: 0.3.80(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
+        version: 0.3.80(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
       "@opentui/core":
         specifier: ^0.1.0
         version: 0.1.82(stage-js@1.0.1)(typescript@5.9.3)(web-tree-sitter@0.25.10)
@@ -101,11 +101,14 @@ importers:
         specifier: ^5.0.0
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
       picocolors:
-        specifier: ^1.0.0
+        specifier: ^1.1.1
         version: 1.1.1
       react:
         specifier: ^18.0.0
         version: 18.3.1
+      redis:
+        specifier: ^4.0.0
+        version: 4.7.1
       yaml:
         specifier: 2.8.3
         version: 2.8.3
@@ -113,6 +116,9 @@ importers:
         specifier: ^3.22.0
         version: 3.25.76
     devDependencies:
+      "@opentelemetry/api":
+        specifier: ^1.9.1
+        version: 1.9.1
       "@types/node":
         specifier: ^20.10.0
         version: 20.19.27
@@ -121,7 +127,7 @@ importers:
         version: 18.3.28
       "@vitest/coverage-v8":
         specifier: ^4.0.16
-        version: 4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))
+        version: 4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))
       openai:
         specifier: ^4.77.0
         version: 4.104.0(ws@8.19.0)(zod@3.25.76)
@@ -133,7 +139,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.16
-        version: 4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
+        version: 4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
 
 packages:
   "@ai-sdk/gateway@3.0.46":
@@ -1259,6 +1265,13 @@ packages:
       }
     engines: { node: ">=8.0.0" }
 
+  "@opentelemetry/api@1.9.1":
+    resolution:
+      {
+        integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==,
+      }
+    engines: { node: ">=8.0.0" }
+
   "@opentui/core-darwin-arm64@0.1.82":
     resolution:
       {
@@ -1321,6 +1334,53 @@ packages:
         integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==,
       }
     engines: { node: ">=14" }
+
+  "@redis/bloom@1.2.0":
+    resolution:
+      {
+        integrity: sha512-HG2DFjYKbpNmVXsa0keLHp/3leGJz1mjh09f2RLGGLQZzSHpkmZWuwJbAvo3QcRY8p80m5+ZdXZdYOSBLlp7Cg==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/client@1.6.1":
+    resolution:
+      {
+        integrity: sha512-/KCsg3xSlR+nCK8/8ZYSknYxvXHwubJrU82F3Lm1Fp6789VQ0/3RJKfsmRXjqfaTA++23CvC3hqmqe/2GEt6Kw==,
+      }
+    engines: { node: ">=14" }
+
+  "@redis/graph@1.1.1":
+    resolution:
+      {
+        integrity: sha512-FEMTcTHZozZciLRl6GiiIB4zGm5z5F3F6a6FZCyrfxdKOhFlGkiAqlexWMBzCi4DcRoyiOsuLfW+cjlGWyExOw==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/json@1.0.7":
+    resolution:
+      {
+        integrity: sha512-6UyXfjVaTBTJtKNG4/9Z8PSpKE6XgSyEb8iwaqDcy+uKrd/DGYHTWkUdnQDyzm727V7p21WUMhsqz5oy65kPcQ==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/search@1.2.0":
+    resolution:
+      {
+        integrity: sha512-tYoDBbtqOVigEDMAcTGsRlMycIIjwMCgD8eR2t0NANeQmgK/lvxNAvYyb6bZDD4frHRhIHkJu2TBRvB0ERkOmw==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
+
+  "@redis/time-series@1.1.0":
+    resolution:
+      {
+        integrity: sha512-c1Q99M5ljsIuc4YdaCwfUEXsofakb9c8+Zse2qxTadu8TalLXuAESzLvFAvNVbkmSlvlzIQOLpBCmWI9wTOt+g==,
+      }
+    peerDependencies:
+      "@redis/client": ^1.0.0
 
   "@rollup/rollup-android-arm-eabi@4.59.0":
     resolution:
@@ -2154,6 +2214,13 @@ packages:
       }
     engines: { node: ">=20" }
 
+  cluster-key-slot@1.1.2:
+    resolution:
+      {
+        integrity: sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==,
+      }
+    engines: { node: ">=0.10.0" }
+
   code-excerpt@4.0.0:
     resolution:
       {
@@ -2754,6 +2821,13 @@ packages:
         integrity: sha512-zV/5HKTfCeKWnxG0Dmrw51hEWFGfcF2xiXqcA3+J90WDuP0SvoiSO5ORvcBsifmx/FoIjgQN3oNOGaQ5PhLFkg==,
       }
     engines: { node: ">=18" }
+
+  generic-pool@3.9.0:
+    resolution:
+      {
+        integrity: sha512-hymDOu5B53XvN4QT9dBmZxPX4CWhBPPLguTZ9MMFeFa/Kg0xWVfylOVNlJji/E7yTZWFd/q9GO5TxDLq156D7g==,
+      }
+    engines: { node: ">= 4" }
 
   get-east-asian-width@1.4.0:
     resolution:
@@ -3860,6 +3934,12 @@ packages:
       }
     engines: { node: ">=6" }
 
+  redis@4.7.1:
+    resolution:
+      {
+        integrity: sha512-S1bJDnqLftzHXHP8JsT5II/CtHWQrASX5K96REjWjlmWKrviSOLWmM7QnRLstAWsu1VBBV1ffV6DzCvxNP0UJQ==,
+      }
+
   require-from-string@2.0.2:
     resolution:
       {
@@ -4683,6 +4763,12 @@ packages:
         integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==,
       }
 
+  yallist@4.0.0:
+    resolution:
+      {
+        integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==,
+      }
+
   yaml@2.8.3:
     resolution:
       {
@@ -5442,14 +5528,14 @@ snapshots:
       "@jridgewell/resolve-uri": 3.1.2
       "@jridgewell/sourcemap-codec": 1.5.5
 
-  "@langchain/core@0.3.80(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))":
+  "@langchain/core@0.3.80(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))":
     dependencies:
       "@cfworker/json-schema": 4.1.1
       ansi-styles: 5.2.0
       camelcase: 6.3.0
       decamelize: 1.2.0
       js-tiktoken: 1.0.21
-      langsmith: 0.4.6(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
+      langsmith: 0.4.6(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76))
       mustache: 4.2.0
       p-queue: 6.6.2
       p-retry: 4.6.2
@@ -5491,6 +5577,8 @@ snapshots:
       fastq: 1.20.1
 
   "@opentelemetry/api@1.9.0": {}
+
+  "@opentelemetry/api@1.9.1": {}
 
   "@opentui/core-darwin-arm64@0.1.82":
     optional: true
@@ -5536,6 +5624,32 @@ snapshots:
 
   "@pkgjs/parseargs@0.11.0":
     optional: true
+
+  "@redis/bloom@1.2.0(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/client@1.6.1":
+    dependencies:
+      cluster-key-slot: 1.1.2
+      generic-pool: 3.9.0
+      yallist: 4.0.0
+
+  "@redis/graph@1.1.1(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/json@1.0.7(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/search@1.2.0(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
+
+  "@redis/time-series@1.1.0(@redis/client@1.6.1)":
+    dependencies:
+      "@redis/client": 1.6.1
 
   "@rollup/rollup-android-arm-eabi@4.59.0":
     optional: true
@@ -5760,7 +5874,7 @@ snapshots:
 
   "@vercel/oidc@3.1.0": {}
 
-  "@vitest/coverage-v8@4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))":
+  "@vitest/coverage-v8@4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))":
     dependencies:
       "@bcoe/v8-coverage": 1.0.2
       "@vitest/utils": 4.0.16
@@ -5773,7 +5887,7 @@ snapshots:
       obug: 2.1.1
       std-env: 3.10.0
       tinyrainbow: 3.0.3
-      vitest: 4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
+      vitest: 4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -5994,6 +6108,8 @@ snapshots:
     dependencies:
       slice-ansi: 7.1.2
       string-width: 8.1.0
+
+  cluster-key-slot@1.1.2: {}
 
   code-excerpt@4.0.0:
     dependencies:
@@ -6386,6 +6502,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  generic-pool@3.9.0: {}
+
   get-east-asian-width@1.4.0: {}
 
   get-intrinsic@1.3.0:
@@ -6743,7 +6861,7 @@ snapshots:
     dependencies:
       json-buffer: 3.0.1
 
-  langsmith@0.4.6(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.19.0)(zod@3.25.76)):
+  langsmith@0.4.6(@opentelemetry/api@1.9.1)(openai@4.104.0(ws@8.19.0)(zod@3.25.76)):
     dependencies:
       "@types/uuid": 10.0.0
       chalk: 4.1.2
@@ -6752,7 +6870,7 @@ snapshots:
       semver: 7.7.3
       uuid: 10.0.0
     optionalDependencies:
-      "@opentelemetry/api": 1.9.0
+      "@opentelemetry/api": 1.9.1
       openai: 4.104.0(ws@8.19.0)(zod@3.25.76)
 
   levn@0.4.1:
@@ -7053,6 +7171,15 @@ snapshots:
       js-yaml: 3.14.2
       pify: 4.0.1
       strip-bom: 3.0.0
+
+  redis@4.7.1:
+    dependencies:
+      "@redis/bloom": 1.2.0(@redis/client@1.6.1)
+      "@redis/client": 1.6.1
+      "@redis/graph": 1.1.1(@redis/client@1.6.1)
+      "@redis/json": 1.0.7(@redis/client@1.6.1)
+      "@redis/search": 1.2.0(@redis/client@1.6.1)
+      "@redis/time-series": 1.1.0(@redis/client@1.6.1)
 
   require-from-string@2.0.2: {}
 
@@ -7374,7 +7501,7 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.3
 
-  vitest@4.0.16(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3):
+  vitest@4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3):
     dependencies:
       "@vitest/expect": 4.0.16
       "@vitest/mocker": 4.0.16(vite@6.4.1(@types/node@20.19.27)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.3))
@@ -7397,7 +7524,7 @@ snapshots:
       vite: 6.4.1(@types/node@20.19.27)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.3)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      "@opentelemetry/api": 1.9.0
+      "@opentelemetry/api": 1.9.1
       "@types/node": 20.19.27
       jsdom: 25.0.1
     transitivePeerDependencies:
@@ -7497,6 +7624,8 @@ snapshots:
 
   xmlchars@2.2.0:
     optional: true
+
+  yallist@4.0.0: {}
 
   yaml@2.8.3: {}
 

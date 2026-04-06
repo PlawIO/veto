@@ -14,6 +14,7 @@ import type {
 } from '../types/config.js';
 import { normalizeValidator } from '../types/config.js';
 import type { Logger } from '../utils/logger.js';
+import type { VetoTracer } from '../observability/otel.js';
 
 /**
  * Options for the validation engine.
@@ -23,6 +24,8 @@ export interface ValidationEngineOptions {
   logger: Logger;
   /** Default decision when no validators match */
   defaultDecision: 'allow' | 'deny' | 'modify';
+  /** Optional OpenTelemetry tracer — no-op when null */
+  otelTracer?: VetoTracer | null;
 }
 
 /**
@@ -48,10 +51,12 @@ export class ValidationEngine {
   private readonly validators: NamedValidator[] = [];
   private readonly logger: Logger;
   private readonly defaultDecision: 'allow' | 'deny' | 'modify';
+  private readonly otelTracer: VetoTracer | null;
 
   constructor(options: ValidationEngineOptions) {
     this.logger = options.logger;
     this.defaultDecision = options.defaultDecision;
+    this.otelTracer = options.otelTracer ?? null;
   }
 
   /**
@@ -128,132 +133,152 @@ export class ValidationEngine {
    * @returns Aggregated validation result
    */
   async validate(context: ValidationContext): Promise<AggregatedValidationResult> {
+    const span = this.otelTracer?.startSpan('veto.validate') ?? null;
     const startTime = performance.now();
     const validatorResults: AggregatedValidationResult['validatorResults'] = [];
 
-    // Get validators that apply to this tool
-    const applicableValidators = this.getApplicableValidators(context.toolName);
+    try {
+      // Get validators that apply to this tool
+      const applicableValidators = this.getApplicableValidators(context.toolName);
 
-    this.logger.debug('Starting validation', {
-      toolName: context.toolName,
-      callId: context.callId,
-      validatorCount: applicableValidators.length,
-    });
-
-    // If no validators, return default decision
-    if (applicableValidators.length === 0) {
-      const defaultResult: ValidationResult = { decision: this.defaultDecision };
-      this.logger.debug('No applicable validators, using default decision', {
-        decision: this.defaultDecision,
+      this.logger.debug('Starting validation', {
+        toolName: context.toolName,
+        callId: context.callId,
+        validatorCount: applicableValidators.length,
       });
-      return {
-        finalResult: defaultResult,
-        validatorResults: [],
-        totalDurationMs: performance.now() - startTime,
-      };
-    }
 
-    let finalResult: ValidationResult = { decision: 'allow' };
-    let currentContext = context;
-
-    // Run validators in sequence
-    for (const validator of applicableValidators) {
-      const validatorStart = performance.now();
-
-      try {
-        const result = await validator.validate(currentContext);
-        const durationMs = performance.now() - validatorStart;
-
-        validatorResults.push({
-          validatorName: validator.name,
-          result,
-          durationMs,
+      // If no validators, return default decision
+      if (applicableValidators.length === 0) {
+        const defaultResult: ValidationResult = { decision: this.defaultDecision };
+        this.logger.debug('No applicable validators, using default decision', {
+          decision: this.defaultDecision,
         });
-
-        this.logger.debug('Validator completed', {
-          validatorName: validator.name,
-          decision: result.decision,
-          durationMs: Math.round(durationMs * 100) / 100,
-        });
-
-        // Handle different decisions
-        if (result.decision === 'deny') {
-          // Stop on first denial
-          finalResult = result;
-          this.logger.info('Tool call denied by validator', {
-            toolName: context.toolName,
-            callId: context.callId,
-            validator: validator.name,
-            reason: result.reason,
-          });
-          break;
-        } else if (result.decision === 'require_approval') {
-          // Stop on approval requirement so callers can route to HITL flows.
-          finalResult = result;
-          this.logger.info('Tool call requires approval by validator', {
-            toolName: context.toolName,
-            callId: context.callId,
-            validator: validator.name,
-            reason: result.reason,
-          });
-          break;
-        } else if (result.decision === 'modify' && result.modifiedArguments) {
-          // Update context with modified arguments for next validator
-          currentContext = {
-            ...currentContext,
-            arguments: result.modifiedArguments,
-          };
-          finalResult = result;
-        } else if (result.decision === 'allow') {
-          // Continue to next validator
-          finalResult = result;
-        }
-      } catch (error) {
-        const durationMs = performance.now() - validatorStart;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        this.logger.error(
-          'Validator threw an error',
-          {
-            validatorName: validator.name,
-            toolName: context.toolName,
-            callId: context.callId,
-          },
-          error instanceof Error ? error : new Error(errorMessage)
-        );
-
-        // Treat validator errors as denials for safety
-        validatorResults.push({
-          validatorName: validator.name,
-          result: {
-            decision: 'deny',
-            reason: `Validator error: ${errorMessage}`,
-          },
-          durationMs,
-        });
-
-        finalResult = {
-          decision: 'deny',
-          reason: `Validator "${validator.name}" threw an error: ${errorMessage}`,
+        const totalDurationMs = performance.now() - startTime;
+        span?.setAttribute('tool.name', context.toolName);
+        span?.setAttribute('veto.decision', defaultResult.decision);
+        span?.setAttribute('veto.duration_ms', totalDurationMs);
+        span?.end();
+        return {
+          finalResult: defaultResult,
+          validatorResults: [],
+          totalDurationMs,
         };
-        break;
       }
+
+      let finalResult: ValidationResult = { decision: 'allow' };
+      let currentContext = context;
+
+      // Run validators in sequence
+      for (const validator of applicableValidators) {
+        const validatorStart = performance.now();
+
+        try {
+          const result = await validator.validate(currentContext);
+          const durationMs = performance.now() - validatorStart;
+
+          validatorResults.push({
+            validatorName: validator.name,
+            result,
+            durationMs,
+          });
+
+          this.logger.debug('Validator completed', {
+            validatorName: validator.name,
+            decision: result.decision,
+            durationMs: Math.round(durationMs * 100) / 100,
+          });
+
+          // Handle different decisions
+          if (result.decision === 'deny') {
+            // Stop on first denial
+            finalResult = result;
+            this.logger.info('Tool call denied by validator', {
+              toolName: context.toolName,
+              callId: context.callId,
+              validator: validator.name,
+              reason: result.reason,
+            });
+            break;
+          } else if (result.decision === 'require_approval') {
+            // Stop on approval requirement so callers can route to HITL flows.
+            finalResult = result;
+            this.logger.info('Tool call requires approval by validator', {
+              toolName: context.toolName,
+              callId: context.callId,
+              validator: validator.name,
+              reason: result.reason,
+            });
+            break;
+          } else if (result.decision === 'modify' && result.modifiedArguments) {
+            // Update context with modified arguments for next validator
+            currentContext = {
+              ...currentContext,
+              arguments: result.modifiedArguments,
+            };
+            finalResult = result;
+          } else if (result.decision === 'allow') {
+            // Continue to next validator
+            finalResult = result;
+          }
+        } catch (error) {
+          const durationMs = performance.now() - validatorStart;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          this.logger.error(
+            'Validator threw an error',
+            {
+              validatorName: validator.name,
+              toolName: context.toolName,
+              callId: context.callId,
+            },
+            error instanceof Error ? error : new Error(errorMessage)
+          );
+
+          // Treat validator errors as denials for safety
+          validatorResults.push({
+            validatorName: validator.name,
+            result: {
+              decision: 'deny',
+              reason: `Validator error: ${errorMessage}`,
+            },
+            durationMs,
+          });
+
+          finalResult = {
+            decision: 'deny',
+            reason: `Validator "${validator.name}" threw an error: ${errorMessage}`,
+          };
+          break;
+        }
+      }
+
+      const totalDurationMs = performance.now() - startTime;
+
+      this.logger.debug('Validation complete', {
+        toolName: context.toolName,
+        callId: context.callId,
+        finalDecision: finalResult.decision,
+        totalDurationMs: Math.round(totalDurationMs * 100) / 100,
+      });
+
+      span?.setAttribute('tool.name', context.toolName);
+      span?.setAttribute('veto.decision', finalResult.decision);
+      if (finalResult.metadata?.ruleId !== undefined) {
+        span?.setAttribute('veto.rule_id', String(finalResult.metadata.ruleId));
+      }
+      span?.setAttribute('veto.duration_ms', totalDurationMs);
+      span?.end();
+
+      return {
+        finalResult,
+        validatorResults,
+        totalDurationMs,
+      };
+    } catch (err) {
+      span?.setStatus({ code: 2 }); // SpanStatusCode.ERROR
+      span?.end();
+      throw err;
     }
-
-    const totalDurationMs = performance.now() - startTime;
-
-    this.logger.debug('Validation complete', {
-      toolName: context.toolName,
-      callId: context.callId,
-      finalDecision: finalResult.decision,
-      totalDurationMs: Math.round(totalDurationMs * 100) / 100,
-    });
-
-    return {
-      finalResult,
-      validatorResults,
-      totalDurationMs,
-    };
   }
 
   /**
