@@ -153,6 +153,8 @@ def _evaluate_conditions(conditions: List[Dict[str, Any]], test_case: VetoTestCa
             actual = (test_case.context or {}).get(field[len("context."):])
         else:
             actual = test_case.arguments.get(field)
+            if actual is None and test_case.context:
+                actual = test_case.context.get(field)
 
         if operator == "equals" and actual != value:
             return False
@@ -228,16 +230,16 @@ def run_tests(
                 if error:
                     print(f"       {error}")
 
-    passed: int = sum(1 for r in results if r.passed)
-    failed = len(results) - passed
+    total_passed: int = sum(1 for r in results if r.passed)
+    failed = len(results) - total_passed
 
     if not quiet:
-        print(f"\nTests: {passed} passed" + (f", {failed} failed" if failed else ""))
+        print(f"\nTests: {total_passed} passed" + (f", {failed} failed" if failed else ""))
 
     if coverage and not quiet:
         _print_coverage(rules, results)
 
-    return VetoTestRunResult(total=len(results), passed=passed, failed=failed, results=results)
+    return VetoTestRunResult(total=len(results), passed=total_passed, failed=failed, results=results)
 
 
 def _print_coverage(rules: List[Dict[str, Any]], results: List[VetoTestResult]) -> None:
