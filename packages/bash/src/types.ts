@@ -137,6 +137,7 @@ export interface CachedDecision {
 export interface CacheKeyInput {
   requestedMode: 'cloud' | 'local' | 'offline';
   apiUrl?: string;
+  apiKeyNamespace?: string;
   command: string;
   cwd: string;
   bashArgv: string[];

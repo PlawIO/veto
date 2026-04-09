@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type { GuardContext, GuardResult } from 'veto-sdk';
-import { PersistentDecisionCache } from './cache.js';
+import { PersistentDecisionCache, deriveApiKeyNamespace } from './cache.js';
 import { buildValidationArguments, buildValidationRequestContext, parseCliArgs, readAllStdin, resolveBashInvocation } from './invocation.js';
 import { executeRealBash, resolveRealBashPath } from './bash.js';
 import { evaluateLocally, findLocalProject } from './local.js';
@@ -54,6 +54,7 @@ function formatDecisionMessage(decision: Pick<TerminalDecision, 'reason' | 'deni
 function cacheKeyFor(
   requestedMode: 'cloud' | 'local' | 'offline',
   apiUrl: string,
+  apiKey: string | undefined,
   args: ValidationArguments,
   bashArgv: string[],
   project: LocalProjectConfig | null
@@ -61,6 +62,7 @@ function cacheKeyFor(
   return {
     requestedMode,
     apiUrl,
+    apiKeyNamespace: deriveApiKeyNamespace(apiKey),
     command: args.command,
     cwd: args.cwd,
     bashArgv,
@@ -262,6 +264,7 @@ export async function runVetoBash(options: RunVetoBashOptions = {}): Promise<Wra
   const cacheKey = cacheKeyFor(
     requestedMode,
     parsed.options.apiUrl,
+    parsed.options.apiKey,
     validationArgs,
     invocation.bashArgv,
     project

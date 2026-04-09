@@ -194,6 +194,36 @@ describe('veto-bash runner', () => {
     expect(Object.keys(cacheContent.entries)).toHaveLength(1);
   });
 
+  it('does not share cached cloud decisions across different api keys', async () => {
+    const cachePath = join(createTempDir('veto-bash-api-key-cache-'), 'cache.json');
+    const validate = vi.fn(async () => ({ decision: 'allow', reason: 'ok' }));
+    const executeRealBash = vi.fn(async () => ({ exitCode: 0, signal: null }));
+
+    await runVetoBash({
+      argv: ['--veto-api-key', 'tenant-a', '--cache-ttl', '60', '-c', 'echo namespaced'],
+      stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      cache: new PersistentDecisionCache(cachePath),
+      currentScriptPath: '/tmp/veto-bash.js',
+      policyClientFactory: () => createPolicyClient({ validate }),
+      resolveRealBash: () => '/bin/bash',
+      executeRealBash,
+    });
+
+    await runVetoBash({
+      argv: ['--veto-api-key', 'tenant-b', '--cache-ttl', '60', '-c', 'echo namespaced'],
+      stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      cache: new PersistentDecisionCache(cachePath),
+      currentScriptPath: '/tmp/veto-bash.js',
+      policyClientFactory: () => createPolicyClient({ validate }),
+      resolveRealBash: () => '/bin/bash',
+      executeRealBash,
+    });
+
+    expect(validate).toHaveBeenCalledTimes(2);
+    const cacheContent = JSON.parse(readFileSync(cachePath, 'utf-8')) as { entries: Record<string, unknown> };
+    expect(Object.keys(cacheContent.entries)).toHaveLength(2);
+  });
+
   it('reads cached decisions from disk across separate cache instances', async () => {
     const cachePath = join(createTempDir('veto-bash-cache-'), 'cache.json');
     const policyClient = createPolicyClient({

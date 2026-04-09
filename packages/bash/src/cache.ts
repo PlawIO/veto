@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, scryptSync } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -12,6 +12,9 @@ interface CacheEntry {
 interface CacheStore {
   entries: Record<string, CacheEntry>;
 }
+
+const API_KEY_NAMESPACE_SALT = 'veto-bash-cache-namespace:v1';
+const apiKeyNamespaceCache = new Map<string, string>();
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -77,6 +80,21 @@ export function defaultCachePath(): string {
 
 export function hashCacheInput(input: CacheKeyInput): string {
   return createHash('sha256').update(stableStringify(input)).digest('hex');
+}
+
+export function deriveApiKeyNamespace(apiKey: string | undefined): string | undefined {
+  if (!apiKey) {
+    return undefined;
+  }
+
+  const cached = apiKeyNamespaceCache.get(apiKey);
+  if (cached) {
+    return cached;
+  }
+
+  const derived = scryptSync(apiKey, API_KEY_NAMESPACE_SALT, 32).toString('hex');
+  apiKeyNamespaceCache.set(apiKey, derived);
+  return derived;
 }
 
 export class PersistentDecisionCache implements DecisionCacheLike {
