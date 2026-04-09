@@ -226,6 +226,52 @@ describe('veto-bash runner', () => {
     expect(Object.keys(cacheContent.entries)).toHaveLength(1);
   });
 
+  it('skips long options with values before locating the real -c command', async () => {
+    const policyClient = createPolicyClient({
+      validate: vi.fn(async () => ({ decision: 'allow' })),
+    });
+
+    await runVetoBash({
+      argv: ['--veto-api-key', 'test-key', '--cache-ttl', '0', '--init-file', '/tmp/customrc', '-c', 'echo long-option'],
+      stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      currentScriptPath: '/tmp/veto-bash.js',
+      policyClientFactory: () => policyClient,
+      resolveRealBash: () => '/bin/bash',
+      executeRealBash: vi.fn(async () => ({ exitCode: 0, signal: null })),
+    });
+
+    expect(policyClient.validate).toHaveBeenCalledWith(
+      'bash',
+      expect.objectContaining({ command: 'echo long-option', shellMode: 'command' }),
+      expect.any(Object)
+    );
+  });
+
+  it('skips short options with values before locating the real script path', async () => {
+    const rootDir = createTempDir('veto-bash-short-option-');
+    const scriptPath = join(rootDir, 'script.sh');
+    writeFileSync(scriptPath, 'echo short option\n', 'utf-8');
+    const policyClient = createPolicyClient({
+      validate: vi.fn(async () => ({ decision: 'allow' })),
+    });
+
+    await runVetoBash({
+      argv: ['--veto-api-key', 'test-key', '--cache-ttl', '0', '-o', 'pipefail', scriptPath],
+      cwd: rootDir,
+      stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      currentScriptPath: '/tmp/veto-bash.js',
+      policyClientFactory: () => policyClient,
+      resolveRealBash: () => '/bin/bash',
+      executeRealBash: vi.fn(async () => ({ exitCode: 0, signal: null })),
+    });
+
+    expect(policyClient.validate).toHaveBeenCalledWith(
+      'bash',
+      expect.objectContaining({ command: 'echo short option\n', shellMode: 'script-file', scriptPath }),
+      expect.any(Object)
+    );
+  });
+
   it('validates script files before execution', async () => {
     const rootDir = createTempDir('veto-bash-script-');
     const scriptPath = join(rootDir, 'deploy.sh');

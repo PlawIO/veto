@@ -31,6 +31,40 @@ function bundleIncludes(arg: string, option: string): boolean {
   return isShortOptionBundle(arg) && arg.slice(1).includes(option);
 }
 
+const LONG_OPTIONS_WITH_VALUE = new Set([
+  '--rcfile',
+  '--init-file',
+]);
+
+const LONG_OPTIONS_NO_VALUE = new Set([
+  '--debugger',
+  '--dump-po-strings',
+  '--dump-strings',
+]);
+
+const SHORT_OPTIONS_WITH_VALUE = new Set([
+  '-O',
+  '+O',
+  '-o',
+  '+o',
+]);
+
+const SHORT_OPTIONS_NO_VALUE = new Set([
+  '-D',
+]);
+
+function hasInlineOptionValue(arg: string): boolean {
+  return arg.startsWith('--rcfile=') || arg.startsWith('--init-file=');
+}
+
+function optionConsumesNextArg(arg: string): boolean {
+  return SHORT_OPTIONS_WITH_VALUE.has(arg) || LONG_OPTIONS_WITH_VALUE.has(arg);
+}
+
+function isStandaloneOption(arg: string): boolean {
+  return LONG_OPTIONS_NO_VALUE.has(arg) || SHORT_OPTIONS_NO_VALUE.has(arg);
+}
+
 export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedCliArgs {
   let apiKey = env.VETO_API_KEY;
   let apiUrl = env.VETO_API_URL ?? DEFAULT_VETO_API_URL;
@@ -149,6 +183,15 @@ export async function resolveBashInvocation(
 
     if (!optionsEnded && (arg === '-s' || bundleIncludes(arg, 's'))) {
       stdinMode = true;
+      continue;
+    }
+
+    if (!optionsEnded && optionConsumesNextArg(arg)) {
+      index += 1;
+      continue;
+    }
+
+    if (!optionsEnded && (hasInlineOptionValue(arg) || isStandaloneOption(arg))) {
       continue;
     }
 
