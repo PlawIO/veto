@@ -2,6 +2,10 @@ import type { ApprovalPollOptions, ApprovalRecord, DenialDetails, PolicyClientLi
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+function isRetriableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 function asObject(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -127,7 +131,13 @@ export class BashPolicyClient implements PolicyClientLike {
           },
         });
 
-        if (response.ok) {
+        if (!response.ok) {
+          const responseText = await response.text().catch(() => '');
+          const error = new PolicyHttpError(response.status, responseText);
+          if (!isRetriableStatus(response.status)) {
+            throw error;
+          }
+        } else {
           const body = await response.json() as Record<string, unknown>;
           const status = body.status;
           if (status === 'approved' || status === 'denied' || status === 'expired') {
@@ -144,6 +154,10 @@ export class BashPolicyClient implements PolicyClientLike {
           }
         }
       } catch (error) {
+        if (error instanceof PolicyHttpError && !isRetriableStatus(error.status)) {
+          throw error;
+        }
+
         if (!(error instanceof PolicyNetworkError) && !(error instanceof PolicyHttpError)) {
           throw error;
         }
@@ -168,10 +182,6 @@ export class BashPolicyClient implements PolicyClientLike {
         signal: controller.signal,
       });
     } catch (error) {
-      if (error instanceof PolicyHttpError) {
-        throw error;
-      }
-
       if (error instanceof Error && error.name === 'AbortError') {
         throw new PolicyNetworkError(`Request timed out after ${this.timeoutMs}ms`);
       }

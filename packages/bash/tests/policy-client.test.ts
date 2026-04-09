@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BashPolicyClient } from '../src/policy-client.js';
+import { BashPolicyClient, PolicyHttpError } from '../src/policy-client.js';
 
 describe('BashPolicyClient', () => {
   it('posts camelCase payloads to /v1/validate', async () => {
@@ -32,5 +32,53 @@ describe('BashPolicyClient', () => {
         }),
       })
     );
+  });
+
+  it('fails fast on non-retriable approval polling http errors', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      text: async () => 'not found',
+    })) as unknown as typeof globalThis.fetch;
+
+    const client = new BashPolicyClient({
+      apiKey: 'test-key',
+      apiUrl: 'https://api.veto.so',
+      fetch,
+    });
+
+    await expect(
+      client.pollApproval('appr-404', { pollIntervalMs: 1, timeoutMs: 50 })
+    ).rejects.toBeInstanceOf(PolicyHttpError);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries retriable approval polling errors before succeeding', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => 'temporarily unavailable',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'appr-123',
+          status: 'approved',
+          resolvedBy: 'admin@example.com',
+        }),
+      }) as unknown as typeof globalThis.fetch;
+
+    const client = new BashPolicyClient({
+      apiKey: 'test-key',
+      apiUrl: 'https://api.veto.so',
+      fetch,
+    });
+
+    const result = await client.pollApproval('appr-123', { pollIntervalMs: 1, timeoutMs: 100 });
+
+    expect(result.status).toBe('approved');
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

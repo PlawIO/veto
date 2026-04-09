@@ -70,7 +70,6 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
   let apiUrl = env.VETO_API_URL ?? DEFAULT_VETO_API_URL;
   let cacheTtlSeconds = DEFAULT_CACHE_TTL_SECONDS;
   let offline = false;
-  const strict = true;
 
   let index = 0;
   while (index < argv.length) {
@@ -83,7 +82,6 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
           apiUrl: normalizeApiUrl(apiUrl),
           cacheTtlSeconds,
           offline,
-          strict,
         },
         bashArgv: argv.slice(index + 1),
       };
@@ -113,11 +111,6 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       continue;
     }
 
-    if (arg === '--strict') {
-      index += 1;
-      continue;
-    }
-
     break;
   }
 
@@ -127,7 +120,6 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       apiUrl: normalizeApiUrl(apiUrl),
       cacheTtlSeconds,
       offline,
-      strict,
     },
     bashArgv: argv.slice(index),
   };

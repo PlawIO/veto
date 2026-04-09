@@ -79,13 +79,6 @@ export function hashCacheInput(input: CacheKeyInput): string {
   return createHash('sha256').update(stableStringify(input)).digest('hex');
 }
 
-export function hashSecret(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return createHash('sha256').update(value).digest('hex');
-}
-
 export class PersistentDecisionCache implements DecisionCacheLike {
   constructor(
     private readonly filePath: string = defaultCachePath(),

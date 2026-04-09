@@ -6,8 +6,8 @@
   "bin": {
     "veto-bash": "./dist/bin.js"
   },
-  "main": "./dist/bin.js",
-  "types": "./dist/bin.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"

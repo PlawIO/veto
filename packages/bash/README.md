@@ -46,15 +46,14 @@ If cloud validation is configured but unreachable, `veto-bash` falls back to loc
 
 ## Flags
 
-| Flag                    | Default               | Description                                                                                          |
-| ----------------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
-| `--veto-api-key <key>`  | `VETO_API_KEY`        | API key for cloud validation                                                                         |
-| `--veto-api-url <url>`  | `https://api.veto.so` | Base URL for `POST /v1/validate` and approval polling                                                |
-| `--cache-ttl <seconds>` | `60`                  | Persistent decision cache TTL                                                                        |
-| `--offline`             | `false`               | Skip cloud validation and evaluate locally with `veto-sdk`                                           |
-| `--strict`              | enabled               | Explicit fail-closed mode; deny and approval failures already exit non-zero for inspectable commands |
+| Flag                    | Default               | Description                                                |
+| ----------------------- | --------------------- | ---------------------------------------------------------- |
+| `--veto-api-key <key>`  | `VETO_API_KEY`        | API key for cloud validation                               |
+| `--veto-api-url <url>`  | `https://api.veto.so` | Base URL for `POST /v1/validate` and approval polling      |
+| `--cache-ttl <seconds>` | `60`                  | Persistent decision cache TTL                              |
+| `--offline`             | `false`               | Skip cloud validation and evaluate locally with `veto-sdk` |
 
-Wrapper flags must appear before the bash argv. Use `--` if you need to pass a literal value that would otherwise be parsed as a wrapper flag.
+Wrapper flags must appear before the bash argv. Use `--` if you need to pass a literal value that would otherwise be parsed as a wrapper flag. Inspectable commands already fail closed by default on deny, approval failure, or missing policy sources.
 
 ## What gets validated
 

@@ -10,7 +10,6 @@ export interface WrapperCliOptions {
   apiUrl: string;
   cacheTtlSeconds: number;
   offline: boolean;
-  strict: boolean;
 }
 
 export interface ParsedCliArgs {
@@ -138,7 +137,6 @@ export interface CachedDecision {
 export interface CacheKeyInput {
   requestedMode: 'cloud' | 'local' | 'offline';
   apiUrl?: string;
-  apiKeyHash?: string;
   command: string;
   cwd: string;
   bashArgv: string[];
