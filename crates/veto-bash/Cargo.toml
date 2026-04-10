@@ -1,0 +1,20 @@
+[package]
+name = "veto-bash-native"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Rust-first guarded bash runtime with MCP support"
+
+[[bin]]
+name = "veto-bash-native"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+regex = "1.11"
+scrypt = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+ureq = { version = "2.12", features = ["json"] }
+walkdir = "2.5"
