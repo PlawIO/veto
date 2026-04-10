@@ -49,11 +49,12 @@ The agent is unaware it's being governed. Your tools are unchanged. No behavior 
 
 ## Packages
 
-| Package                         | Language   | Install                   | Description                              |
-| ------------------------------- | ---------- | ------------------------- | ---------------------------------------- |
-| [`veto-sdk`](./packages/sdk)    | TypeScript | `npm install veto-sdk`    | SDK for guarded agentic apps             |
-| [`veto`](./packages/sdk-python) | Python     | `pip install veto`        | Same API, all major LLM providers        |
-| [`veto-cli`](./packages/cli)    | TypeScript | `npm install -g veto-cli` | Interactive studio + headless automation |
+| Package                         | Language    | Install                    | Description                              |
+| ------------------------------- | ----------- | -------------------------- | ---------------------------------------- |
+| [`veto-sdk`](./packages/sdk)    | TypeScript  | `npm install veto-sdk`     | SDK for guarded agentic apps             |
+| [`veto`](./packages/sdk-python) | Python      | `pip install veto`         | Same API, all major LLM providers        |
+| [`veto-cli`](./packages/cli)    | TypeScript  | `npm install -g veto-cli`  | Interactive studio + headless automation |
+| [`veto-bash`](./packages/bash)  | Rust + Node | `npm install -g veto-bash` | Rust-first guarded `bash` runtime + MCP  |
 
 ## Quick start
 
@@ -154,6 +155,26 @@ npx veto-cli@latest scan --fail-uncovered  # CI gate: exit 1 on unguarded tools
 ```
 
 → [Full CLI reference](./packages/cli/README.md)
+
+## Bash runtime + MCP
+
+```bash
+npm install -g veto-bash
+mkdir -p "$HOME/.veto/bin"
+VETO_BASH_NATIVE="$(veto-bash native-path)"
+ln -sf "$VETO_BASH_NATIVE" "$HOME/.veto/bin/bash"
+export PATH="$HOME/.veto/bin:$PATH"
+export VETO_BASH_REAL_BASH=/bin/bash
+VETO_API_KEY=veto_... bash -c 'echo hello'
+veto-bash mcp init
+veto-bash mcp serve --veto-api-key "$VETO_API_KEY"
+```
+
+`veto-bash` is now Rust-first: the native runtime handles bash interception, deterministic local evaluation, SWR cloud policy refresh, approval polling, audit spooling, and MCP stdio serving. Use `veto-bash native-path` once during setup, then shadow `bash` with that packaged native binary so warm executions stay fully native. Cold or unsupported cases fall back to cloud `POST /v1/validate`. Interactive shells still pass through to the real system `bash`.
+
+This PR does not add a full cross-platform prebuilt binary pipeline yet. The current package/build flow is honest about that: build on the target platform or install an artifact produced for the same platform/arch.
+
+→ [Full `veto-bash` reference](./packages/bash/README.md)
 
 ## Why Veto
 
