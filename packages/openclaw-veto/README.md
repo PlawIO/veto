@@ -45,8 +45,10 @@ Add plugin configuration to your `openclaw.json`:
 
 Supported modes:
 
-- `openclaw-native`: Veto returns `require_approval`, and OpenClaw handles the approval prompt with its built-in UX.
+- `openclaw-native`: Veto returns `require_approval`, and OpenClaw handles the approval prompt with its built-in UX. This works with local YAML rules.
 - `veto-cloud`: Veto polls Veto Cloud until the approval is resolved. Use this when you want approvals to appear in the Veto dashboard and trigger cloud workflows like notifications or webhooks.
+
+`veto-cloud` requires Veto Cloud mode to be configured. Set `VETO_API_KEY` in the environment or configure `cloud.apiKey` in `veto/veto.config.yaml`. If Veto is only running with local YAML rules and no cloud API key, approval paths must use `openclaw-native`.
 
 Example:
 
@@ -67,13 +69,16 @@ Example:
 ```yaml
 rules:
   - id: block-sensitive-files
-    description: Block reads of SSH keys and environment files
+    name: Block sensitive file reads
+    enabled: true
+    severity: critical
+    action: block
     tools: [read_file]
-    severity: deny
-    when:
-      path:
-        matches: "(^|/)(\\.env|id_rsa|id_ed25519)$"
-    deny: "Reading secrets is not allowed"
+    conditions:
+      - field: arguments.path
+        operator: matches
+        value: "(^|/)(\\.env|id_rsa|id_ed25519)$"
+    message: Reading secrets is not allowed
 ```
 
 ### Shell commands
@@ -81,13 +86,16 @@ rules:
 ```yaml
 rules:
   - id: require-approval-for-destructive-shell
-    description: Require approval before destructive shell usage
+    name: Require approval for destructive shell commands
+    enabled: true
+    severity: high
+    action: require_approval
     tools: [bash, shell]
-    severity: require_approval
-    when:
-      command:
-        matches: "\\b(rm -rf|sudo rm|shutdown|reboot)\\b"
-    deny: "Destructive shell commands require approval"
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "\\b(rm -rf|sudo rm|shutdown|reboot)\\b"
+    message: Destructive shell commands require approval
 ```
 
 ### External APIs
@@ -95,13 +103,16 @@ rules:
 ```yaml
 rules:
   - id: block-unapproved-webhooks
-    description: Only allow requests to approved domains
+    name: Block outbound requests to unapproved domains
+    enabled: true
+    severity: high
+    action: block
     tools: [http_request, fetch]
-    severity: deny
-    when:
-      url:
-        not_matches: "^https://(api\\.)?(example\\.com|stripe\\.com|slack\\.com)/"
-    deny: "Outbound API calls must target approved domains"
+    conditions:
+      - field: arguments.url
+        operator: not_matches
+        value: "^https://(api\\.)?(example\\.com|stripe\\.com|slack\\.com)/"
+    message: Outbound API calls must target approved domains
 ```
 
 ## What the plugin does
