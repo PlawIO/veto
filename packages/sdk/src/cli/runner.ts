@@ -68,7 +68,7 @@ Canonical Commands:
   doctor
 
 Core Commands:
-  init
+  init [--cloud] [--api-key <key>]
   learn
   compile
   test
@@ -102,6 +102,7 @@ Options:
 
 Examples:
   veto
+  veto init --cloud --api-key veto_sk_xxx
   veto studio --renderer ink
   veto repl --legacy
   veto policy generate --tool approve_invoice --prompt "do not approve invoices above 50" --save ./veto/rules/invoices.yaml
@@ -896,6 +897,8 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
         agent: flags.agent,
         yes: flags.yes,
         mode: values.mode as 'local' | 'cloud' | 'kernel' | 'custom' | undefined,
+        cloud: flags.cloud,
+        apiKey: values['api-key'],
         approval: flags.approval,
       });
       return result.success ? 0 : 1;

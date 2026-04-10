@@ -31,7 +31,7 @@ describe('CLI init', () => {
       expect(existsSync(join(TEST_DIR, 'veto', 'rules'))).toBe(true);
     });
 
-    it('should create config file', async () => {
+    it('should keep local mode by default', async () => {
       await init({ directory: TEST_DIR, quiet: true });
 
       const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
@@ -41,6 +41,53 @@ describe('CLI init', () => {
       expect(content).toContain('version: "1.0"');
       expect(content).toContain('validation:');
       expect(content).toContain('mode: "local"');
+    });
+
+    it('should set api mode when cloud flag is provided', async () => {
+      await init({ directory: TEST_DIR, cloud: true, quiet: true });
+
+      const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
+      const content = readFileSync(configPath, 'utf-8');
+
+      expect(content).toContain('validation:');
+      expect(content).toContain('mode: "api"');
+    });
+
+    it('should write api key while keeping local mode by default', async () => {
+      await init({
+        directory: TEST_DIR,
+        apiKey: 'veto_sk_xxx',
+        quiet: true,
+      });
+
+      const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
+      const content = readFileSync(configPath, 'utf-8');
+
+      expect(content).toContain('mode: "local"');
+      expect(content).toContain('cloud:');
+      expect(content).toContain('apiKey: "veto_sk_xxx"');
+      expect(content).toContain('timeout: 30000');
+      expect(content).toContain('retries: 2');
+      expect(content).toContain('retryDelay: 1000');
+    });
+
+    it('should set api mode and write api key when cloud and api-key are provided', async () => {
+      await init({
+        directory: TEST_DIR,
+        cloud: true,
+        apiKey: 'veto_sk_xxx',
+        quiet: true,
+      });
+
+      const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
+      const content = readFileSync(configPath, 'utf-8');
+
+      expect(content).toContain('mode: "api"');
+      expect(content).toContain('cloud:');
+      expect(content).toContain('apiKey: "veto_sk_xxx"');
+      expect(content).toContain('timeout: 30000');
+      expect(content).toContain('retries: 2');
+      expect(content).toContain('retryDelay: 1000');
     });
 
     it('should create default rules file', async () => {

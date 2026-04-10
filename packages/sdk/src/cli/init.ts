@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  DEFAULT_CONFIG,
+  createDefaultConfigTemplate,
   DEFAULT_RULES,
   createPackRulesTemplate,
   GITIGNORE_ADDITIONS,
@@ -36,6 +36,10 @@ export interface InitOptions {
   agent?: boolean;
   /** Validation mode selection */
   mode?: 'local' | 'cloud' | 'kernel' | 'custom';
+  /** Configure generated config for cloud validation */
+  cloud?: boolean;
+  /** Write a cloud API key into the generated config */
+  apiKey?: string;
   /** Enable human approval flow */
   approval?: boolean;
 }
@@ -86,6 +90,8 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     force = false,
     pack,
     quiet = false,
+    cloud = false,
+    apiKey,
   } = options;
 
   const result: InitResult = {
@@ -99,6 +105,10 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
   const baseDir = resolve(directory);
   const vetoDir = join(baseDir, 'veto');
   const rulesDir = join(vetoDir, 'rules');
+  const configTemplate = createDefaultConfigTemplate({
+    validationMode: cloud ? 'api' : 'local',
+    apiKey,
+  });
   let selectedPack: string | undefined;
 
   if (pack !== undefined) {
@@ -155,7 +165,7 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     // Create veto.config.yaml
     const configPath = join(vetoDir, 'veto.config.yaml');
     if (!existsSync(configPath) || force) {
-      writeFileSync(configPath, DEFAULT_CONFIG, 'utf-8');
+      writeFileSync(configPath, configTemplate, 'utf-8');
       result.createdFiles.push('veto/veto.config.yaml');
       log('  Created veto/veto.config.yaml', quiet);
     } else {

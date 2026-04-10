@@ -4,10 +4,43 @@
  * @module cli/templates
  */
 
+export interface DefaultConfigTemplateOptions {
+  validationMode?: 'local' | 'api' | 'kernel' | 'custom' | 'cloud';
+  apiKey?: string;
+}
+
+function createCloudConfigTemplate(apiKey: string | undefined): string {
+  if (apiKey === undefined) {
+    return `# Cloud configuration (for mode: "api")
+# cloud:
+#   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
+#   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
+#   timeout: 30000
+#   retries: 2
+#   retryDelay: 1000`;
+  }
+
+  return `# Cloud configuration (for mode: "api")
+cloud:
+  apiKey: ${JSON.stringify(apiKey)}
+  # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
+  timeout: 30000
+  retries: 2
+  retryDelay: 1000`;
+}
+
 /**
  * Default veto.config.yaml content.
  */
-export const DEFAULT_CONFIG = `# Veto Configuration
+export function createDefaultConfigTemplate(
+  options: DefaultConfigTemplateOptions = {}
+): string {
+  const {
+    validationMode = 'local',
+    apiKey,
+  } = options;
+
+  return `# Veto Configuration
 # See README.md for documentation
 
 version: "1.0"
@@ -19,19 +52,13 @@ mode: "strict"
 
 # Validation mode:
 #   "local"  - Evaluate YAML rules locally (default, zero network calls)
-#   "cloud"  - Use Veto Cloud API (set VETO_API_KEY)
+#   "api"    - Use Veto Cloud API or an external HTTP validation API
 #   "kernel" - Use local Ollama model
 #   "custom" - Use specified LLM provider
 validation:
-  mode: "local"
+  mode: "${validationMode}"
 
-# Cloud configuration (for mode: "cloud")
-# cloud:
-#   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
-#   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
-#   timeout: 30000
-#   retries: 2
-#   retryDelay: 1000
+${createCloudConfigTemplate(apiKey)}
 
 # Kernel configuration (for mode: "kernel")
 # kernel:
@@ -81,6 +108,9 @@ rules:
 #   renderer:
 #     preferred: "auto" # auto | ink | opentui | ansi
 `;
+}
+
+export const DEFAULT_CONFIG = createDefaultConfigTemplate();
 
 /**
  * Default rules/defaults.yaml content.
