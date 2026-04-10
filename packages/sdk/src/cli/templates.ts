@@ -4,29 +4,59 @@
  * @module cli/templates
  */
 
+import { Document, Scalar, isMap, stringify as stringifyYaml } from 'yaml';
+
 export interface DefaultConfigTemplateOptions {
   validationMode?: 'local' | 'api' | 'kernel' | 'custom' | 'cloud';
   apiKey?: string;
 }
 
-function createCloudConfigTemplate(apiKey: string | undefined): string {
-  if (apiKey === undefined) {
-    return `# Cloud configuration (for mode: "api")
-# cloud:
-#   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
-#   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
-#   timeout: 30000
-#   retries: 2
-#   retryDelay: 1000`;
+interface DefaultConfigShape {
+  [key: string]: unknown;
+}
+
+function setQuotedScalar(
+  document: Document,
+  path: string[]
+): void {
+  let current: unknown = document.contents;
+
+  for (let index = 0; index < path.length; index += 1) {
+    if (!current || !isMap(current)) {
+      return;
+    }
+
+    const pair = current.items.find((entry) => {
+      const key = entry.key;
+      return key instanceof Scalar && key.value === path[index];
+    });
+
+    if (!pair) {
+      return;
+    }
+
+    if (index === path.length - 1) {
+      if (pair.value instanceof Scalar) {
+        pair.value.type = Scalar.QUOTE_DOUBLE;
+      }
+      return;
+    }
+
+    current = pair.value;
+  }
+}
+
+function createYamlSection(
+  data: DefaultConfigShape,
+  quotedPaths: string[][]
+): string {
+  const document = new Document(data);
+
+  for (const path of quotedPaths) {
+    setQuotedScalar(document, path);
   }
 
-  return `# Cloud configuration (for mode: "api")
-cloud:
-  apiKey: ${JSON.stringify(apiKey)}
-  # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
-  timeout: 30000
-  retries: 2
-  retryDelay: 1000`;
+  return stringifyYaml(document).trimEnd();
 }
 
 /**
@@ -35,30 +65,67 @@ cloud:
 export function createDefaultConfigTemplate(
   options: DefaultConfigTemplateOptions = {}
 ): string {
-  const {
-    validationMode = 'local',
-    apiKey,
-  } = options;
+  const validationMode = options.validationMode ?? 'local';
+  const baseConfigYaml = createYamlSection(
+    {
+      version: '1.0',
+      mode: 'strict',
+      validation: {
+        mode: validationMode,
+      },
+    },
+    [['version'], ['mode'], ['validation', 'mode']]
+  );
+  const cloudConfigYaml = options.apiKey === undefined
+    ? `# cloud:
+#   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
+#   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
+#   timeout: 30000
+#   retries: 2
+#   retryDelay: 1000`
+    : `${createYamlSection(
+        {
+          cloud: {
+            apiKey: options.apiKey,
+            timeout: 30000,
+            retries: 2,
+            retryDelay: 1000,
+          },
+        },
+        [['cloud', 'apiKey']]
+      )}
+  # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted`;
+  const loggingYaml = createYamlSection(
+    {
+      logging: {
+        level: 'info',
+      },
+    },
+    [['logging', 'level']]
+  );
+  const rulesYaml = createYamlSection(
+    {
+      rules: {
+        directory: './rules',
+        recursive: true,
+      },
+    },
+    [['rules', 'directory']]
+  );
 
   return `# Veto Configuration
 # See README.md for documentation
 
-version: "1.0"
+${baseConfigYaml}
 
-# Operating mode:
-#   "strict" - Block tool calls when validation fails
-#   "log"    - Only log validation failures, allow calls to proceed
-mode: "strict"
-
-# Validation mode:
+# Validation mode notes:
 #   "local"  - Evaluate YAML rules locally (default, zero network calls)
 #   "api"    - Use Veto Cloud API or an external HTTP validation API
 #   "kernel" - Use local Ollama model
 #   "custom" - Use specified LLM provider
-validation:
-  mode: "${validationMode}"
 
-${createCloudConfigTemplate(apiKey)}
+# Cloud configuration defaults (for mode: "api" or "cloud")
+${cloudConfigYaml}
 
 # Kernel configuration (for mode: "kernel")
 # kernel:
@@ -87,13 +154,10 @@ ${createCloudConfigTemplate(apiKey)}
 #     reasonField: "reason"
 
 # Logging
-logging:
-  level: "info"  # debug, info, warn, error, silent
+${loggingYaml}  # debug, info, warn, error, silent
 
 # Rules configuration
-rules:
-  directory: "./rules"
-  recursive: true
+${rulesYaml}
 
 # Veto Studio configuration
 # studio:
