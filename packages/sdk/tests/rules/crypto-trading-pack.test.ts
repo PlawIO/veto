@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { collectHeuristicPacksForSingleTool } from '../../src/core/tool-pack-heuristics.js';
 import { evaluateCondition } from '../../src/rules/condition-evaluator.js';
+import { evaluateCondition as evaluateConditionLocally } from '../../src/rules/local-evaluator.js';
 import { resolveBuiltInPolicyPackPath } from '../../src/rules/policy-packs.js';
 import { validatePolicyIR } from '../../src/rules/schema-validator.js';
 
@@ -43,6 +44,11 @@ describe('crypto trading policy pack', () => {
     }, { arguments: { amount: 50 } })).toBe(true);
 
     expect(evaluateCondition({
+      field: 'arguments.stop_loss',
+      operator: 'not_exists',
+    }, { arguments: {} })).toBe(true);
+
+    expect(evaluateConditionLocally({
       field: 'arguments.stop_loss',
       operator: 'not_exists',
     }, { arguments: {} })).toBe(true);

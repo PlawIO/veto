@@ -76,7 +76,7 @@ export function evaluateCondition(
   const fieldValue = resolveFieldPath(condition.field, context);
   const expected = condition.value;
 
-  if (fieldValue === undefined) return false;
+  if (fieldValue === undefined && condition.operator !== 'not_exists') return false;
 
   switch (condition.operator) {
     case 'equals':
