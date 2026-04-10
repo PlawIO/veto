@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Callable, Generic, Literal, Optional, TypeVar
+from typing import Any, AsyncGenerator, Callable, Generic, Literal, Optional, TypeGuard, TypeVar
 from urllib.parse import quote, urlencode
 
 import aiohttp
@@ -12,7 +12,9 @@ DEFAULT_BASE_URL = "https://api.veto.so"
 DEFAULT_TIMEOUT = 30_000
 
 JsonDict = dict[str, Any]
+JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 T = TypeVar("T")
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class VetoAdminError(Exception):
@@ -375,18 +377,19 @@ class VetoAdmin:
     async def listPolicies(self, opts: Optional[dict[str, str]] = None) -> list[Policy]:
         params = _compact_query(opts)
         response = await self._request("GET", "/policies", params=params)
-        return ListResponse[Policy].model_validate(response).data
+        return self._validate_model(ListResponse[Policy], response).data
 
     async def getPolicy(self, toolName: str) -> Policy:
-        return Policy.model_validate(await self._request("GET", f"/policies/{_enc(toolName)}"))
+        return self._validate_model(Policy, await self._request("GET", f"/policies/{_enc(toolName)}"))
 
     async def createPolicy(self, input: CreatePolicyInput | dict[str, Any]) -> Policy:
         payload = CreatePolicyInput.model_validate(input).model_dump(exclude_none=True)
-        return Policy.model_validate(await self._request("POST", "/policies", body=payload))
+        return self._validate_model(Policy, await self._request("POST", "/policies", body=payload))
 
     async def updatePolicy(self, toolName: str, input: UpdatePolicyInput | dict[str, Any]) -> Policy:
         payload = UpdatePolicyInput.model_validate(input).model_dump(exclude_none=True)
-        return Policy.model_validate(
+        return self._validate_model(
+            Policy,
             await self._request("PUT", f"/policies/{_enc(toolName)}", body=payload)
         )
 
@@ -412,13 +415,14 @@ class VetoAdmin:
             DecisionQuery.model_validate(query).model_dump(exclude_none=True) if query is not None else None
         )
         response = await self._request("GET", "/decisions", params=params)
-        return PaginatedResult[Decision].model_validate(response)
+        return self._validate_model(PaginatedResult[Decision], response)
 
     async def getDecision(self, id: str) -> Decision:
-        return Decision.model_validate(await self._request("GET", f"/decisions/{_enc(id)}"))
+        return self._validate_model(Decision, await self._request("GET", f"/decisions/{_enc(id)}"))
 
     async def getDecisionStats(self, opts: Optional[dict[str, Any]] = None) -> DecisionStats:
-        return DecisionStats.model_validate(
+        return self._validate_model(
+            DecisionStats,
             await self._request("GET", "/decisions/stats", params=_compact_query(opts))
         )
 
@@ -427,20 +431,21 @@ class VetoAdmin:
 
     async def listApprovals(self, opts: Optional[dict[str, str]] = None) -> list[Approval]:
         response = await self._request("GET", "/approvals", params=_compact_query(opts))
-        return ListResponse[Approval].model_validate(response).data
+        return self._validate_model(ListResponse[Approval], response).data
 
     async def listPendingApprovals(self) -> list[Approval]:
         response = await self._request("GET", "/approvals/pending")
-        return ListResponse[Approval].model_validate(response).data
+        return self._validate_model(ListResponse[Approval], response).data
 
     async def getApproval(self, id: str) -> Approval:
-        return Approval.model_validate(await self._request("GET", f"/approvals/{_enc(id)}"))
+        return self._validate_model(Approval, await self._request("GET", f"/approvals/{_enc(id)}"))
 
     async def resolveApproval(
         self, id: str, action: Literal["approve", "deny"], resolvedBy: str
     ) -> Approval:
         payload = ResolveApprovalInput(action=action, resolvedBy=resolvedBy).model_dump()
-        return Approval.model_validate(
+        return self._validate_model(
+            Approval,
             await self._request("POST", f"/approvals/{_enc(id)}/resolve", body=payload)
         )
 
@@ -452,13 +457,14 @@ class VetoAdmin:
                 BatchResolveApprovalItem.model_validate(item).model_dump() for item in approvals
             ]
         }
-        return BatchResolveApprovalsResponse.model_validate(
+        return self._validate_model(
+            BatchResolveApprovalsResponse,
             await self._request("POST", "/approvals/batch-resolve", body=payload)
         )
 
     async def listTools(self) -> list[Tool]:
         response = await self._request("GET", "/tools")
-        return ListResponse[Tool].model_validate(response).data
+        return self._validate_model(ListResponse[Tool], response).data
 
     async def deleteTool(self, name: str) -> None:
         await self._request("DELETE", f"/tools/{_enc(name)}")
@@ -466,33 +472,36 @@ class VetoAdmin:
 
     async def listPolicyDrafts(self, opts: Optional[dict[str, str]] = None) -> list[PolicyDraft]:
         response = await self._request("GET", "/policy-drafts", params=_compact_query(opts))
-        return ListResponse[PolicyDraft].model_validate(response).data
+        return self._validate_model(ListResponse[PolicyDraft], response).data
 
     async def createPolicyDraft(self, input: CreatePolicyDraftInput | dict[str, Any]) -> PolicyDraft:
         payload = CreatePolicyDraftInput.model_validate(input).model_dump(exclude_none=True)
-        return PolicyDraft.model_validate(await self._request("POST", "/policy-drafts", body=payload))
+        return self._validate_model(PolicyDraft, await self._request("POST", "/policy-drafts", body=payload))
 
     async def getPolicyDraft(self, id: str) -> PolicyDraft:
-        return PolicyDraft.model_validate(await self._request("GET", f"/policy-drafts/{_enc(id)}"))
+        return self._validate_model(PolicyDraft, await self._request("GET", f"/policy-drafts/{_enc(id)}"))
 
     async def approvePolicyDraft(self, id: str) -> PolicyDraft:
-        return PolicyDraft.model_validate(
+        return self._validate_model(
+            PolicyDraft,
             await self._request("POST", f"/policy-drafts/{_enc(id)}/approve")
         )
 
     async def rejectPolicyDraft(self, id: str, reason: Optional[str] = None) -> PolicyDraft:
         body = {"reason": reason} if reason is not None else None
-        return PolicyDraft.model_validate(
+        return self._validate_model(
+            PolicyDraft,
             await self._request("POST", f"/policy-drafts/{_enc(id)}/reject", body=body)
         )
 
     async def listUpstreams(self) -> list[McpUpstream]:
         response = await self._request("GET", "/mcp/upstreams")
-        return ListResponse[McpUpstream].model_validate(response).data
+        return self._validate_model(ListResponse[McpUpstream], response).data
 
     async def createUpstream(self, input: CreateUpstreamInput | dict[str, Any]) -> McpUpstream:
         payload = CreateUpstreamInput.model_validate(input).model_dump(exclude_none=True)
-        return McpUpstream.model_validate(
+        return self._validate_model(
+            McpUpstream,
             await self._request("POST", "/mcp/upstreams", body=payload)
         )
 
@@ -501,37 +510,39 @@ class VetoAdmin:
         return None
 
     async def testUpstream(self, id: str) -> UpstreamTestResult:
-        return UpstreamTestResult.model_validate(
+        return self._validate_model(
+            UpstreamTestResult,
             await self._request("POST", f"/mcp/upstreams/{_enc(id)}/test")
         )
 
     async def listApiKeys(self) -> list[ApiKeyInfo]:
         response = await self._request("GET", "/api-keys")
-        return ListResponse[ApiKeyInfo].model_validate(response).data
+        return self._validate_model(ListResponse[ApiKeyInfo], response).data
 
     async def createApiKey(self, input: dict[str, Any]) -> ApiKeyCreated:
         payload = _compact_dict(input)
-        return ApiKeyCreated.model_validate(await self._request("POST", "/api-keys", body=payload))
+        return self._validate_model(ApiKeyCreated, await self._request("POST", "/api-keys", body=payload))
 
     async def revokeApiKey(self, id: str) -> None:
         await self._request("DELETE", f"/api-keys/{_enc(id)}")
         return None
 
     async def listOrganizations(self) -> ListResponse[Organization]:
-        return ListResponse[Organization].model_validate(await self._request("GET", "/organizations"))
+        return self._validate_model(ListResponse[Organization], await self._request("GET", "/organizations"))
 
     async def listProjects(self, opts: Optional[dict[str, str]] = None) -> ListResponse[Project]:
-        return ListResponse[Project].model_validate(
+        return self._validate_model(
+            ListResponse[Project],
             await self._request("GET", "/projects", params=_compact_query(opts))
         )
 
     async def create_organization(self, name: str) -> Organization:
         payload = {"name": name, "slug": _slugify(name)}
-        return Organization.model_validate(await self._request("POST", "/organizations", body=payload))
+        return self._validate_model(Organization, await self._request("POST", "/organizations", body=payload))
 
     async def create_project(self, org_id: str, name: str) -> ProjectCreated:
         payload = {"organizationId": org_id, "name": name}
-        return ProjectCreated.model_validate(await self._request("POST", "/projects", body=payload))
+        return self._validate_model(ProjectCreated, await self._request("POST", "/projects", body=payload))
 
     async def create_api_key(self, project_id: str, name: str) -> ApiKeyCreated:
         return await self.createApiKey({"projectId": project_id, "name": name})
@@ -714,13 +725,16 @@ class VetoAdmin:
             self._session = aiohttp.ClientSession(headers=self._get_headers())
         return self._session
 
+    def _validate_model(self, model: type[ModelT], value: JsonValue | None) -> ModelT:
+        return model.model_validate(value)
+
     async def _request(
         self,
         method: str,
         path: str,
         params: Optional[dict[str, str]] = None,
         body: Optional[dict[str, Any]] = None,
-    ) -> Any:
+    ) -> JsonValue | None:
         url = self._build_url(path, params)
         session = self._get_session()
         try:
@@ -741,7 +755,7 @@ class VetoAdmin:
                 text = await response.text()
                 if text == "":
                     return None
-                return json.loads(text)
+                return _load_json_value(text)
         except asyncio.TimeoutError as error:
             raise VetoAdminError(f"Request timed out after {self.timeout}ms", 0) from error
         except aiohttp.ClientError as error:
@@ -811,6 +825,23 @@ def _compact_query(values: Optional[dict[str, Any]]) -> Optional[dict[str, str]]
 
 def _compact_dict(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
+
+
+def _is_json_value(value: Any) -> TypeGuard[JsonValue]:
+    if value is None or isinstance(value, bool | int | float | str):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _is_json_value(item) for key, item in value.items())
+    return False
+
+
+def _load_json_value(value: str) -> JsonValue:
+    parsed = json.loads(value)
+    if _is_json_value(parsed):
+        return parsed
+    raise TypeError("Expected a JSON-compatible response payload")
 
 
 def _slugify(value: str) -> str:
