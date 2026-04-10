@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- [#187](https://github.com/PlawIO/veto/pull/187) [`15843f1`](https://github.com/PlawIO/veto/commit/15843f13d29fab6eee27353637b369049632e497) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add `veto mcp connect` command for persisting MCP client configuration, supporting both local gateway and Veto Cloud endpoints.
+- [#187](https://github.com/PlawIO/veto/pull/187) [`15843f1`](https://github.com/PlawIO/veto/commit/15843f13d29fab6eee27353637b369049632e497) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add `veto mcp connect` command for persisting MCP client configuration, supporting both local gateway and hosted API endpoints.
 
 ### Patch Changes
 

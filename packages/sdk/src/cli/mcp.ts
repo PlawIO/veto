@@ -1495,7 +1495,7 @@ export function runMcpConnectCommand(
   serverName: string;
   created: boolean;
   updated: boolean;
-  mode: 'local' | 'cloud';
+  mode: 'local' | 'api';
   endpoint: string;
   gatewayConfigPath?: string;
 }> {
@@ -1541,7 +1541,7 @@ export function runMcpConnectCommand(
       serverName,
       created,
       updated,
-      mode: options.cloud ? 'cloud' : 'local',
+      mode: options.cloud ? 'api' : 'local',
       endpoint,
       gatewayConfigPath,
     });
