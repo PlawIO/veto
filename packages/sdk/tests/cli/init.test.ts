@@ -38,11 +38,41 @@ describe('CLI init', () => {
       expect(existsSync(configPath)).toBe(true);
 
       const content = readFileSync(configPath, 'utf-8');
-      expect(content).toContain('version: "1.0"');
+      expect(content).toMatch(/version:\s+['"]?1\.0['"]?/);
       expect(content).toContain('validation:');
-      expect(content).toContain('mode: "local"');
+      expect(content).toMatch(/mode:\s+['"]?local['"]?/);
     });
 
+
+    it('should keep default init in local mode', async () => {
+      await init({ directory: TEST_DIR, quiet: true });
+
+      const content = readFileSync(join(TEST_DIR, 'veto', 'veto.config.yaml'), 'utf-8');
+      expect(content).toMatch(/mode:\s+['"]?local['"]?/);
+    });
+
+    it('should set api mode when cloud shortcut is used', async () => {
+      await init({ directory: TEST_DIR, quiet: true, cloud: true });
+
+      const content = readFileSync(join(TEST_DIR, 'veto', 'veto.config.yaml'), 'utf-8');
+      expect(content).toMatch(/mode:\s+['"]?api['"]?/);
+    });
+
+    it('should write api key into cloud config when provided', async () => {
+      await init({ directory: TEST_DIR, quiet: true, apiKey: 'veto_sk_test_1234567890' });
+
+      const content = readFileSync(join(TEST_DIR, 'veto', 'veto.config.yaml'), 'utf-8');
+      expect(content).toContain('veto_sk_test_1234567890');
+      expect(content).toContain('https://api.veto.so');
+    });
+
+    it('should support cloud shortcut and api key together', async () => {
+      await init({ directory: TEST_DIR, quiet: true, cloud: true, apiKey: 'veto_sk_test_1234567890' });
+
+      const content = readFileSync(join(TEST_DIR, 'veto', 'veto.config.yaml'), 'utf-8');
+      expect(content).toMatch(/mode:\s+['"]?api['"]?/);
+      expect(content).toContain('veto_sk_test_1234567890');
+    });
     it('should create default rules file', async () => {
       await init({ directory: TEST_DIR, quiet: true });
 
@@ -145,7 +175,7 @@ describe('CLI init', () => {
 
       // Config should be reset to default
       const content = readFileSync(configPath, 'utf-8');
-      expect(content).toContain('version: "1.0"');
+      expect(content).toMatch(/version:\s+['"]?1\.0['"]?/);
     });
 
     it('should update .gitignore if it exists', async () => {

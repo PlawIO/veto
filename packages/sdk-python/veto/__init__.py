@@ -68,6 +68,9 @@ from veto.cloud.types import (
 )
 from veto.cloud.client import VetoCloudClient, VetoCloudConfig, ApprovalTimeoutError
 from veto.cloud.policy_cache import PolicyCache
+from veto.admin.client import VetoAdmin, VetoAdminError
+from veto.admin.types import VetoAdminConfig, Organization, Project, ApiKeyCreated
+from veto.proxy import ProxyConfig, ProxyServer, start_proxy_server
 
 # Deterministic validation
 from veto.deterministic.types import (
@@ -204,6 +207,15 @@ __all__ = [
     "ApprovalPollOptions",
     "ApprovalTimeoutError",
     "PolicyCache",
+    "VetoAdmin",
+    "VetoAdminError",
+    "VetoAdminConfig",
+    "Organization",
+    "Project",
+    "ApiKeyCreated",
+    "ProxyConfig",
+    "ProxyServer",
+    "start_proxy_server",
     # Deterministic
     "ArgumentConstraint",
     "DeterministicPolicy",

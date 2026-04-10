@@ -10,6 +10,8 @@ const DEFAULT_POLICY_SERVER_URL = 'http://localhost:3001';
 const DEFAULT_LISTEN_HOST = '127.0.0.1';
 const DEFAULT_LISTEN_PORT = 8799;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_CLOUD_MCP_UPSTREAM_URL = 'https://api.veto.so/v1/mcp/default';
+const DEFAULT_CLOUD_POLICY_SERVER_URL = 'https://api.veto.so';
 const MAX_HTTP_BODY_BYTES = 1_048_576;
 const MAX_STDIO_BUFFER_BYTES = 1_048_576;
 const MAX_PENDING_STDIO_REQUESTS = 1_000;
@@ -102,6 +104,13 @@ export interface McpInitOptions {
   outputPath?: string;
 }
 
+export interface McpConnectOptions {
+  configPath?: string;
+  apiKey?: string;
+  cloud?: boolean;
+  asJson?: boolean;
+}
+
 export interface McpDoctorReport {
   configPath: string;
   configValid: boolean;
@@ -125,6 +134,33 @@ export interface McpDoctorReport {
 interface ResolvedMcpConfig {
   path: string;
   config: McpConfig;
+}
+
+function createCloudMcpConfig(apiKey: string): McpConfig {
+  return {
+    listen: {
+      host: DEFAULT_LISTEN_HOST,
+      port: DEFAULT_LISTEN_PORT,
+    },
+    policy: {
+      serverUrl: DEFAULT_CLOUD_POLICY_SERVER_URL,
+      apiKey,
+    },
+    upstreams: [
+      {
+        name: 'default',
+        transport: 'mcp-sse',
+        url: DEFAULT_CLOUD_MCP_UPSTREAM_URL,
+        headers: {
+          'x-veto-api-key': apiKey,
+        },
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      },
+    ],
+    logging: {
+      level: 'info',
+    },
+  };
 }
 
 function ok<T>(data: T): HeadlessResult<T> {
@@ -1511,4 +1547,34 @@ export function resolveMcpConfigForTesting(options: McpServeOptions): ResolvedMc
 
 export function createMcpGatewayServerForTesting(config: McpConfig): Pick<McpGatewayServer, 'start' | 'stop' | 'getAddress'> {
   return new McpGatewayServer(config);
+}
+
+export function runMcpConnectCommand(options: McpConnectOptions = {}): HeadlessResult<{ path: string; mode: 'cloud'; endpoint: string; config: McpConfig }> {
+  try {
+    if (!options.cloud) {
+      return fail('mcp_connect_invalid', 'Only --cloud is currently supported for mcp connect.');
+    }
+
+    const apiKey = options.apiKey?.trim() || process.env.VETO_API_KEY?.trim();
+    if (!apiKey) {
+      return fail('mcp_connect_missing_api_key', 'Missing API key. Provide --api-key or set VETO_API_KEY.');
+    }
+
+    assertApiKeyFormat(apiKey);
+    const path = normalizeConfigPath(options.configPath);
+    const config = createCloudMcpConfig(apiKey);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, stringifyYaml(config, { lineWidth: 0 }).trimEnd() + '\n', 'utf-8');
+
+    return ok({
+      path,
+      mode: 'cloud',
+      endpoint: DEFAULT_CLOUD_MCP_UPSTREAM_URL,
+      config,
+    });
+  } catch (error) {
+    return fail('mcp_connect_failed', 'Failed to connect MCP configuration.', {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

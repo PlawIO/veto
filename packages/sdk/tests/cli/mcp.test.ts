@@ -6,6 +6,7 @@ import {
   createMcpGatewayServerForTesting,
   createDefaultMcpConfigTemplate,
   resolveMcpConfigForTesting,
+  runMcpConnectCommand,
   runMcpDoctorCommand,
   runMcpInitCommand,
 } from '../../src/cli/mcp.js';
@@ -42,6 +43,23 @@ describe('mcp cli commands', () => {
     if (existsSync(TMP_ROOT)) {
       rmSync(TMP_ROOT, { recursive: true, force: true });
     }
+  });
+
+
+  it('connects cloud MCP config to the managed api.veto.so endpoint', () => {
+    const configPath = join(TMP_ROOT, 'veto', 'mcp.config.yaml');
+    const result = runMcpConnectCommand({
+      configPath,
+      cloud: true,
+      apiKey: 'veto_test_key_1234567890',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.endpoint).toBe('https://api.veto.so/v1/mcp/default');
+    expect(result.data?.config.policy.serverUrl).toBe('https://api.veto.so');
+    expect(result.data?.config.upstreams[0]?.url).toBe('https://api.veto.so/v1/mcp/default');
+    expect(result.data?.config.upstreams[0]?.headers?.['x-veto-api-key']).toBe('veto_test_key_1234567890');
+    expect(existsSync(configPath)).toBe(true);
   });
 
   it('creates default mcp config file on init', () => {

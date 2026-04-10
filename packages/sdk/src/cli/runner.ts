@@ -29,7 +29,7 @@ import {
   runPolicyGenerateCommand,
 } from './headless.js';
 import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } from './agent.js';
-import { runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
+import { runMcpConnectCommand, runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
 import { startProxyServer } from '../proxy/server.js';
 
 const VERSION = getCliVersion();
@@ -65,10 +65,11 @@ Canonical Commands:
   mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
   mcp doctor [--config <path>] [--json]
   mcp init [--output <path>] [--json]
+  mcp connect --cloud [--config <path>] [--api-key <key>] [--json]
   doctor
 
 Core Commands:
-  init
+  init [--cloud] [--api-key <key>]
   learn
   compile
   test
@@ -110,6 +111,7 @@ Examples:
   veto cloud login
   veto cloud whoami --json
   veto mcp init
+  veto mcp connect --cloud
   veto mcp doctor --json
   veto mcp serve --config ./veto/mcp.config.yaml
   veto replay --policy ./veto/ --log calls.jsonl
@@ -636,11 +638,23 @@ async function runMcpCommand(
     return result.ok ? 0 : 1;
   }
 
+  if (subCommand === 'connect') {
+    const result = runMcpConnectCommand({
+      configPath: values.config,
+      apiKey: values['api-key'],
+      cloud: flags.cloud ?? false,
+      asJson,
+    });
+    printHeadlessResult(result, asJson);
+    return result.ok ? 0 : 1;
+  }
+
   if (subCommand === 'help') {
     console.log('Usage:');
     console.log('  veto mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
     console.log('  veto mcp doctor [--config <path>] [--json]');
     console.log('  veto mcp init [--output <path>] [--json]');
+    console.log('  veto mcp connect --cloud [--config <path>] [--api-key <key>] [--json]');
     return 0;
   }
 
@@ -785,7 +799,6 @@ async function runAgentCompatibility(
 ): Promise<number> {
   const subCommand = positionals[0] ?? 'help';
   const subArgs = positionals.slice(1);
-  console.error('Warning: `veto agent` commands are deprecated. Use `veto policy` and `veto guard` commands.');
 
   switch (subCommand) {
     case 'init': {
@@ -836,7 +849,7 @@ async function runAgentCompatibility(
     }
     case 'help':
     default: {
-      console.log('Agent commands (deprecated):');
+      console.log('Agent commands:');
       console.log('  veto agent init');
       console.log('  veto agent policy add "..."');
       console.log('  veto agent policy list');
@@ -895,8 +908,10 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
         quiet: flags.quiet,
         agent: flags.agent,
         yes: flags.yes,
-        mode: values.mode as 'local' | 'cloud' | 'kernel' | 'custom' | undefined,
+        mode: values.mode as 'local' | 'api' | 'cloud' | 'kernel' | 'custom' | undefined,
         approval: flags.approval,
+        cloud: flags.cloud,
+        apiKey: values['api-key'],
       });
       return result.success ? 0 : 1;
     }

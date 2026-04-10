@@ -7,8 +7,8 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  DEFAULT_CONFIG,
   DEFAULT_RULES,
+  createDefaultConfigTemplate,
   createPackRulesTemplate,
   GITIGNORE_ADDITIONS,
   ENV_EXAMPLE,
@@ -35,7 +35,11 @@ export interface InitOptions {
   /** Run in non-interactive agent mode */
   agent?: boolean;
   /** Validation mode selection */
-  mode?: 'local' | 'cloud' | 'kernel' | 'custom';
+  mode?: 'local' | 'api' | 'cloud' | 'kernel' | 'custom';
+  /** Shortcut for cloud/API validation mode */
+  cloud?: boolean;
+  /** Seed a cloud API key into veto.config.yaml */
+  apiKey?: string;
   /** Enable human approval flow */
   approval?: boolean;
 }
@@ -86,6 +90,8 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     force = false,
     pack,
     quiet = false,
+    cloud = false,
+    apiKey,
   } = options;
 
   const result: InitResult = {
@@ -155,7 +161,8 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     // Create veto.config.yaml
     const configPath = join(vetoDir, 'veto.config.yaml');
     if (!existsSync(configPath) || force) {
-      writeFileSync(configPath, DEFAULT_CONFIG, 'utf-8');
+      const validationMode = cloud ? 'api' : (options.mode ?? 'local');
+      writeFileSync(configPath, createDefaultConfigTemplate({ validationMode, apiKey }), 'utf-8');
       result.createdFiles.push('veto/veto.config.yaml');
       log('  Created veto/veto.config.yaml', quiet);
     } else {
@@ -214,8 +221,8 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     } else {
       log('  1. Add your validation rules in veto/rules/', quiet);
     }
-    log('  2. Use Veto in your application (local mode is default):', quiet);
-    log('  3. Optional: set VETO_API_KEY to switch to cloud mode', quiet);
+    log(`  2. Use Veto in your application (${cloud ? 'api' : 'local'} mode is configured):`, quiet);
+    log(apiKey ? '  3. Cloud API key was written to veto/veto.config.yaml' : '  3. Optional: set VETO_API_KEY to switch to cloud mode', quiet);
     log('', quiet);
     log('     import { Veto } from "veto-sdk";', quiet);
     log('', quiet);

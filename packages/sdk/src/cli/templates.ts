@@ -1,86 +1,56 @@
+import { stringify as stringifyYaml } from 'yaml';
+
 /**
  * Default templates for veto init.
  *
  * @module cli/templates
  */
 
+
+export interface DefaultConfigTemplateOptions {
+  validationMode?: 'local' | 'api' | 'kernel' | 'custom' | 'cloud';
+  apiKey?: string;
+}
+
+export function createDefaultConfigTemplate(options: DefaultConfigTemplateOptions = {}): string {
+  const validationMode = options.validationMode ?? 'local';
+  const cloud: Record<string, unknown> = {
+    baseUrl: 'https://api.veto.so',
+    timeout: 30000,
+    retries: 2,
+    retryDelay: 1000,
+  };
+
+  if (options.apiKey) {
+    cloud.apiKey = options.apiKey;
+  }
+
+  const content = stringifyYaml({
+    version: '1.0',
+    mode: 'strict',
+    validation: {
+      mode: validationMode,
+    },
+    cloud,
+    logging: {
+      level: 'info',
+    },
+    rules: {
+      directory: './rules',
+      recursive: true,
+    },
+  }, { lineWidth: 0 });
+
+  return `# Veto Configuration
+# See README.md for documentation
+
+${content}`;
+}
+
 /**
  * Default veto.config.yaml content.
  */
-export const DEFAULT_CONFIG = `# Veto Configuration
-# See README.md for documentation
-
-version: "1.0"
-
-# Operating mode:
-#   "strict" - Block tool calls when validation fails
-#   "log"    - Only log validation failures, allow calls to proceed
-mode: "strict"
-
-# Validation mode:
-#   "local"  - Evaluate YAML rules locally (default, zero network calls)
-#   "cloud"  - Use Veto Cloud API (set VETO_API_KEY)
-#   "kernel" - Use local Ollama model
-#   "custom" - Use specified LLM provider
-validation:
-  mode: "local"
-
-# Cloud configuration (for mode: "cloud")
-# cloud:
-#   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
-#   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
-#   timeout: 30000
-#   retries: 2
-#   retryDelay: 1000
-
-# Kernel configuration (for mode: "kernel")
-# kernel:
-#   baseUrl: "http://localhost:11434/v1"
-#   model: "hf.co/ycaleb/veto-warden-4b-GGUF:Q4_K_M"
-#   temperature: 0.1
-#   maxTokens: 256
-
-# Custom LLM provider (for mode: "custom")
-# custom:
-#   provider: "openai"  # openai | anthropic | gemini | openrouter
-#   model: "gpt-5.4"
-#   # apiKey: "sk-..."  # Or set OPENAI_API_KEY env var
-#   temperature: 0.1
-#   maxTokens: 500
-#   # baseUrl: "https://api.openai.com/v1"  # Optional override
-
-# Human-in-the-loop approvals (for action: "require_approval" in local rules)
-# approval:
-#   callbackUrl: "http://localhost:8787/approvals"
-#   timeout: 30000
-#   timeoutBehavior: "block"  # "block" (default) or "allow"
-#   includeCustomContext: false # opt-in: forward validation context.custom to webhook
-#   responseSchema:
-#     decisionField: "decision"
-#     reasonField: "reason"
-
-# Logging
-logging:
-  level: "info"  # debug, info, warn, error, silent
-
-# Rules configuration
-rules:
-  directory: "./rules"
-  recursive: true
-
-# Veto Studio configuration
-# studio:
-#   workspace:
-#     # Persisted startup workspace (absolute or relative path)
-#     defaultDirectory: "."
-#     includeExamples: false
-#     includeTests: false
-#   generation:
-#     # If false, Studio blocks generation when no endpoint is configured
-#     allowTemplateFallback: false
-#   renderer:
-#     preferred: "auto" # auto | ink | opentui | ansi
-`;
+export const DEFAULT_CONFIG = createDefaultConfigTemplate();
 
 /**
  * Default rules/defaults.yaml content.

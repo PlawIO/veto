@@ -85,6 +85,7 @@ export {
   loadMcpConfig,
   createDefaultMcpConfigTemplate,
   runMcpInitCommand,
+  runMcpConnectCommand,
   runMcpDoctorCommand,
   runMcpServeCommand,
   resolveMcpConfigForTesting,
@@ -92,6 +93,7 @@ export {
   type McpServeOptions,
   type McpDoctorOptions,
   type McpInitOptions,
+  type McpConnectOptions,
   type McpDoctorReport,
 } from './mcp.js';
 export {
