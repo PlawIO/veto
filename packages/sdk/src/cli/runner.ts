@@ -785,7 +785,6 @@ async function runAgentCompatibility(
 ): Promise<number> {
   const subCommand = positionals[0] ?? 'help';
   const subArgs = positionals.slice(1);
-  console.error('Warning: `veto agent` commands are deprecated. Use `veto policy` and `veto guard` commands.');
 
   switch (subCommand) {
     case 'init': {
@@ -836,7 +835,7 @@ async function runAgentCompatibility(
     }
     case 'help':
     default: {
-      console.log('Agent commands (deprecated):');
+      console.log('Agent commands:');
       console.log('  veto agent init');
       console.log('  veto agent policy add "..."');
       console.log('  veto agent policy list');
