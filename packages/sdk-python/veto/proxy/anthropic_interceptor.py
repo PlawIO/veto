@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from veto.proxy.sse import encode_sse_event
+
 
 @dataclass
 class AnthropicPendingToolUse:
@@ -77,16 +79,19 @@ def merge_anthropic_tool_use_delta(
     data: dict[str, Any],
     event_type: str,
 ) -> None:
-    index = data.get("index") if isinstance(data.get("index"), int) else 0
+    raw_index = data.get("index")
+    index = raw_index if isinstance(raw_index, int) else 0
 
     if event_type == "content_block_start":
         block = data.get("content_block")
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             return
+        raw_id = block.get("id")
+        raw_name = block.get("name")
         pending[index] = AnthropicPendingToolUse(
             index=index,
-            id=block.get("id") if isinstance(block.get("id"), str) else "",
-            name=block.get("name") if isinstance(block.get("name"), str) else "",
+            id=raw_id if isinstance(raw_id, str) else "",
+            name=raw_name if isinstance(raw_name, str) else "",
             input_raw="",
         )
     elif event_type == "content_block_delta":
@@ -122,7 +127,7 @@ def synth_anthropic_blocked_event(reason: str) -> str:
     }
     block_stop = {"type": "content_block_stop", "index": 0}
     return "".join(
-        f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+        encode_sse_event(json.dumps(payload), event=event)
         for event, payload in [
             ("content_block_start", block_start),
             ("content_block_delta", block_delta),

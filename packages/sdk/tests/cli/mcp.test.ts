@@ -46,20 +46,71 @@ describe('mcp cli commands', () => {
   });
 
 
-  it('connects cloud MCP config to the managed api.veto.so endpoint', () => {
-    const configPath = join(TMP_ROOT, 'veto', 'mcp.config.yaml');
-    const result = runMcpConnectCommand({
-      configPath,
-      cloud: true,
-      apiKey: 'veto_test_key_1234567890',
+  it('connects cloud MCP config and probes the managed endpoint', async () => {
+    mkdirSync(TMP_ROOT, { recursive: true });
+
+    const probeServer = createServer((req, res) => {
+      expect(req.method).toBe('POST');
+      expect(req.url).toBe('/v1/mcp/default');
+      expect(req.headers['x-veto-api-key']).toBe('veto_test_key_1234567890');
+
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(chunk as Buffer));
+      req.on('end', () => {
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { method?: string };
+        expect(payload.method).toBe('tools/list');
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: 'mcp-connect-probe', result: { tools: [] } }));
+      });
     });
 
-    expect(result.ok).toBe(true);
-    expect(result.data?.endpoint).toBe('https://api.veto.so/v1/mcp/default');
-    expect(result.data?.config.policy.serverUrl).toBe('https://api.veto.so');
-    expect(result.data?.config.upstreams[0]?.url).toBe('https://api.veto.so/v1/mcp/default');
-    expect(result.data?.config.upstreams[0]?.headers?.['x-veto-api-key']).toBe('veto_test_key_1234567890');
-    expect(existsSync(configPath)).toBe(true);
+    const port = await listen(probeServer);
+    const configPath = join(TMP_ROOT, 'veto', 'mcp.config.yaml');
+
+    process.env.VETO_CLOUD_API_URL = `http://127.0.0.1:${port}`;
+    process.env.VETO_CLOUD_MCP_URL = `http://127.0.0.1:${port}/v1/mcp/default`;
+
+    try {
+      const result = await runMcpConnectCommand({
+        configPath,
+        cloud: true,
+        apiKey: 'veto_test_key_1234567890',
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.data?.probe.ok).toBe(true);
+      expect(result.data?.endpoint).toBe(`http://127.0.0.1:${port}/v1/mcp/default`);
+      expect(result.data?.config.policy.serverUrl).toBe(`http://127.0.0.1:${port}`);
+      expect(result.data?.config.upstreams[0]?.url).toBe(`http://127.0.0.1:${port}/v1/mcp/default`);
+      expect(result.data?.config.upstreams[0]?.headers?.['x-veto-api-key']).toBe('veto_test_key_1234567890');
+      expect(existsSync(configPath)).toBe(true);
+    } finally {
+      delete process.env.VETO_CLOUD_API_URL;
+      delete process.env.VETO_CLOUD_MCP_URL;
+      await closeServer(probeServer);
+    }
+  });
+
+  it('fails cloud connect when the endpoint probe fails', async () => {
+    const configPath = join(TMP_ROOT, 'veto', 'mcp.config.yaml');
+    process.env.VETO_CLOUD_API_URL = 'http://127.0.0.1:65534';
+    process.env.VETO_CLOUD_MCP_URL = 'http://127.0.0.1:65534/v1/mcp/default';
+
+    try {
+      const result = await runMcpConnectCommand({
+        configPath,
+        cloud: true,
+        apiKey: 'veto_test_key_1234567890',
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error?.code).toBe('mcp_connect_probe_failed');
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      delete process.env.VETO_CLOUD_API_URL;
+      delete process.env.VETO_CLOUD_MCP_URL;
+    }
   });
 
   it('creates default mcp config file on init', () => {

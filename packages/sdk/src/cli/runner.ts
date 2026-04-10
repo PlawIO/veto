@@ -639,7 +639,7 @@ async function runMcpCommand(
   }
 
   if (subCommand === 'connect') {
-    const result = runMcpConnectCommand({
+    const result = await runMcpConnectCommand({
       configPath: values.config,
       apiKey: values['api-key'],
       cloud: flags.cloud ?? false,
@@ -715,7 +715,8 @@ async function runAuditCommand(
         return 1;
       }
 
-      const { chain_hash: _, ...recordWithoutHash } = parsed;
+      const recordWithoutHash = { ...parsed };
+      delete recordWithoutHash.chain_hash;
       const expected = computeChainHash(prevHash, recordWithoutHash);
 
       if (expected !== storedHash) {
@@ -903,6 +904,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return await runMcpCommand(positionals, flags, values);
     case 'init': {
       const result = await init({
+        directory: values.directory,
         force: flags.force,
         pack: values.pack,
         quiet: flags.quiet,

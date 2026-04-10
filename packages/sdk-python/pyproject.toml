@@ -25,6 +25,7 @@ dependencies = [
     "aiohttp>=3.8.0",
     "jsonschema>=4.20.0",
     "pydantic>=2.0.0",
+    "sse-starlette>=2.1.3",
 ]
 
 [project.optional-dependencies]
@@ -57,3 +58,19 @@ packages = ["veto"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "agents.guardrail",
+    "agents.tool_guardrails",
+    "browser_use.agent.views",
+    "browser_use.tools.service",
+    "crewai.tools",
+    "jsonschema",
+    "langchain_core.callbacks",
+    "langchain_core.messages",
+    "opentelemetry",
+    "opentelemetry.trace",
+    "pydantic_ai",
+]
+ignore_missing_imports = true

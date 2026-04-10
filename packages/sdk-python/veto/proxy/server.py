@@ -36,10 +36,11 @@ def _resolve_format(config: ProxyConfig) -> str:
 
 
 def _copy_stream_headers(headers: aiohttp.typedefs.LooseHeaders) -> dict[str, str]:
-    copied = dict(headers)
+    copied = {str(key): str(value) for key, value in dict(headers).items()}
     for key in ("Transfer-Encoding", "transfer-encoding", "Content-Length", "content-length"):
-        copied.pop(key, None)
-    return {str(k): str(v) for k, v in copied.items()}
+        if key in copied:
+            del copied[key]
+    return copied
 
 
 def _buffered_response(status: int, headers: aiohttp.typedefs.LooseHeaders, body: bytes) -> web.Response:
@@ -78,8 +79,10 @@ class ProxyServer:
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, self._host, self._config.port)
         await self._site.start()
-        if self._site._server and self._site._server.sockets:
-            host, port = self._site._server.sockets[0].getsockname()[:2]
+        internal_server = getattr(self._site, "_server", None)
+        sockets = getattr(internal_server, "sockets", None)
+        if sockets:
+            host, port = sockets[0].getsockname()[:2]
             self._host = str(host)
             self._port = int(port)
 
@@ -310,8 +313,10 @@ class ProxyServer:
             for block in content:
                 if not isinstance(block, dict) or block.get("type") != "tool_use":
                     continue
-                name = block.get("name") if isinstance(block.get("name"), str) else ""
-                input_data = block.get("input") if isinstance(block.get("input"), dict) else {}
+                raw_name = block.get("name")
+                raw_input = block.get("input")
+                name = raw_name if isinstance(raw_name, str) else ""
+                input_data = raw_input if isinstance(raw_input, dict) else {}
                 result = await self._veto.guard(name, input_data)
                 if result.decision != "allow":
                     blocked = True
@@ -368,7 +373,8 @@ class ProxyServer:
                 if parsed.event_type == "content_block_start" and isinstance(parsed.data, dict):
                     block = parsed.data.get("content_block")
                     if isinstance(block, dict) and block.get("type") == "tool_use":
-                        index = parsed.data.get("index") if isinstance(parsed.data.get("index"), int) else 0
+                        raw_index = parsed.data.get("index")
+                        index = raw_index if isinstance(raw_index, int) else 0
                         tool_use_indexes.add(index)
 
                 current_index = parsed.data.get("index") if isinstance(parsed.data, dict) and isinstance(parsed.data.get("index"), int) else -1

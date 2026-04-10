@@ -10,7 +10,6 @@ const DEFAULT_POLICY_SERVER_URL = 'http://localhost:3001';
 const DEFAULT_LISTEN_HOST = '127.0.0.1';
 const DEFAULT_LISTEN_PORT = 8799;
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_CLOUD_MCP_UPSTREAM_URL = 'https://api.veto.so/v1/mcp/default';
 const DEFAULT_CLOUD_POLICY_SERVER_URL = 'https://api.veto.so';
 const MAX_HTTP_BODY_BYTES = 1_048_576;
 const MAX_STDIO_BUFFER_BYTES = 1_048_576;
@@ -136,6 +135,14 @@ interface ResolvedMcpConfig {
   config: McpConfig;
 }
 
+function getCloudPolicyServerUrl(): string {
+  return (process.env.VETO_CLOUD_API_URL ?? DEFAULT_CLOUD_POLICY_SERVER_URL).trim().replace(/\/$/, '');
+}
+
+function getCloudMcpUpstreamUrl(): string {
+  return (process.env.VETO_CLOUD_MCP_URL ?? `${getCloudPolicyServerUrl()}/v1/mcp/default`).trim();
+}
+
 function createCloudMcpConfig(apiKey: string): McpConfig {
   return {
     listen: {
@@ -143,14 +150,14 @@ function createCloudMcpConfig(apiKey: string): McpConfig {
       port: DEFAULT_LISTEN_PORT,
     },
     policy: {
-      serverUrl: DEFAULT_CLOUD_POLICY_SERVER_URL,
+      serverUrl: getCloudPolicyServerUrl(),
       apiKey,
     },
     upstreams: [
       {
         name: 'default',
         transport: 'mcp-sse',
-        url: DEFAULT_CLOUD_MCP_UPSTREAM_URL,
+        url: getCloudMcpUpstreamUrl(),
         headers: {
           'x-veto-api-key': apiKey,
         },
@@ -1469,6 +1476,45 @@ export async function runMcpDoctorCommand(options: McpDoctorOptions = {}): Promi
   return ok(report);
 }
 
+
+async function probeCloudMcpConnection(apiKey: string): Promise<{ ok: boolean; endpoint: string; status?: number; message: string; latencyMs: number }> {
+  const endpoint = getCloudMcpUpstreamUrl();
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'x-veto-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'mcp-connect-probe',
+        method: 'tools/list',
+        params: {},
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    return {
+      ok: response.ok,
+      endpoint,
+      status: response.status,
+      latencyMs: Date.now() - startedAt,
+      message: response.ok ? 'Cloud MCP endpoint reachable' : `Cloud MCP endpoint returned ${response.status}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      endpoint,
+      latencyMs: Date.now() - startedAt,
+      message: `Cloud MCP probe failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function printServeStartup(configPath: string, config: McpConfig, asJson: boolean): void {
   const payload = {
     mode: 'mcp-server',
@@ -1549,7 +1595,7 @@ export function createMcpGatewayServerForTesting(config: McpConfig): Pick<McpGat
   return new McpGatewayServer(config);
 }
 
-export function runMcpConnectCommand(options: McpConnectOptions = {}): HeadlessResult<{ path: string; mode: 'cloud'; endpoint: string; config: McpConfig }> {
+export async function runMcpConnectCommand(options: McpConnectOptions = {}): Promise<HeadlessResult<{ path: string; mode: 'cloud'; endpoint: string; config: McpConfig; probe: { ok: boolean; endpoint: string; status?: number; message: string; latencyMs: number } }>> {
   try {
     if (!options.cloud) {
       return fail('mcp_connect_invalid', 'Only --cloud is currently supported for mcp connect.');
@@ -1561,6 +1607,11 @@ export function runMcpConnectCommand(options: McpConnectOptions = {}): HeadlessR
     }
 
     assertApiKeyFormat(apiKey);
+    const probe = await probeCloudMcpConnection(apiKey);
+    if (!probe.ok) {
+      return fail('mcp_connect_probe_failed', 'Failed to reach Veto Cloud MCP endpoint.', probe);
+    }
+
     const path = normalizeConfigPath(options.configPath);
     const config = createCloudMcpConfig(apiKey);
     mkdirSync(dirname(path), { recursive: true });
@@ -1569,8 +1620,9 @@ export function runMcpConnectCommand(options: McpConnectOptions = {}): HeadlessR
     return ok({
       path,
       mode: 'cloud',
-      endpoint: DEFAULT_CLOUD_MCP_UPSTREAM_URL,
+      endpoint: config.upstreams[0]!.url!,
       config,
+      probe,
     });
   } catch (error) {
     return fail('mcp_connect_failed', 'Failed to connect MCP configuration.', {

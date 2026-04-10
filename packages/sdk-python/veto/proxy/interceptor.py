@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from veto.proxy.sse import encode_sse_event
+
 
 @dataclass
 class PendingToolCall:
@@ -83,13 +85,17 @@ def merge_tool_call_deltas(
         for item in tool_calls:
             if not isinstance(item, dict):
                 continue
-            index = item.get("index") if isinstance(item.get("index"), int) else 0
+            raw_index = item.get("index")
+            index = raw_index if isinstance(raw_index, int) else 0
             if index not in pending:
                 function = item.get("function")
                 name = ""
-                if isinstance(function, dict) and isinstance(function.get("name"), str):
-                    name = function["name"]
-                tool_id = item.get("id") if isinstance(item.get("id"), str) else ""
+                if isinstance(function, dict):
+                    function_name = function.get("name")
+                    if isinstance(function_name, str):
+                        name = function_name
+                raw_tool_id = item.get("id")
+                tool_id = raw_tool_id if isinstance(raw_tool_id, str) else ""
                 pending[index] = PendingToolCall(
                     index=index,
                     id=tool_id,
@@ -100,9 +106,9 @@ def merge_tool_call_deltas(
             current = pending[index]
             function = item.get("function")
             if isinstance(function, dict):
-                name = function.get("name")
-                if isinstance(name, str) and name and not current.name:
-                    current.name = name
+                function_name = function.get("name")
+                if isinstance(function_name, str) and function_name and not current.name:
+                    current.name = function_name
                 arguments = function.get("arguments")
                 if isinstance(arguments, str):
                     current.arguments_raw += arguments
@@ -131,4 +137,4 @@ def synth_blocked_event(reason: str, request_id: Optional[str] = None) -> str:
             }
         ],
     }
-    return f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n"
+    return encode_sse_event(json.dumps(chunk)) + encode_sse_event('[DONE]')
