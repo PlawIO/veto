@@ -10,6 +10,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -24,6 +25,8 @@ const POLICY_CACHE_PATH: &str = ".veto/cache/veto-bash-policies.json";
 const AUDIT_SPOOL_PATH: &str = ".veto/audit/veto-bash-spool.jsonl";
 const API_KEY_NAMESPACE_SALT: &str = "veto-bash-cache-namespace:v1";
 const DEFAULT_POLICY_REFRESH_COOLDOWN_MS: u64 = 5_000;
+const FILE_LOCK_TIMEOUT_MS: u64 = 5_000;
+const FILE_LOCK_STALE_MS: u64 = 30_000;
 
 #[derive(Clone, Debug)]
 struct WrapperOptions {
@@ -2037,6 +2040,7 @@ fn append_audit_event(
         forward_request,
     };
     let path = home_relative(AUDIT_SPOOL_PATH)?;
+    let _lock = acquire_mutation_lock(&path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -2112,6 +2116,7 @@ fn run_internal_flush_audit(args: &[String]) -> Result<()> {
     let api_key = api_key.ok_or_else(|| anyhow!("Missing --api-key"))?;
     let namespace = namespace.ok_or_else(|| anyhow!("Missing --api-key-namespace"))?;
     let path = home_relative(AUDIT_SPOOL_PATH)?;
+    let _lock = acquire_mutation_lock(&path)?;
     let lock_path = home_relative(&format!(".veto/cache/flush-{}.lock", namespace))?;
     let existing = match fs::read_to_string(&path) {
         Ok(raw) => raw,
@@ -2311,6 +2316,7 @@ fn store_cached_decision(
     ttl_seconds: u64,
 ) -> Result<()> {
     let path = home_relative(DECISION_CACHE_PATH)?;
+    let _lock = acquire_mutation_lock(&path)?;
     let mut store = read_or_default::<DecisionCacheStore>(&path)?;
     let now = now_ms();
     store.entries.retain(|_, entry| entry.expires_at_ms > now);
@@ -2338,6 +2344,7 @@ fn load_policy_entry(key: &PolicyCacheKey) -> Result<Option<PolicyCacheEntry>> {
 
 fn store_policy_entry(key: &PolicyCacheKey, policy: &CloudPolicy) -> Result<()> {
     let path = home_relative(POLICY_CACHE_PATH)?;
+    let _lock = acquire_mutation_lock(&path)?;
     let mut store = read_or_default::<PolicyCacheStore>(&path)?;
     let now = now_ms();
     store.entries.insert(
@@ -2369,7 +2376,7 @@ where
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    atomic_write_bytes(path, &serde_json::to_vec_pretty(value)?)?;
     Ok(())
 }
 
@@ -2378,13 +2385,99 @@ fn rewrite_jsonl_file(path: &Path, lines: &[String]) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     if lines.is_empty() {
-        fs::write(path, b"")?;
+        atomic_write_bytes(path, b"")?;
     } else {
         let mut content = lines.join("\n");
         content.push('\n');
-        fs::write(path, content)?;
+        atomic_write_bytes(path, content.as_bytes())?;
     }
     Ok(())
+}
+
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| anyhow!("Invalid file name for atomic write: {}", path.display()))?;
+    let temp_path =
+        path.with_file_name(format!(".{}.{}.{}.tmp", file_name, process::id(), now_ms()));
+    fs::write(&temp_path, bytes)?;
+    fs::rename(&temp_path, path)?;
+    Ok(())
+}
+
+struct ExclusiveFileLock {
+    path: PathBuf,
+}
+
+impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_mutation_lock(target_path: &Path) -> Result<ExclusiveFileLock> {
+    acquire_exclusive_lock(&mutation_lock_path(target_path), FILE_LOCK_TIMEOUT_MS)
+}
+
+fn acquire_exclusive_lock(lock_path: &Path, timeout_ms: u64) -> Result<ExclusiveFileLock> {
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let deadline = now_ms() + timeout_ms;
+    loop {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock_path)
+        {
+            Ok(mut file) => {
+                writeln!(file, "{} {}", process::id(), now_ms())?;
+                return Ok(ExclusiveFileLock {
+                    path: lock_path.to_path_buf(),
+                });
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                if is_stale_lock(lock_path, FILE_LOCK_STALE_MS)? {
+                    remove_lock(lock_path)?;
+                    continue;
+                }
+                if now_ms() >= deadline {
+                    return Err(anyhow!(
+                        "Timed out acquiring file lock: {}",
+                        lock_path.display()
+                    ));
+                }
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+fn mutation_lock_path(target_path: &Path) -> PathBuf {
+    let file_name = target_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("lock");
+    target_path.with_file_name(format!(".{file_name}.lock"))
+}
+
+fn is_stale_lock(path: &Path, max_age_ms: u64) -> Result<bool> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let age = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    Ok(age >= max_age_ms)
 }
 
 fn derive_api_key_namespace(api_key: Option<&str>) -> Result<Option<String>> {
@@ -2667,6 +2760,34 @@ mod tests {
         rewrite_jsonl_file(&path, &[]).unwrap();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn exclusive_file_lock_serializes_writers() {
+        let root = std::env::temp_dir().join(format!("veto-bash-lock-{}", now_ms()));
+        std::fs::create_dir_all(&root).unwrap();
+        let lock_path = root.join(".cache.lock");
+
+        let first = acquire_exclusive_lock(&lock_path, 20).unwrap();
+        let second = acquire_exclusive_lock(&lock_path, 20);
+        assert!(second.is_err());
+
+        drop(first);
+
+        let third = acquire_exclusive_lock(&lock_path, 20);
+        assert!(third.is_ok());
+    }
+
+    #[test]
+    fn atomic_write_bytes_replaces_file_contents() {
+        let root = std::env::temp_dir().join(format!("veto-bash-atomic-{}", now_ms()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("cache.json");
+
+        atomic_write_bytes(&path, br#"{"a":1}"#).unwrap();
+        atomic_write_bytes(&path, br#"{"b":2}"#).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"b":2}"#);
     }
 
     #[test]
