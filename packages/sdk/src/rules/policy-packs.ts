@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 
 const BUILT_IN_POLICY_PACK_FILE_NAMES = {
   '@veto/coding-agent': 'coding-agent.yaml',
+  '@veto/crypto-trading': 'crypto-trading.yaml',
   '@veto/financial': 'financial.yaml',
   '@veto/browser-automation': 'browser-automation.yaml',
   '@veto/data-access': 'data-access.yaml',

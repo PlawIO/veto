@@ -10,6 +10,7 @@ export const POLICY_IR_V1_SCHEMA = {
     { required: ['output_rules'] },
     { required: ['extends'] },
     { required: ['economic'] },
+    { required: ['sessionConstraints'] },
   ],
   properties: {
     version: {
@@ -46,6 +47,9 @@ export const POLICY_IR_V1_SCHEMA = {
     economic: {
       $ref: '#/$defs/EconomicPolicy',
     },
+    sessionConstraints: {
+      $ref: '#/$defs/SessionConstraints',
+    },
   },
   additionalProperties: false,
   $defs: {
@@ -66,6 +70,10 @@ export const POLICY_IR_V1_SCHEMA = {
         description: {
           type: 'string',
           description: 'Detailed description of what this rule does.',
+        },
+        message: {
+          type: 'string',
+          description: 'Optional user-facing message for approvals, warnings, or denials.',
         },
         enabled: {
           type: 'boolean',
@@ -214,7 +222,7 @@ export const POLICY_IR_V1_SCHEMA = {
     },
     Condition: {
       type: 'object',
-      required: ['field', 'operator', 'value'],
+      required: ['field', 'operator'],
       properties: {
         field: {
           type: 'string',
@@ -238,13 +246,30 @@ export const POLICY_IR_V1_SCHEMA = {
           if: {
             properties: {
               operator: {
+                const: 'not_exists',
+              },
+            },
+          },
+          else: {
+            required: ['value'],
+          },
+        },
+        {
+          if: {
+            properties: {
+              operator: {
                 enum: ['within_hours', 'outside_hours'],
               },
             },
           },
           then: {
             properties: {
-              value: { $ref: '#/$defs/TimeWindowValue' },
+              value: {
+                anyOf: [
+                  { $ref: '#/$defs/TimeWindowValue' },
+                  { $ref: '#/$defs/TimeWindowString' },
+                ],
+              },
             },
           },
         },
@@ -298,6 +323,11 @@ export const POLICY_IR_V1_SCHEMA = {
         },
       },
       additionalProperties: false,
+    },
+    TimeWindowString: {
+      type: 'string',
+      pattern: '^(?:[01]\\d|2[0-3]):[0-5]\\d-(?:[01]\\d|2[0-3]):[0-5]\\d$',
+      description: 'Simple time window in HH:MM-HH:MM format.',
     },
     AgentScope: {
       oneOf: [
@@ -362,15 +392,78 @@ export const POLICY_IR_V1_SCHEMA = {
         'ends_with',
         'matches',
         'greater_than',
+        'greater_than_or_equal',
         'less_than',
+        'less_than_or_equal',
         'percent_of',
         'length_greater_than',
         'in',
         'not_in',
+        'not_exists',
         'outside_hours',
         'within_hours',
       ],
       description: 'Comparison operator.',
+    },
+    SessionCounterConfig: {
+      type: 'object',
+      required: ['increment'],
+      properties: {
+        increment: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        decrement: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        max: {
+          type: 'number',
+        },
+        maxAction: {
+          type: 'string',
+          enum: ['deny', 'require_approval'],
+        },
+      },
+      additionalProperties: false,
+    },
+    CumulativeLimit: {
+      type: 'object',
+      required: ['argumentName', 'maxValue'],
+      properties: {
+        argumentName: {
+          type: 'string',
+          minLength: 1,
+        },
+        maxValue: {
+          type: 'number',
+        },
+      },
+      additionalProperties: false,
+    },
+    SessionConstraints: {
+      type: 'object',
+      properties: {
+        maxCalls: {
+          type: 'number',
+        },
+        budget: {
+          type: 'number',
+        },
+        spendArgument: {
+          type: 'string',
+          minLength: 1,
+        },
+        cumulativeLimits: {
+          type: 'array',
+          items: { $ref: '#/$defs/CumulativeLimit' },
+        },
+        counters: {
+          type: 'object',
+          additionalProperties: { $ref: '#/$defs/SessionCounterConfig' },
+        },
+      },
+      additionalProperties: false,
     },
     Severity: {
       type: 'string',

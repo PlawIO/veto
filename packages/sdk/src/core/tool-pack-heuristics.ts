@@ -6,6 +6,39 @@ interface ToolPackHeuristic {
 const TOOL_PACK_HEURISTICS: readonly ToolPackHeuristic[] = [
   {
     patterns: [
+      'place_order',
+      'create_order',
+      'cancel_order',
+      'close_position',
+      'open_position',
+      'change_leverage',
+      'set_leverage',
+      'get_funding_rate',
+      'get_positions',
+      'get_orderbook',
+      'margin',
+      'liquidation',
+      'stop_loss',
+      'take_profit',
+      'futures',
+      'spot_trade',
+      'limit_order',
+      'market_order',
+      'leverage',
+      'place_bet',
+      'buy_shares',
+      'buy_outcome',
+      'get_markets',
+      'get_market_odds',
+      'redeem_shares',
+      'polymarket',
+      'prediction',
+      'trading',
+    ],
+    pack: '@veto/crypto-trading',
+  },
+  {
+    patterns: [
       'transfer',
       'payment',
       'balance',
@@ -133,4 +166,3 @@ export function collectHeuristicPacksForToolNames(
 export function collectHeuristicPacksForSingleTool(toolName: string): string[] {
   return collectHeuristicPacksForToolNames([toolName]);
 }
-

@@ -134,9 +134,15 @@ export function evaluateCondition(
     case 'greater_than':
       return typeof fieldValue === 'number' && typeof expected === 'number'
         && Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue > expected;
+    case 'greater_than_or_equal':
+      return typeof fieldValue === 'number' && typeof expected === 'number'
+        && Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue >= expected;
     case 'less_than':
       return typeof fieldValue === 'number' && typeof expected === 'number'
         && Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue < expected;
+    case 'less_than_or_equal':
+      return typeof fieldValue === 'number' && typeof expected === 'number'
+        && Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue <= expected;
     case 'in':
       if (!Array.isArray(expected)) return false;
       if (typeof fieldValue === 'string') {
@@ -151,6 +157,8 @@ export function evaluateCondition(
         return !expected.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === fieldValue);
       }
       return !expected.includes(fieldValue);
+    case 'not_exists':
+      return fieldValue === undefined;
     case 'length_greater_than':
       if (typeof fieldValue === 'string' || Array.isArray(fieldValue)) {
         return typeof expected === 'number' && fieldValue.length > expected;

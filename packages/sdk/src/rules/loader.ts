@@ -349,6 +349,8 @@ export class RuleLoader {
         ? data.output_rules.map((r, i) => this.parseOutputRule(r, `${source}:output-rule-${i}`))
         : undefined,
       settings: data.settings as RuleSet['settings'],
+      economic: data.economic as RuleSet['economic'],
+      sessionConstraints: data.sessionConstraints as RuleSet['sessionConstraints'],
     };
   }
 
@@ -366,6 +368,7 @@ export class RuleLoader {
       id: (ruleData.id as string) ?? `auto-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       name: (ruleData.name as string) ?? 'Unnamed Rule',
       description: ruleData.description as string | undefined,
+      message: ruleData.message as string | undefined,
       enabled: ruleData.enabled !== false, // Default to true
       severity: (ruleData.severity as Rule['severity']) ?? 'medium',
       action: (ruleData.action as Rule['action']) ?? 'block',

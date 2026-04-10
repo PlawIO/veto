@@ -7,6 +7,8 @@
  * @module rules/types
  */
 
+import type { SessionConstraints } from '../deterministic/types.js';
+import type { EconomicPolicyConfig } from '../economic/types.js';
 import type { RateLimitEntry } from '../rate-limiting/types.js';
 export type { RateLimitEntry };
 
@@ -22,11 +24,14 @@ export type ConditionOperator =
   | 'ends_with'
   | 'matches'  // Regex match
   | 'greater_than'
+  | 'greater_than_or_equal'
   | 'less_than'
+  | 'less_than_or_equal'
   | 'percent_of'
   | 'length_greater_than'
   | 'in'
   | 'not_in'
+  | 'not_exists'
   | 'outside_hours'
   | 'within_hours';
 
@@ -131,6 +136,8 @@ export interface Rule {
   name: string;
   /** Detailed description of what the rule does */
   description?: string;
+  /** Optional user-facing message for approvals, warnings, or denials */
+  message?: string;
   /** Whether the rule is enabled */
   enabled: boolean;
   /** Severity level */
@@ -207,6 +214,10 @@ export interface RuleSet {
   output_rules?: OutputRule[];
   /** Global settings for this rule set */
   settings?: RuleSetSettings;
+  /** Economic authorization settings for this rule set */
+  economic?: EconomicPolicyConfig;
+  /** Session-level constraints for this rule set */
+  sessionConstraints?: SessionConstraints;
 }
 
 /**
