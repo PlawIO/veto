@@ -135,6 +135,14 @@ export interface GuardResult {
   economicDenial?: EconomicDenialDetails;
 }
 
+export interface VetoRuntimeInfo {
+  configDir: string;
+  mode: VetoMode;
+  validationMode: ValidationMode;
+  startupMode: StartupMode;
+  cloudReady: boolean;
+}
+
 const RESERVED_LOCAL_CONTEXT_KEYS = new Set(['market', 'budget', 'portfolio']);
 
 /**
@@ -614,7 +622,7 @@ export class Veto {
     }
 
     // Resolve cloud configuration
-    if (this.validationMode === 'cloud') {
+    if (cloudApiKey || cloudBaseUrl || this.validationMode === 'cloud') {
       this.cloudConfig = {
         apiKey: cloudApiKey,
         baseUrl: cloudBaseUrl,
@@ -3590,6 +3598,20 @@ export class Veto {
    */
   validateOutput(toolName: string, output: unknown): OutputValidationResult {
     return this.outputValidator.validate(toolName, output);
+  }
+
+  isCloudReady(): boolean {
+    return typeof this.cloudConfig?.apiKey === 'string' && this.cloudConfig.apiKey.trim().length > 0;
+  }
+
+  getRuntimeInfo(): VetoRuntimeInfo {
+    return {
+      configDir: this.configDir,
+      mode: this.mode,
+      validationMode: this.validationMode,
+      startupMode: this.startupMode,
+      cloudReady: this.isCloudReady(),
+    };
   }
 
   async waitForApproval(

@@ -18,6 +18,38 @@ interface PluginEntry {
   register(api: PluginApi): void | Promise<void>;
 }
 
+interface VetoRuntimeInfo {
+  validationMode?: string;
+  cloudReady?: boolean;
+}
+
+interface VetoPluginRuntime {
+  isCloudReady?: () => boolean;
+  getRuntimeInfo?: () => VetoRuntimeInfo;
+}
+
+function assertApprovalModeReady(approvalMode: VetoApprovalMode, veto: Veto): void {
+  if (approvalMode !== 'veto-cloud') {
+    return;
+  }
+
+  const runtime = veto as unknown as VetoPluginRuntime;
+  const cloudReady = runtime.isCloudReady?.() ?? runtime.getRuntimeInfo?.().cloudReady ?? false;
+
+  if (!cloudReady) {
+    throw new Error(
+      '[veto] approvalMode "veto-cloud" requires Veto Cloud mode. '
+      + 'Configure VETO_API_KEY or cloud.apiKey in veto/veto.config.yaml, '
+      + 'or switch approvalMode to "openclaw-native".',
+    );
+  }
+}
+
+function getValidationMode(veto: Veto): string {
+  const runtime = veto as unknown as VetoPluginRuntime;
+  return runtime.getRuntimeInfo?.().validationMode ?? 'unknown';
+}
+
 async function loadDefinePluginEntry(): Promise<(entry: PluginEntry) => PluginEntry> {
   const modulePath: string = 'openclaw/plugin-sdk/plugin-entry';
 
@@ -46,6 +78,9 @@ export default definePluginEntry({
     const veto = await Veto.init();
     const pluginConfig = api.getConfig?.() as { approvalMode?: VetoApprovalMode } | undefined;
     const approvalMode: VetoApprovalMode = pluginConfig?.approvalMode ?? 'openclaw-native';
+    const validationMode = getValidationMode(veto);
+
+    assertApprovalModeReady(approvalMode, veto);
 
     const beforeToolCall = createVetoBeforeToolCallHook(veto, {
       approvalMode,
@@ -62,6 +97,9 @@ export default definePluginEntry({
     const afterToolCall = createVetoAfterToolCallHook(veto);
     api.registerHook('after_tool_call', afterToolCall);
 
-    api.log?.('info', `[veto] Guardrails active (approval mode: ${approvalMode})`);
+    api.log?.(
+      'info',
+      `[veto] Plugin loaded (approval mode: ${approvalMode}, validation mode: ${validationMode})`,
+    );
   },
 });
