@@ -2289,6 +2289,13 @@ fn should_cache_decision(ttl_seconds: u64, decision: &TerminalDecision) -> bool 
 
 fn load_cached_decision(key: &CacheKeyInput) -> Result<Option<TerminalDecision>> {
     let path = home_relative(DECISION_CACHE_PATH)?;
+    load_cached_decision_from_path(&path, key)
+}
+
+fn load_cached_decision_from_path(
+    path: &Path,
+    key: &CacheKeyInput,
+) -> Result<Option<TerminalDecision>> {
     let raw = match fs::read_to_string(&path) {
         Ok(value) => value,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -2297,7 +2304,11 @@ fn load_cached_decision(key: &CacheKeyInput) -> Result<Option<TerminalDecision>>
     let mut store: DecisionCacheStore = serde_json::from_str(&raw).unwrap_or_default();
     let key_string = serde_json::to_string(key)?;
     let now = now_ms();
+    let original_len = store.entries.len();
     store.entries.retain(|_, entry| entry.expires_at_ms > now);
+    if store.entries.len() != original_len {
+        let _ = persist_pruned_decision_cache(path, now);
+    }
     if let Some(entry) = store.entries.get(&key_string) {
         return Ok(Some(TerminalDecision {
             decision: entry.value.decision.clone(),
@@ -2308,6 +2319,17 @@ fn load_cached_decision(key: &CacheKeyInput) -> Result<Option<TerminalDecision>>
         }));
     }
     Ok(None)
+}
+
+fn persist_pruned_decision_cache(path: &Path, now: u64) -> Result<()> {
+    let _lock = acquire_mutation_lock(path)?;
+    let mut store = read_or_default::<DecisionCacheStore>(path)?;
+    let original_len = store.entries.len();
+    store.entries.retain(|_, entry| entry.expires_at_ms > now);
+    if store.entries.len() != original_len {
+        write_json_file(path, &store)?;
+    }
+    Ok(())
 }
 
 fn store_cached_decision(
@@ -2788,6 +2810,74 @@ mod tests {
         atomic_write_bytes(&path, br#"{"b":2}"#).unwrap();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"b":2}"#);
+    }
+
+    #[test]
+    fn load_cached_decision_persists_pruned_entries() {
+        let root = std::env::temp_dir().join(format!("veto-bash-cache-prune-{}", now_ms()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("decisions.json");
+        let key = CacheKeyInput {
+            requested_mode: "cloud".into(),
+            api_url: Some("https://api.veto.so".into()),
+            api_key_namespace: Some("tenant".into()),
+            command: "echo ok".into(),
+            cwd: "/tmp".into(),
+            bash_argv: vec!["-c".into(), "echo ok".into()],
+            shell_mode: "command".into(),
+            script_path: None,
+            veto_dir: None,
+        };
+        let expired_key = CacheKeyInput {
+            command: "echo stale".into(),
+            bash_argv: vec!["-c".into(), "echo stale".into()],
+            ..key.clone()
+        };
+        let now = now_ms();
+        let store = DecisionCacheStore {
+            entries: HashMap::from([
+                (
+                    serde_json::to_string(&key).unwrap(),
+                    DecisionCacheEntry {
+                        expires_at_ms: now + 60_000,
+                        value: CachedDecision {
+                            decision: "allow".into(),
+                            reason: None,
+                            denial: None,
+                            source: "cloud".into(),
+                            from_approval_flow: false,
+                        },
+                    },
+                ),
+                (
+                    serde_json::to_string(&expired_key).unwrap(),
+                    DecisionCacheEntry {
+                        expires_at_ms: now - 1,
+                        value: CachedDecision {
+                            decision: "deny".into(),
+                            reason: Some("stale".into()),
+                            denial: None,
+                            source: "cloud".into(),
+                            from_approval_flow: false,
+                        },
+                    },
+                ),
+            ]),
+        };
+        write_json_file(&path, &store).unwrap();
+
+        let loaded = load_cached_decision_from_path(&path, &key).unwrap();
+        assert!(loaded.is_some());
+
+        let persisted: DecisionCacheStore =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(persisted.entries.len(), 1);
+        assert!(persisted
+            .entries
+            .contains_key(&serde_json::to_string(&key).unwrap()));
+        assert!(!persisted
+            .entries
+            .contains_key(&serde_json::to_string(&expired_key).unwrap()));
     }
 
     #[test]
