@@ -1,6 +1,6 @@
 {
   "name": "veto-bash",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Rust-first guarded bash runtime with MCP support",
   "type": "module",
   "bin": {
