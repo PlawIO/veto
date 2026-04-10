@@ -693,6 +693,12 @@ class VetoAdmin:
     def on_event(self, type: str | list[str], callback: Callable[[VetoAdminEvent], None]) -> EventSubscription:
         return self.onEvent(type, callback)
 
+    async def subscribe_events(
+        self, opts: Optional[dict[str, list[str]]] = None
+    ) -> Any:
+        async for event in self.subscribeEvents(opts):
+            yield event
+
     def _get_headers(self) -> dict[str, str]:
         return {
             "Content-Type": "application/json",

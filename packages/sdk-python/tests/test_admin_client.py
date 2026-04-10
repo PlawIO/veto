@@ -674,10 +674,13 @@ class TestVetoAdmin:
         async with run_test_server([("GET", "/v1/events/stream", events)]) as server:
             admin = make_admin(server.base_url)
             seen = [event async for event in admin.subscribeEvents({"types": ["tool.deleted", "policy.updated"]})]
+            snake_seen = [event async for event in admin.subscribe_events({"types": ["tool.deleted"]})]
             await admin.close()
 
         assert [event.type for event in seen] == ["tool.deleted", "policy.updated"]
+        assert [event.type for event in snake_seen] == ["tool.deleted", "policy.updated"]
         assert server.requests[0]["query"] == {"types": "tool.deleted,policy.updated"}
+        assert server.requests[1]["query"] == {"types": "tool.deleted"}
 
         async def sse_error(_request: web.Request, _body: Any) -> web.Response:
             return web.Response(status=503, text="down")
