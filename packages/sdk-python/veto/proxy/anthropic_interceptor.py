@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import json
 from typing import Any, Callable
 
-from veto.proxy.sse import encode_sse_json
+from veto.proxy.sse import encode_json_sse_event
 
 
 @dataclass(slots=True)
@@ -124,7 +124,7 @@ def finalize_anthropic_tool_use(
 def synth_anthropic_blocked_event(reason: str) -> str:
     return "".join(
         [
-            encode_sse_json(
+            encode_json_sse_event(
                 {
                     "type": "content_block_start",
                     "index": 0,
@@ -132,7 +132,7 @@ def synth_anthropic_blocked_event(reason: str) -> str:
                 },
                 event="content_block_start",
             ),
-            encode_sse_json(
+            encode_json_sse_event(
                 {
                     "type": "content_block_delta",
                     "index": 0,
@@ -140,10 +140,10 @@ def synth_anthropic_blocked_event(reason: str) -> str:
                 },
                 event="content_block_delta",
             ),
-            encode_sse_json(
+            encode_json_sse_event(
                 {"type": "content_block_stop", "index": 0},
                 event="content_block_stop",
             ),
-            encode_sse_json({}, event="message_stop"),
+            encode_json_sse_event({}, event="message_stop"),
         ]
     )

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import json
 from typing import Any, Callable
 
-from veto.proxy.sse import encode_sse_done, encode_sse_json
+from veto.proxy.sse import encode_json_sse_event, encode_sse_done
 
 
 @dataclass(slots=True)
@@ -142,4 +142,4 @@ def synth_blocked_event(reason: str, request_id: str | None = None) -> str:
             }
         ],
     }
-    return encode_sse_json(chunk) + encode_sse_done()
+    return encode_json_sse_event(chunk) + encode_sse_done()
