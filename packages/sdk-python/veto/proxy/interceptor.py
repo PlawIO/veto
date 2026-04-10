@@ -96,9 +96,11 @@ def merge_tool_call_deltas(
                 name = ""
                 if isinstance(fn, dict) and isinstance(fn.get("name"), str):
                     name = fn["name"]
+                tool_call_id = tool_call.get("id")
+                resolved_id = tool_call_id if isinstance(tool_call_id, str) else ""
                 pending[idx] = PendingToolCall(
                     index=idx,
-                    id=tool_call.get("id") if isinstance(tool_call.get("id"), str) else "",
+                    id=resolved_id,
                     name=name,
                     arguments_raw="",
                 )

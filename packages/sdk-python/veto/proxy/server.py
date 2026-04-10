@@ -82,11 +82,11 @@ class ProxyServer:
             raise
 
         server = self._site._server
-        if server is None or not server.sockets:
+        port = self._extract_server_port(server)
+        if port is None:
             await self.stop()
             raise RuntimeError("Proxy server failed to start")
-
-        self._port = int(server.sockets[0].getsockname()[1])
+        self._port = port
         return self
 
     async def stop(self) -> None:
@@ -132,6 +132,21 @@ class ProxyServer:
         if self.config.format in ("openai", "anthropic"):
             return self.config.format
         return "anthropic" if "anthropic" in self.config.target else "openai"
+
+    @staticmethod
+    def _extract_server_port(server: object) -> int | None:
+        sockets = getattr(server, "sockets", None)
+        if not isinstance(sockets, (list, tuple)) or not sockets:
+            return None
+        first_socket = sockets[0]
+        get_sock_name = getattr(first_socket, "getsockname", None)
+        if not callable(get_sock_name):
+            return None
+        address = get_sock_name()
+        if not isinstance(address, tuple) or len(address) < 2:
+            return None
+        port = address[1]
+        return port if isinstance(port, int) else None
 
     @staticmethod
     def _sanitize_response_headers(
@@ -330,8 +345,10 @@ class ProxyServer:
             for block in content:
                 if not isinstance(block, dict) or block.get("type") != "tool_use":
                     continue
-                name = block.get("name") if isinstance(block.get("name"), str) else ""
-                arguments = block.get("input") if isinstance(block.get("input"), dict) else {}
+                raw_name = block.get("name")
+                raw_input = block.get("input")
+                name = raw_name if isinstance(raw_name, str) else ""
+                arguments = cast(dict[str, Any], raw_input) if isinstance(raw_input, dict) else {}
                 blocked, block_reason = await self._guard_tool_call(name, arguments)
                 if blocked:
                     break
@@ -436,9 +453,15 @@ class ProxyServer:
                     block_reason = "Tool call blocked by veto policy"
                     for tool_call in pending_tool_calls.values():
                         finalized = finalize_tool_call(tool_call, self._warn)
+                        finalized_name = finalized.get("name")
+                        finalized_arguments = finalized.get("arguments")
+                        if not isinstance(finalized_name, str):
+                            finalized_name = ""
+                        if not isinstance(finalized_arguments, dict):
+                            finalized_arguments = {}
                         blocked, block_reason = await self._guard_tool_call(
-                            str(finalized["name"]),
-                            cast(dict[str, Any], finalized["arguments"]),
+                            finalized_name,
+                            cast(dict[str, Any], finalized_arguments),
                         )
                         if blocked:
                             break
@@ -561,9 +584,15 @@ class ProxyServer:
                     block_reason = "Tool call blocked by veto policy"
                     for tool_use in pending_tool_uses.values():
                         finalized = finalize_anthropic_tool_use(tool_use, self._warn)
+                        finalized_name = finalized.get("name")
+                        finalized_arguments = finalized.get("arguments")
+                        if not isinstance(finalized_name, str):
+                            finalized_name = ""
+                        if not isinstance(finalized_arguments, dict):
+                            finalized_arguments = {}
                         blocked, block_reason = await self._guard_tool_call(
-                            str(finalized["name"]),
-                            cast(dict[str, Any], finalized["arguments"]),
+                            finalized_name,
+                            cast(dict[str, Any], finalized_arguments),
                         )
                         if blocked:
                             break

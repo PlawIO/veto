@@ -88,10 +88,14 @@ def merge_anthropic_tool_use_delta(
         block = data.get("content_block")
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             return
+        block_id = block.get("id")
+        block_name = block.get("name")
+        resolved_id = block_id if isinstance(block_id, str) else ""
+        resolved_name = block_name if isinstance(block_name, str) else ""
         pending[idx] = AnthropicPendingToolUse(
             index=idx,
-            id=block.get("id") if isinstance(block.get("id"), str) else "",
-            name=block.get("name") if isinstance(block.get("name"), str) else "",
+            id=resolved_id,
+            name=resolved_name,
             input_raw="",
         )
     elif event_type == "content_block_delta":
