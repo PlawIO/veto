@@ -158,6 +158,7 @@ from veto.providers.adapters import (
     to_google_tool,
     from_google_function_call,
 )
+from veto.proxy import ProxyConfig, ProxyServer, start_proxy_server
 
 from veto.providers.types import (
     OpenAITool,
@@ -299,6 +300,9 @@ __all__ = [
     "to_anthropic_tools",
     "to_google_tool",
     "from_google_function_call",
+    "ProxyConfig",
+    "ProxyServer",
+    "start_proxy_server",
     # Provider types
     "OpenAITool",
     "OpenAIToolCall",
