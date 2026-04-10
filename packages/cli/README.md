@@ -150,6 +150,23 @@ ANTHROPIC_BASE_URL=http://localhost:8080 python your_agent.py
 
 Start an MCP gateway that enforces Veto policies on tool calls passing through MCP servers.
 
+### Connect
+
+Persist an MCP client entry that points either at the local Veto gateway or at Veto Cloud.
+
+```bash
+veto mcp connect                          # writes mcp.json and initializes ./veto/mcp.config.yaml
+veto mcp connect --output ~/.codeium/mcp_config.json
+veto mcp connect --cloud
+veto mcp connect --cloud --output ~/.cursor/mcp.json --json
+```
+
+| Flag       | Default    | Description                                                         |
+| ---------- | ---------- | ------------------------------------------------------------------- |
+| `--output` | `mcp.json` | MCP client config JSON file to create or update                     |
+| `--config` | --         | Local gateway config path to initialize and reference in local mode |
+| `--cloud`  | `false`    | Persist a remote MCP entry for `https://api.veto.so/v1/mcp/default` |
+
 ### Serve
 
 ```bash
@@ -312,33 +329,34 @@ veto version               # show version
 
 ## All commands
 
-| Command                  | Description                                     |
-| ------------------------ | ----------------------------------------------- |
-| `veto` / `veto studio`   | Interactive Veto Studio (TUI)                   |
-| `veto policy generate`   | Generate policy YAML from natural language      |
-| `veto policy apply`      | Apply policy file locally or to Veto Cloud      |
-| `veto guard check`       | Validate a tool call against current rules      |
-| `veto test`              | Run YAML policy unit tests (deterministic)      |
-| `veto test --gaps`       | Adversarial gap analysis                        |
-| `veto scan`              | Coverage audit -- which tools have rules        |
-| `veto diff`              | Show what changed between policy versions       |
-| `veto intercept`         | HTTP proxy for OpenAI/Anthropic SSE streams     |
-| `veto mcp serve`         | Start MCP gateway with policy enforcement       |
-| `veto mcp doctor`        | Diagnose MCP configuration                      |
-| `veto mcp init`          | Generate starter MCP config                     |
-| `veto learn`             | Generate policies from observed tool calls      |
-| `veto compile`           | Compile NL policy to deterministic YAML via LLM |
-| `veto replay`            | Replay historical calls against a policy        |
-| `veto repl`              | Interactive REPL for rules and testing          |
-| `veto audit verify`      | Verify tamper-evident audit chain               |
-| `veto cloud login`       | Authenticate with Veto Cloud                    |
-| `veto cloud whoami`      | Show cloud context                              |
-| `veto cloud org use`     | Switch org context                              |
-| `veto cloud project use` | Switch project context                          |
-| `veto cloud logout`      | Clear stored credentials                        |
-| `veto init`              | Initialize Veto in a new project                |
-| `veto doctor`            | Diagnostics                                     |
-| `veto version`           | Show version                                    |
+| Command                  | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| `veto` / `veto studio`   | Interactive Veto Studio (TUI)                    |
+| `veto policy generate`   | Generate policy YAML from natural language       |
+| `veto policy apply`      | Apply policy file locally or to Veto Cloud       |
+| `veto guard check`       | Validate a tool call against current rules       |
+| `veto test`              | Run YAML policy unit tests (deterministic)       |
+| `veto test --gaps`       | Adversarial gap analysis                         |
+| `veto scan`              | Coverage audit -- which tools have rules         |
+| `veto diff`              | Show what changed between policy versions        |
+| `veto intercept`         | HTTP proxy for OpenAI/Anthropic SSE streams      |
+| `veto mcp connect`       | Persist MCP client config for local or cloud use |
+| `veto mcp serve`         | Start MCP gateway with policy enforcement        |
+| `veto mcp doctor`        | Diagnose MCP configuration                       |
+| `veto mcp init`          | Generate starter MCP config                      |
+| `veto learn`             | Generate policies from observed tool calls       |
+| `veto compile`           | Compile NL policy to deterministic YAML via LLM  |
+| `veto replay`            | Replay historical calls against a policy         |
+| `veto repl`              | Interactive REPL for rules and testing           |
+| `veto audit verify`      | Verify tamper-evident audit chain                |
+| `veto cloud login`       | Authenticate with Veto Cloud                     |
+| `veto cloud whoami`      | Show cloud context                               |
+| `veto cloud org use`     | Switch org context                               |
+| `veto cloud project use` | Switch project context                           |
+| `veto cloud logout`      | Clear stored credentials                         |
+| `veto init`              | Initialize Veto in a new project                 |
+| `veto doctor`            | Diagnostics                                      |
+| `veto version`           | Show version                                     |
 
 ## Compatibility
 

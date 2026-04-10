@@ -29,7 +29,7 @@ import {
   runPolicyGenerateCommand,
 } from './headless.js';
 import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } from './agent.js';
-import { runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
+import { runMcpConnectCommand, runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
 import { startProxyServer } from '../proxy/server.js';
 
 const VERSION = getCliVersion();
@@ -62,6 +62,7 @@ Canonical Commands:
   cloud org use <id>
   cloud project use <id>
   cloud logout
+  mcp connect [--output <path>] [--config <path>] [--cloud] [--json]
   mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
   mcp doctor [--config <path>] [--json]
   mcp init [--output <path>] [--json]
@@ -111,6 +112,7 @@ Examples:
   veto cloud login
   veto cloud whoami --json
   veto mcp init
+  veto mcp connect --cloud
   veto mcp doctor --json
   veto mcp serve --config ./veto/mcp.config.yaml
   veto replay --policy ./veto/ --log calls.jsonl
@@ -621,6 +623,16 @@ async function runMcpCommand(
     return 0;
   }
 
+  if (subCommand === 'connect') {
+    const result = runMcpConnectCommand({
+      outputPath: values.output,
+      configPath: values.config,
+      cloud: flags.cloud ?? false,
+    });
+    printHeadlessResult(result, asJson);
+    return result.ok ? 0 : 1;
+  }
+
   if (subCommand === 'doctor') {
     const result = await runMcpDoctorCommand({
       configPath: values.config,
@@ -639,6 +651,7 @@ async function runMcpCommand(
 
   if (subCommand === 'help') {
     console.log('Usage:');
+    console.log('  veto mcp connect [--output <path>] [--config <path>] [--cloud] [--json]');
     console.log('  veto mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
     console.log('  veto mcp doctor [--config <path>] [--json]');
     console.log('  veto mcp init [--output <path>] [--json]');
@@ -786,7 +799,6 @@ async function runAgentCompatibility(
 ): Promise<number> {
   const subCommand = positionals[0] ?? 'help';
   const subArgs = positionals.slice(1);
-  console.error('Warning: `veto agent` commands are deprecated. Use `veto policy` and `veto guard` commands.');
 
   switch (subCommand) {
     case 'init': {
@@ -837,7 +849,7 @@ async function runAgentCompatibility(
     }
     case 'help':
     default: {
-      console.log('Agent commands (deprecated):');
+      console.log('Agent commands:');
       console.log('  veto agent init');
       console.log('  veto agent policy add "..."');
       console.log('  veto agent policy list');

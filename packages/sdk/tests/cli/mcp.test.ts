@@ -6,6 +6,7 @@ import {
   createMcpGatewayServerForTesting,
   createDefaultMcpConfigTemplate,
   resolveMcpConfigForTesting,
+  runMcpConnectCommand,
   runMcpDoctorCommand,
   runMcpInitCommand,
 } from '../../src/cli/mcp.js';
@@ -55,6 +56,101 @@ describe('mcp cli commands', () => {
     const second = runMcpInitCommand({ outputPath });
     expect(second.ok).toBe(true);
     expect(second.data?.created).toBe(false);
+  });
+
+  it('persists a local MCP client config entry and initializes the gateway config', () => {
+    const outputPath = join(TMP_ROOT, 'mcp.json');
+    const gatewayConfigPath = join(TMP_ROOT, 'veto', 'mcp.config.yaml');
+    const result = runMcpConnectCommand({
+      outputPath,
+      configPath: gatewayConfigPath,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.mode).toBe('local');
+    expect(result.data?.created).toBe(true);
+    expect(result.data?.updated).toBe(true);
+    expect(result.data?.gatewayConfigPath).toBe(gatewayConfigPath);
+    expect(existsSync(outputPath)).toBe(true);
+    expect(existsSync(gatewayConfigPath)).toBe(true);
+
+    const parsed = JSON.parse(readFileSync(outputPath, 'utf-8')) as {
+      mcpServers?: Record<string, {
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      }>;
+    };
+
+    expect(parsed.mcpServers?.veto?.command).toBe('veto');
+    expect(parsed.mcpServers?.veto?.args).toEqual(['mcp', 'serve', '--config', gatewayConfigPath]);
+    expect(parsed.mcpServers?.veto?.env).toEqual({
+      VETO_API_KEY: '${env:VETO_API_KEY}',
+    });
+
+    const second = runMcpConnectCommand({
+      outputPath,
+      configPath: gatewayConfigPath,
+    });
+    expect(second.ok).toBe(true);
+    expect(second.data?.created).toBe(false);
+    expect(second.data?.updated).toBe(false);
+  });
+
+  it('persists a cloud MCP client config entry when --cloud is enabled', () => {
+    const outputPath = join(TMP_ROOT, 'mcp.json');
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, JSON.stringify({
+      version: 1,
+      mcpServers: {
+        existing: {
+          command: 'node',
+          args: ['existing.js'],
+        },
+      },
+    }, null, 2), 'utf-8');
+
+    const result = runMcpConnectCommand({
+      outputPath,
+      cloud: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.mode).toBe('cloud');
+    expect(result.data?.endpoint).toBe('https://api.veto.so/v1/mcp/default');
+    expect(result.data?.gatewayConfigPath).toBeUndefined();
+
+    const parsed = JSON.parse(readFileSync(outputPath, 'utf-8')) as {
+      version?: number;
+      mcpServers?: Record<string, {
+        command?: string;
+        args?: string[];
+        url?: string;
+        serverUrl?: string;
+        headers?: Record<string, string>;
+      }>;
+    };
+
+    expect(parsed.version).toBe(1);
+    expect(parsed.mcpServers?.existing).toEqual({
+      command: 'node',
+      args: ['existing.js'],
+    });
+    expect(parsed.mcpServers?.veto).toEqual({
+      url: 'https://api.veto.so/v1/mcp/default',
+      serverUrl: 'https://api.veto.so/v1/mcp/default',
+      headers: {
+        'X-Veto-API-Key': '${env:VETO_API_KEY}',
+      },
+    });
+
+    const second = runMcpConnectCommand({
+      outputPath,
+      cloud: true,
+    });
+    expect(second.ok).toBe(true);
+    expect(second.data?.created).toBe(false);
+    expect(second.data?.updated).toBe(false);
   });
 
   it('builds quick serve config from flags when no file exists', () => {

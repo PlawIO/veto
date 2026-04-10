@@ -84,11 +84,13 @@ export {
 export {
   loadMcpConfig,
   createDefaultMcpConfigTemplate,
+  runMcpConnectCommand,
   runMcpInitCommand,
   runMcpDoctorCommand,
   runMcpServeCommand,
   resolveMcpConfigForTesting,
   type McpConfig,
+  type McpConnectOptions,
   type McpServeOptions,
   type McpDoctorOptions,
   type McpInitOptions,

@@ -1,5 +1,11 @@
 # veto (Python SDK)
 
+## 0.13.0
+
+### Minor Changes
+
+- Port `VetoAdmin` to the Python SDK with async admin management client support matching the TypeScript admin surface.
+
 ## 0.12.1
 
 ### Patch Changes
