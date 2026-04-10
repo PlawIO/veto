@@ -7,7 +7,7 @@
 import { Document, Scalar, isMap, stringify as stringifyYaml } from 'yaml';
 
 export interface DefaultConfigTemplateOptions {
-  validationMode?: 'local' | 'api' | 'kernel' | 'custom' | 'cloud';
+  validationMode?: 'local' | 'api' | 'kernel' | 'custom';
   apiKey?: string;
 }
 
@@ -124,7 +124,7 @@ ${baseConfigYaml}
 #   "kernel" - Use local Ollama model
 #   "custom" - Use specified LLM provider
 
-# Cloud configuration defaults (for mode: "api" or "cloud")
+# Cloud configuration defaults (for mode: "api")
 ${cloudConfigYaml}
 
 # Kernel configuration (for mode: "kernel")
@@ -285,6 +285,15 @@ export const GITIGNORE_ADDITIONS = `
 veto/.env
 veto/*.local.yaml
 `;
+
+export function createGitignoreAdditions(apiKey?: string): string {
+  if (!apiKey) {
+    return GITIGNORE_ADDITIONS;
+  }
+
+  return `${GITIGNORE_ADDITIONS}veto/veto.config.yaml
+`;
+}
 
 /**
  * Example .env file content.

@@ -8,9 +8,9 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   createDefaultConfigTemplate,
+  createGitignoreAdditions,
   DEFAULT_RULES,
   createPackRulesTemplate,
-  GITIGNORE_ADDITIONS,
   ENV_EXAMPLE,
 } from './templates.js';
 import {
@@ -35,7 +35,7 @@ export interface InitOptions {
   /** Run in non-interactive agent mode */
   agent?: boolean;
   /** Validation mode selection */
-  mode?: 'local' | 'cloud' | 'kernel' | 'custom';
+  mode?: 'local' | 'api' | 'kernel' | 'custom';
   /** Configure generated config for cloud validation */
   cloud?: boolean;
   /** Write a cloud API key into the generated config */
@@ -109,6 +109,7 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     validationMode: cloud ? 'api' : 'local',
     apiKey,
   });
+  const gitignoreAdditions = createGitignoreAdditions(apiKey);
   let selectedPack: string | undefined;
 
   if (pack !== undefined) {
@@ -168,6 +169,11 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
       writeFileSync(configPath, configTemplate, 'utf-8');
       result.createdFiles.push('veto/veto.config.yaml');
       log('  Created veto/veto.config.yaml', quiet);
+      if (apiKey) {
+        const apiKeyWarning = 'Warning: API key written to veto/veto.config.yaml — do NOT commit this file, or set VETO_API_KEY env var instead.';
+        result.messages.push(apiKeyWarning);
+        log(apiKeyWarning, quiet);
+      }
     } else {
       result.skippedFiles.push('veto/veto.config.yaml');
       log('  Skipped veto/veto.config.yaml (already exists)', quiet);
@@ -202,10 +208,17 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     const gitignorePath = join(baseDir, '.gitignore');
     if (existsSync(gitignorePath)) {
       const gitignoreContent = readFileSync(gitignorePath, 'utf-8');
-      if (!gitignoreContent.includes('veto/.env')) {
+      const missingEntries = gitignoreAdditions
+        .split('\n')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== '' && !entry.startsWith('#') && !gitignoreContent.includes(entry));
+
+      if (missingEntries.length > 0) {
+        const needsTrailingNewline = gitignoreContent.length > 0 && !gitignoreContent.endsWith('\n');
+        const commentPrefix = gitignoreContent.includes('# Veto') ? '' : '# Veto\n';
         writeFileSync(
           gitignorePath,
-          gitignoreContent + GITIGNORE_ADDITIONS,
+          `${gitignoreContent}${needsTrailingNewline ? '\n' : ''}${commentPrefix}${missingEntries.join('\n')}\n`,
           'utf-8'
         );
         result.messages.push('Updated .gitignore with Veto entries');

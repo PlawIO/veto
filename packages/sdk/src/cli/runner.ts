@@ -908,7 +908,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
         quiet: flags.quiet,
         agent: flags.agent,
         yes: flags.yes,
-        mode: values.mode as 'local' | 'cloud' | 'kernel' | 'custom' | undefined,
+        mode: values.mode as 'local' | 'api' | 'kernel' | 'custom' | undefined,
         cloud: flags.cloud,
         apiKey: values['api-key'],
         approval: flags.approval,
