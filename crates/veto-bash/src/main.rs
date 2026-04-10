@@ -118,6 +118,8 @@ struct TerminalDecision {
     #[serde(default)]
     denial: Option<DenialDetails>,
     source: String,
+    #[serde(default, rename = "fromApprovalFlow")]
+    from_approval_flow: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,6 +130,8 @@ struct CachedDecision {
     #[serde(default)]
     denial: Option<DenialDetails>,
     source: String,
+    #[serde(default, rename = "fromApprovalFlow")]
+    from_approval_flow: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1146,6 +1150,7 @@ fn decide(
                     reason: decision.reason,
                     denial: decision.denial,
                     source: "cloud-policy-cache".to_string(),
+                    from_approval_flow: false,
                 });
             }
         }
@@ -1210,12 +1215,14 @@ fn resolve_cloud_response(
             reason: response.reason,
             denial: None,
             source: "cloud".to_string(),
+            from_approval_flow: false,
         }),
         "deny" => Ok(TerminalDecision {
             decision: "deny".to_string(),
             reason: response.reason,
             denial: response.denial,
             source: "cloud".to_string(),
+            from_approval_flow: false,
         }),
         "require_approval" => {
             let approval_id = response.approval_id.ok_or_else(|| {
@@ -1235,6 +1242,7 @@ fn resolve_cloud_response(
                     )),
                     denial: None,
                     source: "cloud".to_string(),
+                    from_approval_flow: true,
                 })
             } else {
                 Ok(TerminalDecision {
@@ -1248,6 +1256,7 @@ fn resolve_cloud_response(
                     )),
                     denial: response.denial,
                     source: "cloud".to_string(),
+                    from_approval_flow: true,
                 })
             }
         }
@@ -1365,6 +1374,7 @@ fn evaluate_cloud_policy(
                 )),
                 denial: None,
                 source: "cloud-policy-cache".to_string(),
+                from_approval_flow: false,
             }));
         }
     }
@@ -1375,6 +1385,7 @@ fn evaluate_cloud_policy(
         reason: None,
         denial: None,
         source: "cloud-policy-cache".to_string(),
+        from_approval_flow: false,
     }))
 }
 
@@ -1680,6 +1691,7 @@ fn evaluate_local_project(
                 reason,
                 denial: None,
                 source: source.to_string(),
+                from_approval_flow: false,
             },
             "require_approval" => TerminalDecision {
                 decision: "deny".to_string(),
@@ -1697,6 +1709,7 @@ fn evaluate_local_project(
                     input: None,
                 }),
                 source: source.to_string(),
+                from_approval_flow: false,
             },
             _ => TerminalDecision {
                 decision: "deny".to_string(),
@@ -1711,6 +1724,7 @@ fn evaluate_local_project(
                     input: None,
                 }),
                 source: source.to_string(),
+                from_approval_flow: false,
             },
         });
     }
@@ -1720,6 +1734,7 @@ fn evaluate_local_project(
         reason: None,
         denial: None,
         source: source.to_string(),
+        from_approval_flow: false,
     })
 }
 
@@ -2134,7 +2149,7 @@ fn run_internal_flush_audit(args: &[String]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, retained.join("\n"))?;
+    rewrite_jsonl_file(&path, &retained)?;
     remove_lock(&lock_path)?;
     Ok(())
 }
@@ -2264,7 +2279,7 @@ fn exec_capture(
 }
 
 fn should_cache_decision(ttl_seconds: u64, decision: &TerminalDecision) -> bool {
-    ttl_seconds > 0 && decision.source != "cloud-fallback-local"
+    ttl_seconds > 0 && decision.source != "cloud-fallback-local" && !decision.from_approval_flow
 }
 
 fn load_cached_decision(key: &CacheKeyInput) -> Result<Option<TerminalDecision>> {
@@ -2284,6 +2299,7 @@ fn load_cached_decision(key: &CacheKeyInput) -> Result<Option<TerminalDecision>>
             reason: entry.value.reason.clone(),
             denial: entry.value.denial.clone(),
             source: "cache".to_string(),
+            from_approval_flow: entry.value.from_approval_flow,
         }));
     }
     Ok(None)
@@ -2307,6 +2323,7 @@ fn store_cached_decision(
                 reason: decision.reason.clone(),
                 denial: decision.denial.clone(),
                 source: decision.source.clone(),
+                from_approval_flow: decision.from_approval_flow,
             },
         },
     );
@@ -2353,6 +2370,20 @@ where
         fs::create_dir_all(parent)?;
     }
     fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    Ok(())
+}
+
+fn rewrite_jsonl_file(path: &Path, lines: &[String]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if lines.is_empty() {
+        fs::write(path, b"")?;
+    } else {
+        let mut content = lines.join("\n");
+        content.push('\n');
+        fs::write(path, content)?;
+    }
     Ok(())
 }
 
@@ -2568,6 +2599,7 @@ mod tests {
             reason: None,
             denial: None,
             source: "cloud-fallback-local".into(),
+            from_approval_flow: false,
         };
 
         assert!(!should_cache_decision(60, &decision));
@@ -2586,6 +2618,55 @@ mod tests {
         assert!(should_retry_approval_status(503));
         assert!(!should_retry_approval_status(403));
         assert!(!should_retry_approval_status(404));
+    }
+
+    #[test]
+    fn approval_flow_allows_are_not_cacheable() {
+        let decision = TerminalDecision {
+            decision: "allow".into(),
+            reason: Some("Approved by human: reviewer".into()),
+            denial: None,
+            source: "cloud".into(),
+            from_approval_flow: true,
+        };
+
+        assert!(!should_cache_decision(60, &decision));
+    }
+
+    #[test]
+    fn rewrite_jsonl_file_preserves_trailing_newline_for_future_appends() {
+        let root = std::env::temp_dir().join(format!("veto-bash-jsonl-{}", now_ms()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("spool.jsonl");
+
+        rewrite_jsonl_file(&path, &[r#"{"a":1}"#.to_string()]).unwrap();
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(file, "{}", r#"{"b":2}"#).unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.ends_with('\n'));
+
+        let lines = contents
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        let first: Value = serde_json::from_str(lines[0]).unwrap();
+        let second: Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(first["a"], json!(1));
+        assert_eq!(second["b"], json!(2));
+    }
+
+    #[test]
+    fn rewrite_jsonl_file_with_empty_lines_writes_empty_file() {
+        let root = std::env::temp_dir().join(format!("veto-bash-jsonl-empty-{}", now_ms()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("spool.jsonl");
+
+        rewrite_jsonl_file(&path, &[]).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
 
     #[test]
