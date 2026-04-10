@@ -1,11 +1,15 @@
 {
   "name": "openclaw-veto",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Veto guardrails plugin for OpenClaw — intercept, validate, and control every agent tool call",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md", "openclaw.plugin.json"],
+  "files": [
+    "dist",
+    "README.md",
+    "openclaw.plugin.json"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -22,7 +26,9 @@
     "agent-authorization"
   ],
   "openclaw": {
-    "extensions": ["./dist/index.js"],
+    "extensions": [
+      "./dist/index.js"
+    ],
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2"
     }
@@ -34,7 +40,9 @@
     "openclaw": ">=2026.3.0"
   },
   "peerDependenciesMeta": {
-    "openclaw": { "optional": true }
+    "openclaw": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
