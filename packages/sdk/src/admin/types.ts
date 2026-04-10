@@ -60,6 +60,7 @@ export interface LlmConfig {
 
 export interface SessionConstraints {
   maxCalls?: number;
+  spendArgument?: string;
   budget?: number;
   cumulativeLimits?: { argumentName: string; maxValue: number }[];
   counters?: Record<string, {

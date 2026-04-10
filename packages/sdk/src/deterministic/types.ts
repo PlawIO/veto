@@ -99,6 +99,9 @@ export interface SessionConstraints {
   /** Maximum number of calls to a single tool per session */
   maxCalls?: number;
 
+  /** Preferred argument name used to track session spend in policy examples */
+  spendArgument?: string;
+
   /**
    * Cumulative argument limits — sums a numeric argument across calls
    * and denies when the total exceeds `maxValue`.

@@ -165,6 +165,26 @@ function normalizeTimeDay(value: string): TimeConditionDay | null {
 }
 
 function normalizeTimeWindowValue(raw: unknown): TimeWindowValue | null {
+  if (typeof raw === 'string') {
+    const [start, end] = raw.split('-');
+    if (!start || !end) {
+      return null;
+    }
+
+    const startMinutes = parseClockToMinutes(start);
+    const endMinutes = parseClockToMinutes(end);
+    if (startMinutes === null || endMinutes === null) {
+      return null;
+    }
+
+    return {
+      start,
+      end,
+      timezone: 'UTC',
+      days: null,
+    };
+  }
+
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
   }
@@ -508,9 +528,17 @@ export function evaluateLegacyCondition(
       if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
       return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue > expected;
     }
+    case 'greater_than_or_equal': {
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue >= expected;
+    }
     case 'less_than': {
       if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
       return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue < expected;
+    }
+    case 'less_than_or_equal': {
+      if (typeof fieldValue !== 'number' || typeof expected !== 'number') return false;
+      return Number.isFinite(fieldValue) && Number.isFinite(expected) && fieldValue <= expected;
     }
     case 'length_greater_than': {
       const fieldLength = getLengthComparableValue(fieldValue);
@@ -539,6 +567,8 @@ export function evaluateLegacyCondition(
         return !expected.some((e: unknown) => typeof e === 'string' ? e.toLowerCase() === lower : e === fieldValue);
       }
       return !expected.includes(fieldValue);
+    case 'not_exists':
+      return fieldValue === undefined;
     case 'within_hours': {
       const result = evaluateTimeWindow(fieldValue, expected);
       return result !== null && result.inScope && result.withinWindow;

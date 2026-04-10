@@ -342,7 +342,25 @@ describe('Policy IR v1 Schema Validator', () => {
       })).toThrow(PolicySchemaError);
     });
 
-    it('should reject non-object values for time operators', () => {
+    it('should accept simple string values for time operators and reject invalid strings', () => {
+      expect(() => validatePolicyIR({
+        version: '1.0',
+        rules: [
+          {
+            id: 'good-time-value',
+            name: 'Good time operator value',
+            action: 'block',
+            conditions: [
+              {
+                field: 'context.time',
+                operator: 'within_hours',
+                value: '09:00-17:00',
+              },
+            ],
+          },
+        ],
+      })).not.toThrow();
+
       expect(() => validatePolicyIR({
         version: '1.0',
         rules: [
@@ -354,7 +372,7 @@ describe('Policy IR v1 Schema Validator', () => {
               {
                 field: 'context.time',
                 operator: 'within_hours',
-                value: '09:00-17:00',
+                value: '9-5',
               },
             ],
           },
