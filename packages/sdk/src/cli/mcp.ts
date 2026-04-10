@@ -6,6 +6,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { HeadlessResult } from './headless.js';
 
 const DEFAULT_CONFIG_PATH = 'veto/mcp.config.yaml';
+const DEFAULT_CONNECT_CONFIG_PATH = 'mcp.json';
+const DEFAULT_CONNECT_SERVER_NAME = 'veto';
+const DEFAULT_CLOUD_MCP_URL = 'https://api.veto.so/v1/mcp/default';
 const DEFAULT_POLICY_SERVER_URL = 'http://localhost:3001';
 const DEFAULT_LISTEN_HOST = '127.0.0.1';
 const DEFAULT_LISTEN_PORT = 8799;
@@ -98,6 +101,13 @@ export interface McpDoctorOptions {
   configPath?: string;
 }
 
+export interface McpConnectOptions {
+  outputPath?: string;
+  configPath?: string;
+  serverName?: string;
+  cloud?: boolean;
+}
+
 export interface McpInitOptions {
   outputPath?: string;
 }
@@ -125,6 +135,20 @@ export interface McpDoctorReport {
 interface ResolvedMcpConfig {
   path: string;
   config: McpConfig;
+}
+
+interface McpClientServerConfig {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  serverUrl?: string;
+  headers?: Record<string, string>;
+}
+
+interface McpClientConfigDocument {
+  mcpServers?: Record<string, McpClientServerConfig>;
+  [key: string]: unknown;
 }
 
 function ok<T>(data: T): HeadlessResult<T> {
@@ -231,6 +255,10 @@ function normalizeConfigPath(pathValue: string | undefined): string {
   return resolve(pathValue ?? DEFAULT_CONFIG_PATH);
 }
 
+function normalizeConnectConfigPath(pathValue: string | undefined): string {
+  return resolve(pathValue ?? DEFAULT_CONNECT_CONFIG_PATH);
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {};
@@ -288,6 +316,10 @@ function optionalHeaders(value: unknown): Record<string, string> | undefined {
   }
 
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function createEnvInterpolation(name: string): string {
+  return `\${env:${name}}`;
 }
 
 function optionalPositiveNumber(value: unknown, fallback: number, fieldName: string): number {
@@ -404,6 +436,55 @@ function loadConfigFromPath(configPath: string): McpConfig {
   const content = readFileSync(configPath, 'utf-8');
   const parsed = parseYaml(content) as unknown;
   return parseConfigDocument(parsed);
+}
+
+function loadMcpClientConfigDocument(configPath: string): McpClientConfigDocument {
+  if (!existsSync(configPath)) {
+    return {};
+  }
+
+  const content = readFileSync(configPath, 'utf-8').trim();
+  if (content.length === 0) {
+    return {};
+  }
+
+  const parsed = JSON.parse(content) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Invalid MCP client config at ${configPath}: expected top-level object`);
+  }
+
+  const document = parsed as Record<string, unknown>;
+  const servers = document.mcpServers;
+  if (servers !== undefined && (!servers || typeof servers !== 'object' || Array.isArray(servers))) {
+    throw new Error(`Invalid MCP client config at ${configPath}: mcpServers must be an object`);
+  }
+
+  return document as McpClientConfigDocument;
+}
+
+function writeMcpClientConfigDocument(configPath: string, document: McpClientConfigDocument): void {
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(document, null, 2) + '\n', 'utf-8');
+}
+
+function createLocalMcpClientServerConfig(configPath: string): McpClientServerConfig {
+  return {
+    command: 'veto',
+    args: ['mcp', 'serve', '--config', configPath],
+    env: {
+      VETO_API_KEY: createEnvInterpolation('VETO_API_KEY'),
+    },
+  };
+}
+
+function createCloudMcpClientServerConfig(): McpClientServerConfig {
+  return {
+    url: DEFAULT_CLOUD_MCP_URL,
+    serverUrl: DEFAULT_CLOUD_MCP_URL,
+    headers: {
+      'X-Veto-API-Key': createEnvInterpolation('VETO_API_KEY'),
+    },
+  };
 }
 
 function parseQuickStdioCommand(upstreamValue: string): { command: string; args: string[] } {
@@ -1402,6 +1483,70 @@ export function runMcpInitCommand(options: McpInitOptions = {}): HeadlessResult<
     });
   } catch (error) {
     return fail('mcp_init_failed', 'Failed to initialize MCP config.', {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export function runMcpConnectCommand(
+  options: McpConnectOptions = {},
+): HeadlessResult<{
+  path: string;
+  serverName: string;
+  created: boolean;
+  updated: boolean;
+  mode: 'local' | 'cloud';
+  endpoint: string;
+  gatewayConfigPath?: string;
+}> {
+  try {
+    const path = normalizeConnectConfigPath(options.outputPath);
+    const serverName = options.serverName?.trim() || DEFAULT_CONNECT_SERVER_NAME;
+    if (!serverName) {
+      throw new Error('MCP server name must be a non-empty string');
+    }
+
+    const document = loadMcpClientConfigDocument(path);
+    const servers = { ...(document.mcpServers ?? {}) };
+    const existing = servers[serverName];
+
+    let nextConfig: McpClientServerConfig;
+    let endpoint: string;
+    let gatewayConfigPath: string | undefined;
+
+    if (options.cloud) {
+      nextConfig = createCloudMcpClientServerConfig();
+      endpoint = DEFAULT_CLOUD_MCP_URL;
+    } else {
+      gatewayConfigPath = normalizeConfigPath(options.configPath);
+      const initResult = runMcpInitCommand({ outputPath: gatewayConfigPath });
+      if (!initResult.ok) {
+        throw new Error(initResult.error?.message ?? 'Failed to initialize MCP gateway config');
+      }
+
+      nextConfig = createLocalMcpClientServerConfig(gatewayConfigPath);
+      endpoint = gatewayConfigPath;
+    }
+
+    const created = existing === undefined;
+    const updated = JSON.stringify(existing ?? null) !== JSON.stringify(nextConfig);
+
+    servers[serverName] = nextConfig;
+    document.mcpServers = servers;
+
+    writeMcpClientConfigDocument(path, document);
+
+    return ok({
+      path,
+      serverName,
+      created,
+      updated,
+      mode: options.cloud ? 'cloud' : 'local',
+      endpoint,
+      gatewayConfigPath,
+    });
+  } catch (error) {
+    return fail('mcp_connect_failed', 'Failed to persist MCP client config.', {
       reason: error instanceof Error ? error.message : String(error),
     });
   }
