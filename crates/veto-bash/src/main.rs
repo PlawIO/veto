@@ -617,90 +617,15 @@ fn run_mcp_serve(args: &[String]) -> Result<()> {
             }
             "tools/call" => {
                 if let Some(id) = id {
-                    let params = message
-                        .get("params")
-                        .and_then(Value::as_object)
-                        .cloned()
-                        .unwrap_or_default();
-                    let tool_name = params
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    if tool_name != "bash_exec" {
-                        write_mcp_message(
-                            &mut writer,
-                            &json!({
-                                "jsonrpc": "2.0",
-                                "id": id,
-                                "error": { "code": -32602, "message": format!("Unknown tool: {tool_name}") }
-                            }),
-                        )?;
-                        continue;
-                    }
-
-                    let args_value = params
-                        .get("arguments")
-                        .and_then(Value::as_object)
-                        .cloned()
-                        .unwrap_or_default();
-                    let bash_argv = args_value
-                        .get("argv")
-                        .and_then(Value::as_array)
-                        .ok_or_else(|| {
-                            anyhow!("tools/call arguments.argv must be an array of strings")
-                        })?
-                        .iter()
-                        .map(|value| {
-                            value
-                                .as_str()
-                                .map(str::to_string)
-                                .ok_or_else(|| anyhow!("argv entries must be strings"))
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    let stdin_text = args_value
-                        .get("stdin")
-                        .and_then(Value::as_str)
-                        .map(str::to_string);
-                    let cwd = args_value
-                        .get("cwd")
-                        .and_then(Value::as_str)
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| current_dir.clone());
-                    let invocation =
-                        resolve_invocation_with_supplied_stdin(&bash_argv, &cwd, stdin_text)?;
-                    let result = execute_guarded_bash(
-                        invocation,
-                        &parsed.options,
-                        cwd,
-                        ExecutionMode::Capture,
-                    )?;
-                    let payload = match result {
-                        GuardedExecutionResult::ExecutedCapture(data) => json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "content": [{
-                                    "type": "text",
-                                    "text": format!("exitCode: {}\nstdout:\n{}\nstderr:\n{}", data.status_code, data.stdout, data.stderr)
-                                }]
-                            }
-                        }),
-                        GuardedExecutionResult::Denied(message) => json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "content": [{ "type": "text", "text": message }],
-                                "isError": true
-                            }
-                        }),
-                        GuardedExecutionResult::ExecutedPassthrough(_) => json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "content": [{ "type": "text", "text": "Passthrough execution is not available in MCP mode." }],
-                                "isError": true
-                            }
-                        }),
+                    let payload = match handle_mcp_tools_call(&message, &id, &parsed, &current_dir)
+                    {
+                        Ok(payload) => payload,
+                        Err(McpCallError::InvalidRequest(message)) => {
+                            mcp_error_response(id.clone(), -32602, &message)
+                        }
+                        Err(McpCallError::ToolFailure(message)) => {
+                            mcp_error_response(id.clone(), -32000, &message)
+                        }
                     };
                     write_mcp_message(&mut writer, &payload)?;
                 }
@@ -721,6 +646,110 @@ fn run_mcp_serve(args: &[String]) -> Result<()> {
     }
 
     Ok(())
+}
+
+enum McpCallError {
+    InvalidRequest(String),
+    ToolFailure(String),
+}
+
+fn handle_mcp_tools_call(
+    message: &Value,
+    id: &Value,
+    parsed: &ParsedWrapperArgs,
+    current_dir: &Path,
+) -> std::result::Result<Value, McpCallError> {
+    let params = message
+        .get("params")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let tool_name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if tool_name != "bash_exec" {
+        return Err(McpCallError::InvalidRequest(format!(
+            "Unknown tool: {tool_name}"
+        )));
+    }
+
+    let args_value = params
+        .get("arguments")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let bash_argv = args_value
+        .get("argv")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            McpCallError::InvalidRequest(
+                "tools/call arguments.argv must be an array of strings".to_string(),
+            )
+        })?
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_string).ok_or_else(|| {
+                McpCallError::InvalidRequest("argv entries must be strings".to_string())
+            })
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let stdin_text = args_value
+        .get("stdin")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let cwd = args_value
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| current_dir.to_path_buf());
+    let invocation = resolve_invocation_with_supplied_stdin(&bash_argv, &cwd, stdin_text)
+        .map_err(|error| McpCallError::InvalidRequest(error.to_string()))?;
+    let result = execute_guarded_bash(invocation, &parsed.options, cwd, ExecutionMode::Capture)
+        .map_err(|error| McpCallError::ToolFailure(error.to_string()))?;
+    Ok(mcp_tools_call_result_response(id.clone(), result))
+}
+
+fn mcp_tools_call_result_response(id: Value, result: GuardedExecutionResult) -> Value {
+    match result {
+        GuardedExecutionResult::ExecutedCapture(data) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "content": [{
+                    "type": "text",
+                    "text": format!("exitCode: {}\nstdout:\n{}\nstderr:\n{}", data.status_code, data.stdout, data.stderr)
+                }]
+            }
+        }),
+        GuardedExecutionResult::Denied(message) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "content": [{ "type": "text", "text": message }],
+                "isError": true
+            }
+        }),
+        GuardedExecutionResult::ExecutedPassthrough(_) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "content": [{ "type": "text", "text": "Passthrough execution is not available in MCP mode." }],
+                "isError": true
+            }
+        }),
+    }
+}
+
+fn mcp_error_response(id: Value, code: i32, message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    })
 }
 
 fn parse_wrapper_args(args: &[String]) -> Result<ParsedWrapperArgs> {
@@ -2557,5 +2586,72 @@ mod tests {
         assert!(should_retry_approval_status(503));
         assert!(!should_retry_approval_status(403));
         assert!(!should_retry_approval_status(404));
+    }
+
+    #[test]
+    fn mcp_tools_call_invalid_argv_returns_request_error() {
+        let parsed = ParsedWrapperArgs {
+            options: WrapperOptions {
+                api_key: None,
+                api_url: DEFAULT_API_URL.to_string(),
+                cache_ttl_seconds: 60,
+                offline: true,
+            },
+            bash_argv: Vec::new(),
+        };
+        let message = json!({
+            "params": {
+                "name": "bash_exec",
+                "arguments": {
+                    "argv": ["-lc", 123]
+                }
+            }
+        });
+
+        let error = handle_mcp_tools_call(&message, &json!(1), &parsed, Path::new("/tmp"))
+            .expect_err("expected invalid request");
+        match error {
+            McpCallError::InvalidRequest(message) => {
+                assert!(message.contains("argv entries must be strings"))
+            }
+            other => panic!("unexpected error: {:?}", other_type_name(&other)),
+        }
+    }
+
+    #[test]
+    fn mcp_tools_call_unknown_tool_returns_request_error() {
+        let parsed = ParsedWrapperArgs {
+            options: WrapperOptions {
+                api_key: None,
+                api_url: DEFAULT_API_URL.to_string(),
+                cache_ttl_seconds: 60,
+                offline: true,
+            },
+            bash_argv: Vec::new(),
+        };
+        let message = json!({
+            "params": {
+                "name": "nope",
+                "arguments": {
+                    "argv": ["-lc", "echo ok"]
+                }
+            }
+        });
+
+        let error = handle_mcp_tools_call(&message, &json!(1), &parsed, Path::new("/tmp"))
+            .expect_err("expected invalid request");
+        match error {
+            McpCallError::InvalidRequest(message) => {
+                assert!(message.contains("Unknown tool"))
+            }
+            other => panic!("unexpected error: {:?}", other_type_name(&other)),
+        }
+    }
+
+    fn other_type_name(error: &McpCallError) -> &'static str {
+        match error {
+            McpCallError::InvalidRequest(_) => "InvalidRequest",
+            McpCallError::ToolFailure(_) => "ToolFailure",
+        }
     }
 }
