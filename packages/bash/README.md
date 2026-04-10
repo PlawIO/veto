@@ -3,12 +3,13 @@
 [![npm](https://img.shields.io/npm/v/veto-bash?color=000000)](https://www.npmjs.com/package/veto-bash)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
-`veto-bash` is a Rust-first guarded bash runtime with MCP support. The npm package in @packages/bash is a thin Node launcher and packaging surface; the hot path lives in the native crate at @crates/veto-bash.
+`veto-bash` is a Rust-first guarded bash runtime with MCP support. The npm package in @packages/bash ships the native runtime plus a small Node helper command; the hot path lives in the native crate at @crates/veto-bash.
 
 ## Architecture
 
 - native runtime owns bash argv parsing, local deterministic evaluation, real bash handoff, approval polling, decision caching, policy SWR refresh, audit spooling, and MCP stdio mode
-- npm package ships the launcher, docs, and the current-platform native binary produced during `pnpm --filter veto-bash build`
+- npm package ships the current-platform native binary produced during `pnpm --filter veto-bash build`
+- the `veto-bash` command is a setup/helper entrypoint; shadowed `bash` should point at the packaged native binary path, not the JS helper
 - inspectable executions fail closed by default
 
 Warm-path overhead is designed around local deterministic evaluation:
@@ -38,10 +39,13 @@ There are no cross-platform prebuilt binaries in this PR yet.
 
 ```bash
 mkdir -p "$HOME/.veto/bin"
-ln -sf "$(command -v veto-bash)" "$HOME/.veto/bin/bash"
+VETO_BASH_NATIVE="$(veto-bash native-path)"
+ln -sf "$VETO_BASH_NATIVE" "$HOME/.veto/bin/bash"
 export PATH="$HOME/.veto/bin:$PATH"
 export VETO_BASH_REAL_BASH=/bin/bash
 ```
+
+`veto-bash native-path` is a one-time helper for setup. After that, intercepted `bash` launches hit the native binary directly with no Node process in front of the hot path.
 
 The runtime resolves the real shell in this order:
 
@@ -62,6 +66,8 @@ bash --veto-api-key "$VETO_API_KEY" ./scripts/deploy.sh staging
 printf 'echo from stdin\n' | bash --veto-api-key "$VETO_API_KEY" -s
 bash --offline -c 'pnpm test'
 ```
+
+If you invoke `veto-bash` directly, it still forwards into the native runtime, but the recommended bash-shadowing setup is the native binary path above so warm command interception stays fully native.
 
 Supported inspectable modes:
 
