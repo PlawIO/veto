@@ -51,7 +51,7 @@ import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import type { KernelClient as KernelClientType } from '../kernel/client.js';
 import type { CustomConfig, CustomToolCall, CustomResponse } from '../custom/types.js';
 import type { CustomClient as CustomClientType } from '../custom/client.js';
-import type { VetoCloudConfig, ApprovalPollOptions, CloudToolRegistration } from '../cloud/types.js';
+import type { VetoCloudConfig, ApprovalData, ApprovalPollOptions, CloudToolRegistration } from '../cloud/types.js';
 import { VetoCloudClient, ApprovalTimeoutError } from '../cloud/client.js';
 import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
@@ -3590,6 +3590,45 @@ export class Veto {
    */
   validateOutput(toolName: string, output: unknown): OutputValidationResult {
     return this.outputValidator.validate(toolName, output);
+  }
+
+  async waitForApproval(
+    approvalId: string,
+    options?: ApprovalPollOptions
+  ): Promise<ApprovalData> {
+    return await this.getCloudClient().pollApproval(approvalId, options ?? this.approvalPollOptions);
+  }
+
+  logToolExecution(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown,
+    context?: {
+      toolCallId?: string;
+      sessionId?: string;
+      agentId?: string;
+      error?: unknown;
+    }
+  ): void {
+    const metadata: Record<string, unknown> = {
+      source: 'tool_execution',
+    };
+
+    if (context?.toolCallId) metadata.toolCallId = context.toolCallId;
+    if (context?.sessionId) metadata.sessionId = context.sessionId;
+    if (context?.agentId) metadata.agentId = context.agentId;
+    if (result !== undefined) metadata.executionResult = result;
+    if (context?.error !== undefined) {
+      metadata.executionError = context.error instanceof Error
+        ? { name: context.error.name, message: context.error.message }
+        : String(context.error);
+    }
+
+    this.historyTracker.record(toolName, args, {
+      decision: 'allow',
+      reason: context?.error === undefined ? 'Tool execution completed' : 'Tool execution failed',
+      metadata,
+    });
   }
 
   /**
