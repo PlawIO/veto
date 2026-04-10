@@ -1,5 +1,17 @@
 # veto-sdk
 
+## 2.5.0
+
+### Minor Changes
+
+- [#187](https://github.com/PlawIO/veto/pull/187) [`15843f1`](https://github.com/PlawIO/veto/commit/15843f13d29fab6eee27353637b369049632e497) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add `veto mcp connect` command for persisting MCP client configuration, supporting both local gateway and Veto Cloud endpoints.
+
+### Patch Changes
+
+- [#186](https://github.com/PlawIO/veto/pull/186) [`3d9c1ec`](https://github.com/PlawIO/veto/commit/3d9c1ec2381d7fb201d636a0715eeb5337d2a162) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Remove the misleading deprecation warning from `veto agent` compatibility commands, which remain the primary entry point for agent workflows.
+
+- [#182](https://github.com/PlawIO/veto/pull/182) [`dfa6240`](https://github.com/PlawIO/veto/commit/dfa6240f8d932473bc9c5e4d2c748811c4f6881d) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add the missing changeset for the already-merged `@veto/crypto-trading` policy pack so the follow-up CI fix passes for PR #179 / SCO-004.
+
 ## 2.4.0
 
 ### Minor Changes
