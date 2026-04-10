@@ -1502,9 +1502,6 @@ export function runMcpConnectCommand(
   try {
     const path = normalizeConnectConfigPath(options.outputPath);
     const serverName = options.serverName?.trim() || DEFAULT_CONNECT_SERVER_NAME;
-    if (!serverName) {
-      throw new Error('MCP server name must be a non-empty string');
-    }
 
     const document = loadMcpClientConfigDocument(path);
     const servers = { ...(document.mcpServers ?? {}) };
@@ -1531,10 +1528,11 @@ export function runMcpConnectCommand(
     const created = existing === undefined;
     const updated = JSON.stringify(existing ?? null) !== JSON.stringify(nextConfig);
 
-    servers[serverName] = nextConfig;
-    document.mcpServers = servers;
-
-    writeMcpClientConfigDocument(path, document);
+    if (created || updated) {
+      servers[serverName] = nextConfig;
+      document.mcpServers = servers;
+      writeMcpClientConfigDocument(path, document);
+    }
 
     return ok({
       path,

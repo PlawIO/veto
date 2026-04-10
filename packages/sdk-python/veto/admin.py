@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Callable, Generic, Literal, Optional, TypeVar
+from typing import Any, AsyncGenerator, Callable, Generic, Literal, Optional, TypeVar
 from urllib.parse import quote, urlencode
 
 import aiohttp
@@ -557,7 +557,7 @@ class VetoAdmin:
             try:
                 async with session.get(
                     url,
-                    headers={**self._get_headers(), "Accept": "text/event-stream"},
+                    headers={"Accept": "text/event-stream"},
                     timeout=None,
                 ) as response:
                     if response.status >= 400 or response.content is None:
@@ -571,7 +571,7 @@ class VetoAdmin:
 
     async def subscribeEvents(
         self, opts: Optional[dict[str, list[str]]] = None
-    ) -> Any:
+    ) -> AsyncGenerator[VetoAdminEvent, None]:
         params: Optional[dict[str, str]] = None
         if opts and opts.get("types"):
             params = {"types": ",".join(opts["types"])}
@@ -580,8 +580,8 @@ class VetoAdmin:
         try:
             async with session.get(
                 url,
-                headers={**self._get_headers(), "Accept": "text/event-stream"},
-                timeout=aiohttp.ClientTimeout(total=self.timeout / 1000),
+                headers={"Accept": "text/event-stream"},
+                timeout=None,
             ) as response:
                 if response.status >= 400:
                     raise VetoAdminError(f"SSE connection failed: {response.status}", response.status)
@@ -695,7 +695,7 @@ class VetoAdmin:
 
     async def subscribe_events(
         self, opts: Optional[dict[str, list[str]]] = None
-    ) -> Any:
+    ) -> AsyncGenerator[VetoAdminEvent, None]:
         async for event in self.subscribeEvents(opts):
             yield event
 
@@ -773,21 +773,30 @@ class VetoAdmin:
         except aiohttp.ClientError as error:
             raise VetoAdminError(str(error), 0) from error
 
-    async def _iter_sse(self, response: aiohttp.ClientResponse) -> Any:
+    async def _iter_sse(self, response: aiohttp.ClientResponse) -> AsyncGenerator[VetoAdminEvent, None]:
         buffer = ""
         async for chunk in response.content.iter_chunked(1024):
             buffer += chunk.decode("utf-8")
             lines = buffer.split("\n")
             buffer = lines.pop() if lines else ""
             for line in lines:
-                if line.startswith("data: "):
-                    payload = line[6:].strip()
-                    if not payload or payload == ":ping":
-                        continue
-                    try:
-                        yield VetoAdminEvent.model_validate(json.loads(payload))
-                    except json.JSONDecodeError:
-                        continue
+                event = self._parse_sse_line(line)
+                if event is not None:
+                    yield event
+        event = self._parse_sse_line(buffer)
+        if event is not None:
+            yield event
+
+    def _parse_sse_line(self, line: str) -> Optional[VetoAdminEvent]:
+        if not line.startswith("data: "):
+            return None
+        payload = line[6:].strip()
+        if not payload or payload == ":ping":
+            return None
+        try:
+            return VetoAdminEvent.model_validate(json.loads(payload))
+        except json.JSONDecodeError:
+            return None
 
 
 def _enc(value: str) -> str:
