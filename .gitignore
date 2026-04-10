@@ -25,6 +25,8 @@ packages/cli/go/veto-*
 # Native binary in bin
 packages/cli/bin/veto
 packages/cli/bin/veto.exe
+crates/*/target/
+target/
 
 # IDE
 .idea/
