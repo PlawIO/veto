@@ -171,6 +171,10 @@
       "types": "./dist/integrations/openai-agents/index.d.ts",
       "import": "./dist/integrations/openai-agents/index.js"
     },
+    "./integrations/openclaw": {
+      "types": "./dist/integrations/openclaw/index.d.ts",
+      "import": "./dist/integrations/openclaw/index.js"
+    },
     "./extractors": {
       "types": "./dist/extractors/index.d.ts",
       "import": "./dist/extractors/index.js"
