@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   createMcpGatewayServerForTesting,
@@ -88,6 +88,7 @@ describe('mcp cli commands', () => {
       VETO_API_KEY: '${env:VETO_API_KEY}',
     });
 
+    chmodSync(outputPath, 0o444);
     const second = runMcpConnectCommand({
       outputPath,
       configPath: gatewayConfigPath,

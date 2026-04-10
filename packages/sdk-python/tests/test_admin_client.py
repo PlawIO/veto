@@ -74,21 +74,59 @@ async def run_test_server(
     runner = web.AppRunner(app)
     await runner.setup()
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-
-    site = web.TCPSite(runner, "127.0.0.1", port)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(socket.SOMAXCONN)
+    sock.setblocking(False)
+    port = sock.getsockname()[1]
+    site = web.SockSite(runner, sock)
     await site.start()
 
     try:
         yield SimpleNamespace(base_url=f"http://127.0.0.1:{port}", requests=requests)
     finally:
         await runner.cleanup()
+        sock.close()
 
 
 def make_admin(base_url: str, timeout: int = 30_000) -> VetoAdmin:
     return VetoAdmin(VetoAdminOptions(apiKey="test-key", baseUrl=base_url, timeout=timeout))
+
+
+class FakeSseContent:
+    def __init__(self, chunks: list[bytes]):
+        self._chunks = chunks
+
+    async def iter_chunked(self, _size: int) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
+
+
+class FakeSseResponse:
+    def __init__(self, chunks: list[bytes], status: int = 200):
+        self.status = status
+        self.content = FakeSseContent(chunks)
+
+
+class FakeSseRequestContext:
+    def __init__(self, response: FakeSseResponse):
+        self._response = response
+
+    async def __aenter__(self) -> FakeSseResponse:
+        return self._response
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None
+
+
+class FakeSseSession:
+    def __init__(self, response: FakeSseResponse):
+        self.response = response
+        self.calls: list[dict[str, Any]] = []
+
+    def get(self, url: str, *, headers: dict[str, str], timeout: Any) -> FakeSseRequestContext:
+        self.calls.append({"url": url, "headers": headers, "timeout": timeout})
+        return FakeSseRequestContext(self.response)
 
 
 class TestVetoAdmin:
@@ -537,7 +575,7 @@ class TestVetoAdmin:
             orgs = await admin.listOrganizations()
             projects = await admin.listProjects({"organizationId": "org_1"})
             snake_orgs = await admin.list_organizations()
-            snake_projects = await admin.list_projects({"organizationId": "org_1"})
+            snake_projects = await admin.list_projects("org_1")
             await admin.close()
 
         assert keys[0]._id == "key_1"
@@ -660,19 +698,59 @@ class TestVetoAdmin:
         assert server.requests[0]["query"] == {"types": "decision.created,approval.pending"}
         assert server.requests[0]["headers"]["Accept"] == "text/event-stream"
 
+    async def test_subscribe_events_uses_accept_header_and_disables_request_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        admin = make_admin("http://example.test", timeout=10)
+        session = FakeSseSession(
+            FakeSseResponse([b'data: {"type":"decision.created","data":{"id":"dec_1"}}'])
+        )
+        monkeypatch.setattr(admin, "_get_session", lambda: session)
+
+        seen = [event async for event in admin.subscribeEvents({"types": ["decision.created"]})]
+
+        assert [event.type for event in seen] == ["decision.created"]
+        assert session.calls == [
+            {
+                "url": "http://example.test/v1/events/stream?types=decision.created",
+                "headers": {"Accept": "text/event-stream"},
+                "timeout": None,
+            }
+        ]
+        await admin.close()
+
+    async def test_iter_sse_flushes_trailing_buffer(self) -> None:
+        admin = make_admin("http://example.test")
+
+        seen = [
+            event
+            async for event in admin._iter_sse(
+                FakeSseResponse(
+                    [
+                        b"data: :ping\n",
+                        b'data: {"type":"decision.created","data":{"id":"dec_1"}}\n',
+                        b"data: malformed\n",
+                        b'data: {"type":"approval.pending","data":{"id":"apr_1"}}',
+                    ]
+                )
+            )
+        ]
+
+        assert [event.type for event in seen] == ["decision.created", "approval.pending"]
+        await admin.close()
+
     async def test_subscribe_events_async_iterator_and_errors(self) -> None:
         async def events(_request: web.Request, _body: Any) -> web.StreamResponse:
             response = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
             await response.prepare(_request)
+            await asyncio.sleep(0.05)
             await response.write(b'data: :ping\n')
             await response.write(b'data: {"type":"tool.deleted","data":{"name":"transfer_funds"}}\n')
             await response.write(b'data: malformed\n')
-            await response.write(b'data: {"type":"policy.updated","data":{"id":"pol_1"}}\n')
+            await response.write(b'data: {"type":"policy.updated","data":{"id":"pol_1"}}')
             await response.write_eof()
             return response
 
         async with run_test_server([("GET", "/v1/events/stream", events)]) as server:
-            admin = make_admin(server.base_url)
+            admin = make_admin(server.base_url, timeout=10)
             seen = [event async for event in admin.subscribeEvents({"types": ["tool.deleted", "policy.updated"]})]
             snake_seen = [event async for event in admin.subscribe_events({"types": ["tool.deleted"]})]
             await admin.close()
@@ -681,6 +759,9 @@ class TestVetoAdmin:
         assert [event.type for event in snake_seen] == ["tool.deleted", "policy.updated"]
         assert server.requests[0]["query"] == {"types": "tool.deleted,policy.updated"}
         assert server.requests[1]["query"] == {"types": "tool.deleted"}
+        assert server.requests[0]["headers"]["Accept"] == "text/event-stream"
+        assert server.requests[0]["headers"]["X-Veto-API-Key"] == "test-key"
+        assert server.requests[0]["headers"]["Content-Type"] == "application/json"
 
         async def sse_error(_request: web.Request, _body: Any) -> web.Response:
             return web.Response(status=503, text="down")
