@@ -1,5 +1,11 @@
 # @veto/python-release
 
+## 0.4.0
+
+### Minor Changes
+
+- [#185](https://github.com/PlawIO/veto/pull/185) [`bd8c579`](https://github.com/PlawIO/veto/commit/bd8c579124fc98fbac6e676b8a1886b10d8bda17) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Port `VetoAdmin` to the Python SDK with async admin management client support matching the TypeScript admin surface.
+
 ## 0.3.1
 
 ### Patch Changes
