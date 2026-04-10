@@ -4,6 +4,7 @@ Integration tests for the Python proxy server.
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -314,6 +315,104 @@ async def test_anthropic_stream_blocked_tool_use(veto_config_dir: str) -> None:
         assert status == 200
         assert "[BLOCKED by veto]" in body
         assert "event: content_block_delta" in body
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_openai_intercept_forces_identity_encoding(veto_config_dir: str) -> None:
+    captured: dict[str, str | None] = {}
+
+    async def upstream_handler(request: web.Request) -> web.StreamResponse | web.Response:
+        accept_encoding = request.headers.get("Accept-Encoding")
+        captured["accept_encoding"] = accept_encoding
+        body = _build_openai_tool_call_sse("delete_file", '{"path":"/etc/hosts"}').encode("utf-8")
+        if accept_encoding != "identity":
+            return web.Response(
+                body=gzip.compress(body),
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Content-Encoding": "gzip",
+                },
+            )
+
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(request)
+        await response.write(body)
+        await response.write_eof()
+        return response
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await start_proxy_server(
+        ProxyConfig(0, upstream_url, 1024 * 1024, veto_config_dir, "openai")
+    )
+
+    try:
+        status, body, _ = await _request_text(
+            server.port,
+            "/v1/chat/completions",
+            {"model": "gpt-4", "stream": True, "messages": []},
+            headers={"Accept-Encoding": "gzip"},
+        )
+        assert status == 200
+        assert captured["accept_encoding"] == "identity"
+        assert "[BLOCKED by veto]" in body
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_intercept_forces_identity_encoding(veto_config_dir: str) -> None:
+    captured: dict[str, str | None] = {}
+
+    async def upstream_handler(request: web.Request) -> web.Response:
+        accept_encoding = request.headers.get("Accept-Encoding")
+        captured["accept_encoding"] = accept_encoding
+        body = json.dumps(
+            {
+                "id": "msg_123",
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "delete_file",
+                        "input": {"path": "/etc/hosts"},
+                    }
+                ],
+                "stop_reason": "tool_use",
+            }
+        ).encode("utf-8")
+        if accept_encoding != "identity":
+            return web.Response(
+                body=gzip.compress(body),
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Encoding": "gzip",
+                },
+            )
+
+        return web.Response(body=body, content_type="application/json")
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await start_proxy_server(
+        ProxyConfig(0, upstream_url, 1024 * 1024, veto_config_dir, "anthropic")
+    )
+
+    try:
+        status, body, _ = await _request_text(
+            server.port,
+            "/v1/messages",
+            {"model": "claude-sonnet-4", "stream": False, "messages": []},
+            headers={"Accept-Encoding": "gzip"},
+        )
+        assert status == 200
+        assert captured["accept_encoding"] == "identity"
+        parsed = json.loads(body)
+        assert "[BLOCKED by veto]" in parsed["content"][0]["text"]
     finally:
         await server.stop()
         await stop_upstream()

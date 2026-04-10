@@ -160,11 +160,15 @@ class ProxyServer:
         self,
         request: web.Request,
         body_length: int,
+        *,
+        intercepting: bool,
     ) -> dict[str, str]:
         target = URL(self.config.target)
         headers = {key: value for key, value in request.headers.items()}
         headers["Host"] = target.authority
         headers.pop("Content-Length", None)
+        if intercepting:
+            headers["Accept-Encoding"] = "identity"
         headers["Content-Length"] = str(body_length)
         return headers
 
@@ -606,7 +610,11 @@ class ProxyServer:
 
         is_stream = parsed_body is not None and parsed_body.get("stream") is True
         upstream_url = self._build_upstream_url(request)
-        upstream_headers = self._build_upstream_headers(request, len(body))
+        upstream_headers = self._build_upstream_headers(
+            request,
+            len(body),
+            intercepting=is_intercept_target,
+        )
 
         try:
             async with session.request(
