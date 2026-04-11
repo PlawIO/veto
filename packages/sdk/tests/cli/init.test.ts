@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, expectTypeOf } from 'vitest';
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { init, isInitialized, getVetoDir } from '../../src/cli/init.js';
+import type { InitOptions } from '../../src/cli/init.js';
+import { createDefaultConfigTemplate } from '../../src/cli/templates.js';
 
 const TEST_DIR = '/tmp/veto-test-' + Date.now();
 
@@ -22,6 +24,19 @@ describe('CLI init', () => {
   });
 
   describe('init', () => {
+    it('should expose only supported validation modes in init options and templates', () => {
+      expectTypeOf<InitOptions['mode']>().toEqualTypeOf<
+        'local' | 'api' | 'kernel' | 'custom' | undefined
+      >();
+      expectTypeOf<Parameters<typeof createDefaultConfigTemplate>[0]>().toEqualTypeOf<
+        | {
+            validationMode?: 'local' | 'api' | 'kernel' | 'custom';
+            apiKey?: string;
+          }
+        | undefined
+      >();
+    });
+
     it('should create veto directory structure', async () => {
       const result = await init({ directory: TEST_DIR, quiet: true });
 
@@ -31,7 +46,7 @@ describe('CLI init', () => {
       expect(existsSync(join(TEST_DIR, 'veto', 'rules'))).toBe(true);
     });
 
-    it('should create config file', async () => {
+    it('should keep local mode by default', async () => {
       await init({ directory: TEST_DIR, quiet: true });
 
       const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
@@ -41,6 +56,71 @@ describe('CLI init', () => {
       expect(content).toContain('version: "1.0"');
       expect(content).toContain('validation:');
       expect(content).toContain('mode: "local"');
+    });
+
+    it('should set api mode when cloud flag is provided', async () => {
+      await init({ directory: TEST_DIR, cloud: true, quiet: true });
+
+      const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
+      const content = readFileSync(configPath, 'utf-8');
+
+      expect(content).toContain('validation:');
+      expect(content).toContain('mode: "api"');
+    });
+
+    it('should write api key while keeping local mode by default', async () => {
+      await init({
+        directory: TEST_DIR,
+        apiKey: 'veto_sk_xxx',
+        quiet: true,
+      });
+
+      const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
+      const content = readFileSync(configPath, 'utf-8');
+
+      expect(content).toContain('mode: "local"');
+      expect(content).toContain('cloud:');
+      expect(content).toContain('apiKey: "veto_sk_xxx"');
+      expect(content).toContain('timeout: 30000');
+      expect(content).toContain('retries: 2');
+      expect(content).toContain('retryDelay: 1000');
+    });
+
+    it('should warn when api key is written to config', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+      try {
+        await init({
+          directory: TEST_DIR,
+          apiKey: 'veto_sk_xxx',
+        });
+
+        const output = consoleSpy.mock.calls.map(([message]) => String(message)).join('\n');
+        expect(output).toContain(
+          'Warning: API key written to veto/veto.config.yaml — do NOT commit this file, or set VETO_API_KEY env var instead.'
+        );
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('should set api mode and write api key when cloud and api-key are provided', async () => {
+      await init({
+        directory: TEST_DIR,
+        cloud: true,
+        apiKey: 'veto_sk_xxx',
+        quiet: true,
+      });
+
+      const configPath = join(TEST_DIR, 'veto', 'veto.config.yaml');
+      const content = readFileSync(configPath, 'utf-8');
+
+      expect(content).toContain('mode: "api"');
+      expect(content).toContain('cloud:');
+      expect(content).toContain('apiKey: "veto_sk_xxx"');
+      expect(content).toContain('timeout: 30000');
+      expect(content).toContain('retries: 2');
+      expect(content).toContain('retryDelay: 1000');
     });
 
     it('should create default rules file', async () => {
@@ -158,6 +238,32 @@ describe('CLI init', () => {
       const content = readFileSync(gitignorePath, 'utf-8');
       expect(content).toContain('node_modules/');
       expect(content).toContain('veto/.env');
+      expect(content).not.toContain('veto/veto.config.yaml');
+    });
+
+    it('should add veto config to .gitignore when api key is provided', async () => {
+      const gitignorePath = join(TEST_DIR, '.gitignore');
+      writeFileSync(gitignorePath, 'node_modules/\n', 'utf-8');
+
+      await init({ directory: TEST_DIR, apiKey: 'veto_sk_xxx', quiet: true });
+
+      const content = readFileSync(gitignorePath, 'utf-8');
+      expect(content).toContain('veto/.env');
+      expect(content).toContain('veto/veto.config.yaml');
+    });
+
+    it('should add only the missing veto config ignore entry for api-key init', async () => {
+      const gitignorePath = join(TEST_DIR, '.gitignore');
+      writeFileSync(gitignorePath, 'node_modules/\n# Veto\nveto/.env\nveto/*.local.yaml\n', 'utf-8');
+
+      await init({ directory: TEST_DIR, apiKey: 'veto_sk_xxx', quiet: true });
+
+      const content = readFileSync(gitignorePath, 'utf-8');
+      const envMatches = content.match(/veto\/\.env/g);
+      const configMatches = content.match(/veto\/veto\.config\.yaml/g);
+
+      expect(envMatches).toHaveLength(1);
+      expect(configMatches).toHaveLength(1);
     });
 
     it('should not duplicate .gitignore entries', async () => {
@@ -169,6 +275,21 @@ describe('CLI init', () => {
 
       const content = readFileSync(gitignorePath, 'utf-8');
       const matches = content.match(/veto\/\.env/g);
+      expect(matches).toHaveLength(1);
+    });
+
+    it('should not duplicate veto config .gitignore entries for api-key init', async () => {
+      const gitignorePath = join(TEST_DIR, '.gitignore');
+      writeFileSync(
+        gitignorePath,
+        'node_modules/\nveto/.env\nveto/veto.config.yaml\n',
+        'utf-8'
+      );
+
+      await init({ directory: TEST_DIR, apiKey: 'veto_sk_xxx', quiet: true });
+
+      const content = readFileSync(gitignorePath, 'utf-8');
+      const matches = content.match(/veto\/veto\.config\.yaml/g);
       expect(matches).toHaveLength(1);
     });
   });

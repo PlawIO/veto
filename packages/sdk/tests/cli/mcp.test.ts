@@ -98,7 +98,7 @@ describe('mcp cli commands', () => {
     expect(second.data?.updated).toBe(false);
   });
 
-  it('persists a cloud MCP client config entry when --cloud is enabled', () => {
+  it('persists an api MCP client config entry when --cloud is enabled', () => {
     const outputPath = join(TMP_ROOT, 'mcp.json');
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, JSON.stringify({
@@ -117,7 +117,7 @@ describe('mcp cli commands', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.data?.mode).toBe('cloud');
+    expect(result.data?.mode).toBe('api');
     expect(result.data?.endpoint).toBe('https://api.veto.so/v1/mcp/default');
     expect(result.data?.gatewayConfigPath).toBeUndefined();
 

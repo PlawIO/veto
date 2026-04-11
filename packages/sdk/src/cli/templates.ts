@@ -4,34 +4,128 @@
  * @module cli/templates
  */
 
+import { Document, Scalar, isMap, stringify as stringifyYaml } from 'yaml';
+
+export interface DefaultConfigTemplateOptions {
+  validationMode?: 'local' | 'api' | 'kernel' | 'custom';
+  apiKey?: string;
+}
+
+interface DefaultConfigShape {
+  [key: string]: unknown;
+}
+
+function setQuotedScalar(
+  document: Document,
+  path: string[]
+): void {
+  let current: unknown = document.contents;
+
+  for (let index = 0; index < path.length; index += 1) {
+    if (!current || !isMap(current)) {
+      return;
+    }
+
+    const pair = current.items.find((entry) => {
+      const key = entry.key;
+      return key instanceof Scalar && key.value === path[index];
+    });
+
+    if (!pair) {
+      return;
+    }
+
+    if (index === path.length - 1) {
+      if (pair.value instanceof Scalar) {
+        pair.value.type = Scalar.QUOTE_DOUBLE;
+      }
+      return;
+    }
+
+    current = pair.value;
+  }
+}
+
+function createYamlSection(
+  data: DefaultConfigShape,
+  quotedPaths: string[][]
+): string {
+  const document = new Document(data);
+
+  for (const path of quotedPaths) {
+    setQuotedScalar(document, path);
+  }
+
+  return stringifyYaml(document).trimEnd();
+}
+
 /**
  * Default veto.config.yaml content.
  */
-export const DEFAULT_CONFIG = `# Veto Configuration
-# See README.md for documentation
-
-version: "1.0"
-
-# Operating mode:
-#   "strict" - Block tool calls when validation fails
-#   "log"    - Only log validation failures, allow calls to proceed
-mode: "strict"
-
-# Validation mode:
-#   "local"  - Evaluate YAML rules locally (default, zero network calls)
-#   "cloud"  - Use Veto Cloud API (set VETO_API_KEY)
-#   "kernel" - Use local Ollama model
-#   "custom" - Use specified LLM provider
-validation:
-  mode: "local"
-
-# Cloud configuration (for mode: "cloud")
-# cloud:
+export function createDefaultConfigTemplate(
+  options: DefaultConfigTemplateOptions = {}
+): string {
+  const validationMode = options.validationMode ?? 'local';
+  const baseConfigYaml = createYamlSection(
+    {
+      version: '1.0',
+      mode: 'strict',
+      validation: {
+        mode: validationMode,
+      },
+    },
+    [['version'], ['mode'], ['validation', 'mode']]
+  );
+  const cloudConfigYaml = options.apiKey === undefined
+    ? `# cloud:
 #   # apiKey: "veto_..."  # Or set VETO_API_KEY env var
 #   # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted
 #   timeout: 30000
 #   retries: 2
-#   retryDelay: 1000
+#   retryDelay: 1000`
+    : `${createYamlSection(
+        {
+          cloud: {
+            apiKey: options.apiKey,
+            timeout: 30000,
+            retries: 2,
+            retryDelay: 1000,
+          },
+        },
+        [['cloud', 'apiKey']]
+      )}
+  # baseUrl: "https://api.veto.so"  # Set to your endpoint for self-hosted`;
+  const loggingYaml = createYamlSection(
+    {
+      logging: {
+        level: 'info',
+      },
+    },
+    [['logging', 'level']]
+  );
+  const rulesYaml = createYamlSection(
+    {
+      rules: {
+        directory: './rules',
+        recursive: true,
+      },
+    },
+    [['rules', 'directory']]
+  );
+
+  return `# Veto Configuration
+# See README.md for documentation
+
+${baseConfigYaml}
+
+# Validation mode notes:
+#   "local"  - Evaluate YAML rules locally (default, zero network calls)
+#   "api"    - Use Veto Cloud API or an external HTTP validation API
+#   "kernel" - Use local Ollama model
+#   "custom" - Use specified LLM provider
+
+# Cloud configuration defaults (for mode: "api")
+${cloudConfigYaml}
 
 # Kernel configuration (for mode: "kernel")
 # kernel:
@@ -60,13 +154,10 @@ validation:
 #     reasonField: "reason"
 
 # Logging
-logging:
-  level: "info"  # debug, info, warn, error, silent
+${loggingYaml}  # debug, info, warn, error, silent
 
 # Rules configuration
-rules:
-  directory: "./rules"
-  recursive: true
+${rulesYaml}
 
 # Veto Studio configuration
 # studio:
@@ -81,6 +172,9 @@ rules:
 #   renderer:
 #     preferred: "auto" # auto | ink | opentui | ansi
 `;
+}
+
+export const DEFAULT_CONFIG = createDefaultConfigTemplate();
 
 /**
  * Default rules/defaults.yaml content.
@@ -191,6 +285,15 @@ export const GITIGNORE_ADDITIONS = `
 veto/.env
 veto/*.local.yaml
 `;
+
+export function createGitignoreAdditions(apiKey?: string): string {
+  if (!apiKey) {
+    return GITIGNORE_ADDITIONS;
+  }
+
+  return `${GITIGNORE_ADDITIONS}veto/veto.config.yaml
+`;
+}
 
 /**
  * Example .env file content.
