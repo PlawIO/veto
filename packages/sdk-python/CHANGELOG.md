@@ -1,5 +1,12 @@
 # veto (Python SDK)
 
+## 0.14.0
+
+### Minor Changes
+
+- Fix MCP connect no-op rewrites and Python admin SSE streaming behavior.
+- Add an aiohttp-based Python proxy server with OpenAI and Anthropic SSE interception helpers.
+
 ## 0.13.0
 
 ### Minor Changes

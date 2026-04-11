@@ -1,5 +1,15 @@
 # @veto/python-release
 
+## 0.5.0
+
+### Minor Changes
+
+- [#188](https://github.com/PlawIO/veto/pull/188) [`29c5123`](https://github.com/PlawIO/veto/commit/29c512337b7db8b7590c14f395706d9e97c11c70) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add an aiohttp-based Python proxy server with OpenAI and Anthropic SSE interception helpers.
+
+### Patch Changes
+
+- [#190](https://github.com/PlawIO/veto/pull/190) [`c76d142`](https://github.com/PlawIO/veto/commit/c76d142d8273a0a3ea526847c8ed71ebe29c0717) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix MCP connect no-op rewrites and Python admin SSE streaming behavior.
+
 ## 0.4.0
 
 ### Minor Changes
