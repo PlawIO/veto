@@ -1,5 +1,13 @@
 # veto-sdk
 
+## 2.5.1
+
+### Patch Changes
+
+- [#190](https://github.com/PlawIO/veto/pull/190) [`c76d142`](https://github.com/PlawIO/veto/commit/c76d142d8273a0a3ea526847c8ed71ebe29c0717) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Fix MCP connect no-op rewrites and Python admin SSE streaming behavior.
+
+- [#189](https://github.com/PlawIO/veto/pull/189) [`95c6f1e`](https://github.com/PlawIO/veto/commit/95c6f1eab3e203343a51731ada996c1140cc1bb1) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add `veto init --cloud` and `--api-key` flags so cloud validation mode and credentials can be scaffolded in one command for PLW-201 / GH #263.
+
 ## 2.5.0
 
 ### Minor Changes
