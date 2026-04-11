@@ -304,10 +304,14 @@ function getZonedDayAndMinute(
     if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
       return null;
     }
+    const normalizedHour = hour === 24 ? 0 : hour;
+    if (normalizedHour < 0 || normalizedHour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
 
     return {
       day,
-      minuteOfDay: (hour * 60) + minute,
+      minuteOfDay: (normalizedHour * 60) + minute,
     };
   } catch {
     return null;

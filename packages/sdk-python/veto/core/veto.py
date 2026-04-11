@@ -325,6 +325,9 @@ class Veto:
 
         self._logger.info("Veto initialized successfully")
 
+    async def close(self) -> None:
+        await self._cloud_client.close()
+
     @classmethod
     async def init(cls, options: Optional[VetoOptions] = None) -> "Veto":
         """

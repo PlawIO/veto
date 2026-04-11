@@ -2,17 +2,55 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Callable, Generic, Literal, Optional, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Callable,
+    ClassVar,
+    Generic,
+    Literal,
+    Optional,
+    TypeVar,
+)
 from urllib.parse import quote, urlencode
 
 import aiohttp
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    BaseModelType = TypeVar("BaseModelType", bound="BaseModel")
+
+    class BaseModel:
+        model_config: ClassVar[object]
+
+        def __init__(self, **data: Any) -> None: ...
+
+        @classmethod
+        def model_validate(cls: type[BaseModelType], obj: object) -> BaseModelType: ...
+
+        def model_dump(
+            self,
+            *,
+            by_alias: bool = False,
+            exclude_none: bool = False,
+        ) -> dict[str, Any]: ...
+
+    class AliasChoices:
+        def __init__(self, *choices: str) -> None: ...
+
+    class ConfigDict(dict[str, object]):
+        pass
+
+    def Field(*args: Any, **kwargs: Any) -> Any: ...
+else:
+    from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 DEFAULT_BASE_URL = "https://api.veto.so"
 DEFAULT_TIMEOUT = 30_000
 
 JsonDict = dict[str, Any]
 T = TypeVar("T")
+ModelType = TypeVar("ModelType", bound="AdminModel")
 
 
 class VetoAdminError(Exception):
@@ -371,6 +409,20 @@ class VetoAdmin:
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         await self.close()
+
+    async def _request_model(
+        self,
+        model: type[ModelType],
+        method: str,
+        path: str,
+        *,
+        params: Optional[dict[str, str]] = None,
+        body: Optional[dict[str, Any]] = None,
+    ) -> ModelType:
+        response = await self._request(method, path, params=params, body=body)
+        if response is None:
+            raise VetoAdminError(f"{method} {path} returned no body", 0)
+        return model.model_validate(response)
 
     async def listPolicies(self, opts: Optional[dict[str, str]] = None) -> list[Policy]:
         params = _compact_query(opts)

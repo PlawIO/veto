@@ -233,16 +233,14 @@ describe('evaluateCondition', () => {
   });
 
   it('within_hours supports structured TimeWindowValue', () => {
-    const now = new Date();
-    const h = now.getUTCHours();
-    const nextH = (h + 2) % 24;
+    const now = new Date('2026-01-15T00:30:00.000Z');
     expect(evaluateCondition(
       {
         field: 'x',
         operator: 'within_hours',
         value: {
-          start: `${String(h).padStart(2, '0')}:00`,
-          end: `${String(nextH).padStart(2, '0')}:00`,
+          start: '00:00',
+          end: '02:00',
           timezone: 'UTC',
         },
       },
