@@ -148,6 +148,17 @@ def synth_anthropic_blocked_event(reason: str) -> str:
                 {"type": "content_block_stop", "index": 0},
                 event="content_block_stop",
             ),
+            encode_json_sse_event(
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "stop_reason": "end_turn",
+                        "stop_sequence": None,
+                    },
+                    "usage": {"output_tokens": 0},
+                },
+                event="message_delta",
+            ),
             encode_json_sse_event({}, event="message_stop"),
         ]
     )

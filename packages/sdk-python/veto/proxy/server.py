@@ -4,6 +4,7 @@ Aiohttp-based Veto intercept proxy.
 
 from __future__ import annotations
 
+import asyncio
 import codecs
 import json
 from typing import Any, cast
@@ -52,6 +53,10 @@ class ProxyServer:
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._port: int | None = None
+        self._active_requests = 0
+        self._active_requests_drained = asyncio.Event()
+        self._active_requests_drained.set()
+        self._stopping = False
 
     @property
     def port(self) -> int:
@@ -67,6 +72,9 @@ class ProxyServer:
         if self.is_running:
             return self
 
+        self._stopping = False
+        self._active_requests = 0
+        self._active_requests_drained.set()
         self._veto = await Veto.init(VetoOptions(config_dir=self.config.config_dir))
         self._session = aiohttp.ClientSession(auto_decompress=False)
         self._app = web.Application()
@@ -90,19 +98,26 @@ class ProxyServer:
         return self
 
     async def stop(self) -> None:
+        self._stopping = True
+
+        if self._site is not None:
+            await self._site.stop()
+        self._site = None
+
+        if self._runner is not None:
+            await self._runner.shutdown()
+            await self._active_requests_drained.wait()
+            await self._runner.cleanup()
+        self._runner = None
+        self._app = None
+        self._port = None
+
         if self._session is not None and not self._session.closed:
             await self._session.close()
         self._session = None
 
-        if self._runner is not None:
-            await self._runner.cleanup()
-        self._runner = None
-        self._site = None
-        self._app = None
-        self._port = None
-
         if self._veto is not None:
-            await self._veto._cloud_client.close()
+            await self._veto.close()
         self._veto = None
 
     async def close(self) -> None:
@@ -180,12 +195,42 @@ class ProxyServer:
     ) -> dict[str, str]:
         target = URL(self.config.target)
         headers = {key: value for key, value in request.headers.items()}
+        connection_header = request.headers.get("Connection", "")
+        connection_tokens = {
+            token.strip().lower()
+            for token in connection_header.split(",")
+            if token.strip()
+        }
+        strip_headers = HOP_BY_HOP_HEADERS | connection_tokens | {"proxy-connection"}
+        headers = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in strip_headers
+        }
         headers["Host"] = target.authority
         headers.pop("Content-Length", None)
         if intercepting:
             headers["Accept-Encoding"] = "identity"
         headers["Content-Length"] = str(body_length)
         return headers
+
+    @staticmethod
+    def _is_intercept_target(path: str, fmt: ResolvedProxyFormat) -> bool:
+        if fmt == "anthropic":
+            return path == "/v1/messages"
+        return path.endswith("/chat/completions")
+
+    async def _track_request_start(self) -> bool:
+        if self._stopping:
+            return False
+        self._active_requests += 1
+        self._active_requests_drained.clear()
+        return True
+
+    def _track_request_finish(self) -> None:
+        self._active_requests = max(0, self._active_requests - 1)
+        if self._active_requests == 0:
+            self._active_requests_drained.set()
 
     @staticmethod
     async def _read_request_body(request: web.Request) -> bytes | None:
@@ -397,7 +442,6 @@ class ProxyServer:
         buffered_lines: list[str] = []
         buffered_bytes = 0
         mode = "passthrough"
-        buffer_overflowed = False
 
         async def write_line(line: str) -> None:
             await response.write((line + "\n").encode("utf-8"))
@@ -409,78 +453,87 @@ class ProxyServer:
             buffered_lines = []
             buffered_bytes = 0
 
+        async def block_stream(reason: str) -> None:
+            nonlocal mode, buffered_lines, buffered_bytes
+            buffered_lines = []
+            buffered_bytes = 0
+            mode = "blocked"
+            await response.write(synth_blocked_event(reason).encode("utf-8"))
+
+        async def process_line(raw_line: str) -> None:
+            nonlocal mode, buffered_bytes, buffered_lines
+            line = raw_line[:-1] if raw_line.endswith("\r") else raw_line
+            parsed = parse_sse_line(line)
+
+            if mode == "blocked":
+                return
+
+            if parsed.done:
+                if mode == "buffer":
+                    await flush_buffer()
+                await response.write(b"data: [DONE]\n\n")
+                return
+
+            if mode == "overflow":
+                await write_line(line)
+                return
+
+            if mode == "passthrough":
+                if parsed.has_tool_calls:
+                    mode = "buffer"
+                else:
+                    await write_line(line)
+                    return
+
+            if parsed.data is not None:
+                merge_tool_call_deltas(pending_tool_calls, parsed.data)
+
+            buffered_lines.append(line)
+            buffered_bytes += len(line.encode("utf-8"))
+
+            if buffered_bytes > self.config.max_buffer_bytes:
+                self._warn("[veto intercept] Buffer limit exceeded — blocking stream")
+                await block_stream("Tool call blocked by veto policy")
+                return
+
+            if parsed.finish_reason_tool_calls:
+                blocked = False
+                block_reason = "Tool call blocked by veto policy"
+                for tool_call in pending_tool_calls.values():
+                    finalized = finalize_tool_call(tool_call, self._warn)
+                    finalized_name = finalized.get("name")
+                    finalized_arguments = finalized.get("arguments")
+                    if not isinstance(finalized_name, str):
+                        finalized_name = ""
+                    if not isinstance(finalized_arguments, dict):
+                        finalized_arguments = {}
+                    blocked, block_reason = await self._guard_tool_call(
+                        finalized_name,
+                        cast(dict[str, Any], finalized_arguments),
+                    )
+                    if blocked:
+                        break
+
+                if blocked:
+                    await block_stream(block_reason)
+                else:
+                    await flush_buffer()
+                    mode = "passthrough"
+                pending_tool_calls.clear()
+
         async for raw_chunk in upstream.content.iter_chunked(65536):
             partial += decoder.decode(raw_chunk)
             lines = partial.split("\n")
             partial = lines.pop() if lines else ""
 
             for raw_line in lines:
-                line = raw_line[:-1] if raw_line.endswith("\r") else raw_line
-                parsed = parse_sse_line(line)
-
-                if parsed.done:
-                    if mode == "buffer":
-                        await flush_buffer()
-                    await response.write(b"data: [DONE]\n\n")
-                    continue
-
-                if mode == "overflow":
-                    await write_line(line)
-                    continue
-
-                if mode == "passthrough":
-                    if parsed.has_tool_calls:
-                        mode = "buffer"
-                    else:
-                        await write_line(line)
-                        continue
-
-                if parsed.data is not None:
-                    merge_tool_call_deltas(pending_tool_calls, parsed.data)
-
-                buffered_lines.append(line)
-                buffered_bytes += len(line.encode("utf-8"))
-
-                if buffered_bytes > self.config.max_buffer_bytes:
-                    buffer_overflowed = True
-                    mode = "overflow"
-                    await flush_buffer()
-                    self._warn("[veto intercept] Buffer limit exceeded — flushing without validation")
-                    continue
-
-                if parsed.finish_reason_tool_calls:
-                    blocked = False
-                    block_reason = "Tool call blocked by veto policy"
-                    for tool_call in pending_tool_calls.values():
-                        finalized = finalize_tool_call(tool_call, self._warn)
-                        finalized_name = finalized.get("name")
-                        finalized_arguments = finalized.get("arguments")
-                        if not isinstance(finalized_name, str):
-                            finalized_name = ""
-                        if not isinstance(finalized_arguments, dict):
-                            finalized_arguments = {}
-                        blocked, block_reason = await self._guard_tool_call(
-                            finalized_name,
-                            cast(dict[str, Any], finalized_arguments),
-                        )
-                        if blocked:
-                            break
-
-                    if blocked:
-                        buffered_lines = []
-                        buffered_bytes = 0
-                        await response.write(synth_blocked_event(block_reason).encode("utf-8"))
-                    else:
-                        await flush_buffer()
-
-                    mode = "passthrough"
-                    pending_tool_calls.clear()
+                await process_line(raw_line)
 
         partial += decoder.decode(b"", final=True)
-        if partial.strip():
-            await response.write((partial + "\n").encode("utf-8"))
+        if partial:
+            await process_line(partial)
 
-        if mode == "buffer" and not buffer_overflowed:
+        if mode == "buffer":
             await flush_buffer()
 
         await response.write_eof()
@@ -503,7 +556,6 @@ class ProxyServer:
         buffered_chunks: list[str] = []
         buffered_bytes = 0
         mode = "passthrough"
-        buffer_overflowed = False
         tool_use_indexes: set[int] = set()
         event_line_buffer: list[str] = []
 
@@ -513,6 +565,99 @@ class ProxyServer:
                 await response.write(chunk.encode("utf-8"))
             buffered_chunks = []
             buffered_bytes = 0
+
+        async def validate_pending_tool_uses() -> tuple[bool, str]:
+            blocked = False
+            block_reason = "Tool call blocked by veto policy"
+            for tool_use in pending_tool_uses.values():
+                finalized = finalize_anthropic_tool_use(tool_use, self._warn)
+                finalized_name = finalized.get("name")
+                finalized_arguments = finalized.get("arguments")
+                if not isinstance(finalized_name, str):
+                    finalized_name = ""
+                if not isinstance(finalized_arguments, dict):
+                    finalized_arguments = {}
+                blocked, block_reason = await self._guard_tool_call(
+                    finalized_name,
+                    cast(dict[str, Any], finalized_arguments),
+                )
+                if blocked:
+                    break
+            return blocked, block_reason
+
+        async def block_stream(reason: str) -> None:
+            nonlocal mode, buffered_chunks, buffered_bytes
+            buffered_chunks = []
+            buffered_bytes = 0
+            mode = "blocked"
+            await response.write(synth_anthropic_blocked_event(reason).encode("utf-8"))
+
+        async def process_event_lines(lines: list[str]) -> None:
+            nonlocal mode, buffered_bytes, buffered_chunks, event_line_buffer
+            if not lines:
+                if mode == "passthrough":
+                    await response.write(b"\n")
+                return
+
+            if mode == "blocked":
+                return
+
+            sse_block = "\n".join(lines) + "\n\n"
+            parsed = parse_anthropic_sse_lines(lines)
+
+            if parsed.event_type == "content_block_start" and parsed.data is not None:
+                block = parsed.data.get("content_block")
+                index = parsed.data.get("index")
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and isinstance(index, int)
+                ):
+                    tool_use_indexes.add(index)
+
+            event_index = parsed.data.get("index") if isinstance(parsed.data, dict) else None
+            is_tool_use_event = parsed.has_tool_use or (
+                parsed.tool_use_stop
+                and isinstance(event_index, int)
+                and event_index in tool_use_indexes
+            )
+
+            if mode == "overflow":
+                await response.write(sse_block.encode("utf-8"))
+                return
+
+            if mode == "passthrough":
+                if is_tool_use_event:
+                    mode = "buffer"
+                else:
+                    await response.write(sse_block.encode("utf-8"))
+                    return
+
+            if parsed.data is not None and parsed.event_type is not None:
+                merge_anthropic_tool_use_delta(
+                    pending_tool_uses,
+                    parsed.data,
+                    parsed.event_type,
+                )
+
+            buffered_chunks.append(sse_block)
+            buffered_bytes += len(sse_block.encode("utf-8"))
+
+            if buffered_bytes > self.config.max_buffer_bytes:
+                self._warn("[veto intercept] Buffer limit exceeded — blocking stream")
+                await block_stream("Tool call blocked by veto policy")
+                return
+
+            if parsed.message_stop:
+                blocked, block_reason = await validate_pending_tool_uses()
+                if blocked:
+                    await block_stream(block_reason)
+                else:
+                    await flush_buffer()
+
+                mode = "passthrough"
+                pending_tool_uses.clear()
+                tool_use_indexes.clear()
 
         async for raw_chunk in upstream.content.iter_chunked(65536):
             partial += decoder.decode(raw_chunk)
@@ -525,127 +670,56 @@ class ProxyServer:
                     event_line_buffer.append(line)
                     continue
 
-                if not event_line_buffer:
-                    if mode == "passthrough":
-                        await response.write(b"\n")
-                    continue
-
-                sse_block = "\n".join(event_line_buffer) + "\n\n"
-                parsed = parse_anthropic_sse_lines(event_line_buffer)
+                await process_event_lines(event_line_buffer)
                 event_line_buffer = []
 
-                if parsed.event_type == "content_block_start" and parsed.data is not None:
-                    block = parsed.data.get("content_block")
-                    index = parsed.data.get("index")
-                    if (
-                        isinstance(block, dict)
-                        and block.get("type") == "tool_use"
-                        and isinstance(index, int)
-                    ):
-                        tool_use_indexes.add(index)
-
-                event_index = parsed.data.get("index") if isinstance(parsed.data, dict) else None
-                is_tool_use_event = parsed.has_tool_use or (
-                    parsed.tool_use_stop
-                    and isinstance(event_index, int)
-                    and event_index in tool_use_indexes
-                )
-
-                if mode == "overflow":
-                    await response.write(sse_block.encode("utf-8"))
-                    continue
-
-                if mode == "passthrough":
-                    if is_tool_use_event:
-                        mode = "buffer"
-                    else:
-                        await response.write(sse_block.encode("utf-8"))
-                        continue
-
-                if parsed.data is not None and parsed.event_type is not None:
-                    merge_anthropic_tool_use_delta(
-                        pending_tool_uses,
-                        parsed.data,
-                        parsed.event_type,
-                    )
-
-                buffered_chunks.append(sse_block)
-                buffered_bytes += len(sse_block.encode("utf-8"))
-
-                if buffered_bytes > self.config.max_buffer_bytes:
-                    buffer_overflowed = True
-                    mode = "overflow"
-                    await flush_buffer()
-                    self._warn("[veto intercept] Buffer limit exceeded — flushing without validation")
-                    continue
-
-                if parsed.message_stop:
-                    blocked = False
-                    block_reason = "Tool call blocked by veto policy"
-                    for tool_use in pending_tool_uses.values():
-                        finalized = finalize_anthropic_tool_use(tool_use, self._warn)
-                        finalized_name = finalized.get("name")
-                        finalized_arguments = finalized.get("arguments")
-                        if not isinstance(finalized_name, str):
-                            finalized_name = ""
-                        if not isinstance(finalized_arguments, dict):
-                            finalized_arguments = {}
-                        blocked, block_reason = await self._guard_tool_call(
-                            finalized_name,
-                            cast(dict[str, Any], finalized_arguments),
-                        )
-                        if blocked:
-                            break
-
-                    if blocked:
-                        buffered_chunks = []
-                        buffered_bytes = 0
-                        await response.write(synth_anthropic_blocked_event(block_reason).encode("utf-8"))
-                    else:
-                        await flush_buffer()
-
-                    mode = "passthrough"
-                    pending_tool_uses.clear()
-                    tool_use_indexes.clear()
-
         partial += decoder.decode(b"", final=True)
-        if partial.strip():
-            await response.write((partial + "\n").encode("utf-8"))
+        if partial:
+            event_line_buffer.append(partial[:-1] if partial.endswith("\r") else partial)
+        if event_line_buffer:
+            await process_event_lines(event_line_buffer)
+            event_line_buffer = []
 
-        if mode == "buffer" and not buffer_overflowed:
-            await flush_buffer()
+        if mode == "buffer":
+            blocked, block_reason = await validate_pending_tool_uses()
+            if blocked:
+                await block_stream(block_reason)
+            else:
+                await flush_buffer()
 
         await response.write_eof()
         return response
 
     async def _handle_request(self, request: web.Request) -> web.StreamResponse | web.Response:
+        if not await self._track_request_start():
+            return web.Response(status=503, text="Proxy server is shutting down", content_type="text/plain")
+
         _, session = self._require_runtime()
-        req_url = str(request.rel_url)
-        fmt = self._resolve_format()
-        is_intercept_target = "/v1/messages" in req_url if fmt == "anthropic" else "/chat/completions" in req_url
-
-        body = await self._read_request_body(request)
-        if body is None:
-            return web.Response(status=413, text="Request body too large", content_type="text/plain")
-
-        parsed_body: dict[str, Any] | None = None
-        if is_intercept_target:
-            try:
-                loaded = json.loads(body.decode("utf-8"))
-                if isinstance(loaded, dict):
-                    parsed_body = loaded
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                parsed_body = None
-
-        is_stream = parsed_body is not None and parsed_body.get("stream") is True
-        upstream_url = self._build_upstream_url(request)
-        upstream_headers = self._build_upstream_headers(
-            request,
-            len(body),
-            intercepting=is_intercept_target,
-        )
-
         try:
+            fmt = self._resolve_format()
+            is_intercept_target = self._is_intercept_target(request.path, fmt)
+
+            body = await self._read_request_body(request)
+            if body is None:
+                return web.Response(status=413, text="Request body too large", content_type="text/plain")
+
+            parsed_body: dict[str, Any] | None = None
+            if is_intercept_target:
+                try:
+                    loaded = json.loads(body.decode("utf-8"))
+                    if isinstance(loaded, dict):
+                        parsed_body = loaded
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    parsed_body = None
+
+            is_stream = parsed_body is not None and parsed_body.get("stream") is True
+            upstream_url = self._build_upstream_url(request)
+            upstream_headers = self._build_upstream_headers(
+                request,
+                len(body),
+                intercepting=is_intercept_target,
+            )
+
             async with session.request(
                 method=request.method,
                 url=upstream_url,
@@ -670,6 +744,8 @@ class ProxyServer:
         except Exception as exc:
             self._error(f"[veto intercept] Internal proxy error: {exc}")
             return web.Response(status=500, text="Internal proxy error", content_type="text/plain")
+        finally:
+            self._track_request_finish()
 
 
 async def start_proxy_server(config: ProxyConfig) -> ProxyServer:

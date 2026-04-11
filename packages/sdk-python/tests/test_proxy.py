@@ -4,6 +4,7 @@ Integration and helper tests for the Python proxy server.
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 from pathlib import Path
@@ -168,7 +169,14 @@ def _build_openai_tool_call_sse(tool_name: str, args: str) -> str:
         {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         separators=(",", ":"),
     )
-    return f"data: {delta1}\n\ndata: {delta2}\n\ndata: {finish}\n\ndata: [DONE]\n\n"
+    return "".join(
+        [
+            encode_sse_event(delta1),
+            encode_sse_event(delta2),
+            encode_sse_event(finish),
+            encode_sse_event("[DONE]"),
+        ]
+    )
 
 
 def _build_openai_content_sse(text: str) -> str:
@@ -180,7 +188,13 @@ def _build_openai_content_sse(text: str) -> str:
         {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         separators=(",", ":"),
     )
-    return f"data: {chunk}\n\ndata: {done}\n\ndata: [DONE]\n\n"
+    return "".join(
+        [
+            encode_sse_event(chunk),
+            encode_sse_event(done),
+            encode_sse_event("[DONE]"),
+        ]
+    )
 
 
 def _build_openai_non_stream_tool_call(tool_name: str) -> bytes:
@@ -215,16 +229,103 @@ def _build_openai_non_stream_tool_call(tool_name: str) -> bytes:
 def _build_anthropic_tool_use_sse(tool_name: str, input_json: str) -> str:
     return "".join(
         [
-            "event: content_block_start\n"
-            f"data: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'tool_use', 'id': 'toolu_1', 'name': tool_name}}, separators=(',', ':'))}\n\n",
-            "event: content_block_delta\n"
-            f"data: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'input_json_delta', 'partial_json': input_json}}, separators=(',', ':'))}\n\n",
-            "event: content_block_stop\n"
-            f"data: {json.dumps({'type': 'content_block_stop', 'index': 0}, separators=(',', ':'))}\n\n",
-            "event: message_stop\n"
-            "data: {}\n\n",
+            encode_sse_event(
+                json.dumps(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": tool_name,
+                        },
+                    },
+                    separators=(",", ":"),
+                ),
+                event="content_block_start",
+            ),
+            encode_sse_event(
+                json.dumps(
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": input_json,
+                        },
+                    },
+                    separators=(",", ":"),
+                ),
+                event="content_block_delta",
+            ),
+            encode_sse_event(
+                json.dumps(
+                    {"type": "content_block_stop", "index": 0},
+                    separators=(",", ":"),
+                ),
+                event="content_block_stop",
+            ),
+            encode_sse_event("{}", event="message_stop"),
         ]
     )
+
+
+def _build_anthropic_text_sse(text: str) -> str:
+    return "".join(
+        [
+            encode_sse_event(
+                json.dumps(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                    separators=(",", ":"),
+                ),
+                event="content_block_start",
+            ),
+            encode_sse_event(
+                json.dumps(
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": text},
+                    },
+                    separators=(",", ":"),
+                ),
+                event="content_block_delta",
+            ),
+            encode_sse_event(
+                json.dumps(
+                    {"type": "content_block_stop", "index": 0},
+                    separators=(",", ":"),
+                ),
+                event="content_block_stop",
+            ),
+            encode_sse_event(
+                json.dumps(
+                    {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                        "usage": {"output_tokens": 1},
+                    },
+                    separators=(",", ":"),
+                ),
+                event="message_delta",
+            ),
+            encode_sse_event("{}", event="message_stop"),
+        ]
+    )
+
+
+def _extract_openai_data_lines(payload: str) -> list[str]:
+    normalized = payload.replace("\r\n", "\n")
+    return [line for line in normalized.splitlines() if line.startswith("data: ")]
+
+
+def _extract_anthropic_event_lines(payload: str) -> list[list[str]]:
+    normalized = payload.replace("\r\n", "\n")
+    return [block.splitlines() for block in normalized.strip().split("\n\n") if block.strip()]
 
 
 def _build_anthropic_non_stream_tool_use(tool_name: str) -> bytes:
@@ -274,16 +375,18 @@ def test_encode_sse_event_and_openai_helpers() -> None:
     assert "data: hello" in encoded
 
     pending: dict[int, PendingToolCall] = {}
-    first_line = parse_sse_line(
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","function":{"name":"delete_file","arguments":"{"}}]},"finish_reason":null}]}'
+    openai_lines = _extract_openai_data_lines(
+        _build_openai_tool_call_sse("delete_file", '{"path":"/tmp"}')
     )
-    second_line = parse_sse_line(
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"path\\":\\"/tmp\\"}"}}]},"finish_reason":"tool_calls"}]}'
-    )
+    first_line = parse_sse_line(openai_lines[0])
+    second_line = parse_sse_line(openai_lines[1])
+    finish_line = parse_sse_line(openai_lines[2])
     assert first_line.has_tool_calls is True
-    assert second_line.finish_reason_tool_calls is True
+    assert second_line.has_tool_calls is True
+    assert finish_line.finish_reason_tool_calls is True
     merge_tool_call_deltas(pending, first_line.data or {})
     merge_tool_call_deltas(pending, second_line.data or {})
+    merge_tool_call_deltas(pending, finish_line.data or {})
     finalized = finalize_tool_call(pending[0])
     assert finalized == {
         "name": "delete_file",
@@ -302,15 +405,11 @@ def test_encode_sse_event_and_openai_helpers() -> None:
 
 def test_anthropic_helpers() -> None:
     pending: dict[int, AnthropicPendingToolUse] = {}
-    start_lines = [
-        "event: content_block_start",
-        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"delete_file"}}',
-    ]
-    delta_lines = [
-        "event: content_block_delta",
-        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"/tmp\\"}"}}',
-    ]
-    stop_lines = ["event: message_stop", "data: {}"]
+    anthropic_blocks = _extract_anthropic_event_lines(
+        _build_anthropic_tool_use_sse("delete_file", '{"path":"/tmp"}')
+    )
+    start_lines, delta_lines = anthropic_blocks[0], anthropic_blocks[1]
+    stop_lines = anthropic_blocks[-1]
 
     parsed_start = parse_anthropic_sse_lines(start_lines)
     parsed_delta = parse_anthropic_sse_lines(delta_lines)
@@ -335,6 +434,8 @@ def test_anthropic_helpers() -> None:
 
     blocked = synth_anthropic_blocked_event("Denied")
     assert "event: content_block_start" in blocked
+    assert "event: message_delta" in blocked
+    assert '"stop_reason":"end_turn"' in blocked
     assert "event: message_stop" in blocked
     assert "[BLOCKED by veto] Denied" in blocked
 
@@ -396,7 +497,7 @@ async def test_openai_sse_allowed(veto_config_dir: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_sse_buffer_overflow_passthrough(veto_config_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_openai_sse_buffer_overflow_blocks(veto_config_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_guard(self: Veto, name: str, arguments: dict[str, Any]) -> GuardResult:
@@ -423,8 +524,7 @@ async def test_openai_sse_buffer_overflow_passthrough(veto_config_dir: str, monk
             {"model": "gpt-4", "stream": True, "messages": []},
         )
         assert status == 200
-        assert "[BLOCKED by veto]" not in body
-        assert "delete_file" in body
+        assert "[BLOCKED by veto]" in body
         assert calls == []
     finally:
         await server.stop()
@@ -488,7 +588,7 @@ async def test_anthropic_sse_allowed(veto_config_dir: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_anthropic_sse_buffer_overflow_passthrough(veto_config_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_anthropic_sse_buffer_overflow_blocks(veto_config_dir: str, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_guard(self: Veto, name: str, arguments: dict[str, Any]) -> GuardResult:
@@ -515,8 +615,8 @@ async def test_anthropic_sse_buffer_overflow_passthrough(veto_config_dir: str, m
             {"model": "claude-sonnet-4", "stream": True, "messages": []},
         )
         assert status == 200
-        assert "[BLOCKED by veto]" not in body
-        assert '"name":"delete_file"' in body
+        assert "[BLOCKED by veto]" in body
+        assert "event: message_delta" in body
         assert calls == []
     finally:
         await server.stop()
@@ -667,6 +767,187 @@ async def test_anthropic_intercept_forces_identity_encoding(veto_config_dir: str
 
 
 @pytest.mark.asyncio
+async def test_intercept_target_uses_request_path_only(veto_config_dir: str) -> None:
+    captured: dict[str, str | None] = {}
+
+    async def upstream_handler(request: web.Request) -> web.StreamResponse:
+        captured["accept_encoding"] = request.headers.get("Accept-Encoding")
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(request)
+        await response.write(_build_openai_content_sse("query-ok").encode("utf-8"))
+        await response.write_eof()
+        return response
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await _start_proxy(veto_config_dir, upstream_url, fmt="openai")
+
+    try:
+        status, body, _ = await _request_text(
+            server.port,
+            "/v1/other?target=/chat/completions",
+            {"model": "gpt-4", "stream": True, "messages": []},
+            headers={"Accept-Encoding": "gzip"},
+        )
+        assert status == 200
+        assert captured["accept_encoding"] == "gzip"
+        assert "query-ok" in body
+        assert "[BLOCKED by veto]" not in body
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_proxy_strips_hop_by_hop_request_headers(veto_config_dir: str) -> None:
+    captured: dict[str, str | None] = {}
+
+    async def upstream_handler(request: web.Request) -> web.Response:
+        for key in [
+            "Connection",
+            "Keep-Alive",
+            "Transfer-Encoding",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailer",
+            "Trailers",
+            "Upgrade",
+            "X-Remove-Me",
+            "Host",
+        ]:
+            captured[key] = request.headers.get(key)
+        return web.json_response({"ok": True})
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await _start_proxy(veto_config_dir, upstream_url, fmt="openai")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"http://127.0.0.1:{server.port}/headers",
+                json={"hello": "world"},
+                headers={
+                    "Connection": "keep-alive, x-remove-me",
+                    "Keep-Alive": "timeout=5",
+                    "Proxy-Authenticate": "basic",
+                    "Proxy-Authorization": "secret",
+                    "TE": "trailers",
+                    "Trailer": "Expires",
+                    "Trailers": "Expires",
+                    "Upgrade": "websocket",
+                    "X-Remove-Me": "yes",
+                },
+            ) as response:
+                assert response.status == 200
+                assert await response.json() == {"ok": True}
+
+        for key in [
+            "Connection",
+            "Keep-Alive",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailer",
+            "Trailers",
+            "Upgrade",
+            "X-Remove-Me",
+        ]:
+            assert captured[key] is None
+        assert captured["Host"] == upstream_url.replace("http://", "")
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_openai_sse_flushes_partial_event_at_eof(veto_config_dir: str) -> None:
+    payload = _build_openai_tool_call_sse("read_file", '{"path":"/tmp/file"}')
+    payload = payload.removesuffix("\n\n")
+
+    async def upstream_handler(_request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(_request)
+        await response.write(payload.encode("utf-8"))
+        await response.write_eof()
+        return response
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await _start_proxy(veto_config_dir, upstream_url, fmt="openai")
+
+    try:
+        status, body, _ = await _request_text(
+            server.port,
+            "/v1/chat/completions",
+            {"model": "gpt-4", "stream": True, "messages": []},
+        )
+        assert status == 200
+        assert "read_file" in body
+        assert "data: [DONE]" in body
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_sse_flushes_partial_event_at_eof(veto_config_dir: str) -> None:
+    payload = _build_anthropic_tool_use_sse("read_file", '{"path":"/tmp/file"}')
+    payload = payload.removesuffix("\n\n")
+
+    async def upstream_handler(_request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(_request)
+        await response.write(payload.encode("utf-8"))
+        await response.write_eof()
+        return response
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await _start_proxy(veto_config_dir, upstream_url, fmt="anthropic")
+
+    try:
+        status, body, _ = await _request_text(
+            server.port,
+            "/v1/messages",
+            {"model": "claude-sonnet-4", "stream": True, "messages": []},
+        )
+        assert status == 200
+        assert '"name":"read_file"' in body
+        assert "event: message_stop" in body
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_sse_eof_without_message_stop_blocks(veto_config_dir: str) -> None:
+    payload = _build_anthropic_tool_use_sse("delete_file", '{"path":"/etc/hosts"}')
+    payload = payload.rsplit("event: message_stop", 1)[0].rstrip()
+
+    async def upstream_handler(_request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(_request)
+        await response.write(payload.encode("utf-8"))
+        await response.write_eof()
+        return response
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await _start_proxy(veto_config_dir, upstream_url, fmt="anthropic")
+
+    try:
+        status, body, _ = await _request_text(
+            server.port,
+            "/v1/messages",
+            {"model": "claude-sonnet-4", "stream": True, "messages": []},
+        )
+        assert status == 200
+        assert "[BLOCKED by veto]" in body
+        assert "event: message_delta" in body
+        assert "event: message_stop" in body
+    finally:
+        await server.stop()
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
 async def test_proxy_server_lifecycle(veto_config_dir: str) -> None:
     async def upstream_handler(_request: web.Request) -> web.StreamResponse:
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
@@ -698,4 +979,47 @@ async def test_proxy_server_lifecycle(veto_config_dir: str) -> None:
                 {"model": "gpt-4", "stream": True, "messages": []},
             )
     finally:
+        await stop_upstream()
+
+
+@pytest.mark.asyncio
+async def test_proxy_stop_waits_for_in_flight_requests(veto_config_dir: str) -> None:
+    request_started = asyncio.Event()
+    release_upstream = asyncio.Event()
+
+    async def upstream_handler(_request: web.Request) -> web.StreamResponse:
+        request_started.set()
+        await release_upstream.wait()
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(_request)
+        await response.write(_build_openai_content_sse("done").encode("utf-8"))
+        await response.write_eof()
+        return response
+
+    upstream_url, stop_upstream = await _start_server(upstream_handler)
+    server = await _start_proxy(veto_config_dir, upstream_url, fmt="openai")
+
+    async def make_request() -> tuple[int, str]:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"http://127.0.0.1:{server.port}/v1/chat/completions",
+                json={"model": "gpt-4", "stream": True, "messages": []},
+            ) as response:
+                return response.status, await response.text()
+
+    try:
+        request_task = asyncio.create_task(make_request())
+        await request_started.wait()
+        stop_task = asyncio.create_task(server.stop())
+        await asyncio.sleep(0.05)
+        assert request_task.done() is False
+        release_upstream.set()
+        status, body = await request_task
+        await stop_task
+        assert status == 200
+        assert "done" in body
+    finally:
+        release_upstream.set()
+        if server.is_running:
+            await server.stop()
         await stop_upstream()
