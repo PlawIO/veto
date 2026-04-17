@@ -147,6 +147,12 @@ The native evaluator handles the bash policy subset needed for fast command inte
 
 If a cached cloud policy uses unsupported features such as session constraints, rate limits, or unsupported dynamic constraints, the runtime skips the local fast path and goes to cloud instead of guessing.
 
+For nearby local project rules, keep the current Rust subset in mind:
+
+- the runtime discovers plain rule files from `veto/veto.config.yaml` and `veto/rules/**`
+- local rule evaluation currently understands `allow`, `block`, and `require_approval`
+- rule-file `extends` is not supported in the native local path yet; use flattened local rules or cloud validation instead
+
 ## Cache layout
 
 - decision cache: `$HOME/.veto/cache/veto-bash-decisions.json`

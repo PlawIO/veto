@@ -170,7 +170,7 @@ veto-bash mcp init
 veto-bash mcp serve --veto-api-key "$VETO_API_KEY"
 ```
 
-`veto-bash` is now Rust-first: the native runtime handles bash interception, deterministic local evaluation, SWR cloud policy refresh, approval polling, audit spooling, and MCP stdio serving. Use `veto-bash native-path` once during setup, then shadow `bash` with that packaged native binary so warm executions stay fully native. Cold or unsupported cases fall back to cloud `POST /v1/validate`. Interactive shells still pass through to the real system `bash`.
+`veto-bash` is now Rust-first: the native runtime handles bash interception, deterministic local evaluation, SWR cloud policy refresh, approval polling, audit spooling, and MCP stdio serving. Use `veto-bash native-path` once during setup, then shadow `bash` with that packaged native binary so warm executions stay fully native. Cold or unsupported cases fall back to cloud `POST /v1/validate`. Interactive shells still pass through to the real system `bash`. The local native path intentionally supports a narrower YAML subset than the SDKs today, so projects using `extends` or unsupported dynamic constraints should expect cloud validation instead of a guessed local decision.
 
 This PR does not add a full cross-platform prebuilt binary pipeline yet. The current package/build flow is honest about that: build on the target platform or install an artifact produced for the same platform/arch.
 
