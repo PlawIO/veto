@@ -2,8 +2,12 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const MCP_MESSAGE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_veto-bash-native")
@@ -62,27 +66,88 @@ fn write_mcp_message(writer: &mut impl Write, value: &Value) {
     writer.flush().unwrap();
 }
 
-fn read_mcp_message(reader: &mut impl Read) -> Value {
+fn read_mcp_message(reader: &mut impl Read) -> Result<Option<Value>, String> {
     let mut header_bytes = Vec::new();
     let mut buffer = [0u8; 1];
     loop {
-        reader.read_exact(&mut buffer).unwrap();
+        match reader.read_exact(&mut buffer) {
+            Ok(()) => {}
+            Err(error)
+                if header_bytes.is_empty() && error.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error.to_string()),
+        }
         header_bytes.push(buffer[0]);
         if header_bytes.ends_with(b"\r\n\r\n") {
             break;
         }
     }
 
-    let header_text = String::from_utf8(header_bytes).unwrap();
+    let header_text = String::from_utf8(header_bytes).map_err(|error| error.to_string())?;
     let content_length = header_text
         .split("\r\n")
         .find_map(|line| line.strip_prefix("Content-Length:"))
-        .map(|value| value.trim().parse::<usize>().unwrap())
-        .unwrap();
+        .ok_or_else(|| "missing Content-Length header".to_string())?
+        .trim()
+        .parse::<usize>()
+        .map_err(|error| error.to_string())?;
 
     let mut body = vec![0u8; content_length];
-    reader.read_exact(&mut body).unwrap();
-    serde_json::from_slice(&body).unwrap()
+    reader
+        .read_exact(&mut body)
+        .map_err(|error| error.to_string())?;
+    serde_json::from_slice(&body)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+fn spawn_mcp_reader(mut reader: impl Read + Send + 'static) -> Receiver<Result<Value, String>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || loop {
+        match read_mcp_message(&mut reader) {
+            Ok(Some(message)) => {
+                if sender.send(Ok(message)).is_err() {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                let _ = sender.send(Err(error));
+                break;
+            }
+        }
+    });
+    receiver
+}
+
+fn recv_mcp_message(
+    receiver: &Receiver<Result<Value, String>>,
+    child: &mut Child,
+    label: &str,
+) -> Value {
+    match receiver.recv_timeout(MCP_MESSAGE_TIMEOUT) {
+        Ok(Ok(message)) => message,
+        Ok(Err(error)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("failed to read MCP message for {label}: {error}");
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "timed out waiting {:?} for MCP message: {label}",
+                MCP_MESSAGE_TIMEOUT
+            );
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("MCP reader disconnected while waiting for {label}");
+        }
+    }
 }
 
 #[test]
@@ -207,8 +272,9 @@ fn mcp_serve_survives_invalid_request_and_executes_next_call() {
         .unwrap();
 
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
+    let receiver = spawn_mcp_reader(stdout);
 
     write_mcp_message(
         &mut stdin,
@@ -226,7 +292,7 @@ fn mcp_serve_survives_invalid_request_and_executes_next_call() {
             }
         }),
     );
-    let initialize = read_mcp_message(&mut stdout);
+    let initialize = recv_mcp_message(&receiver, &mut child, "initialize");
     assert_eq!(initialize["id"], 1);
     assert_eq!(initialize["result"]["serverInfo"]["name"], "veto-bash");
 
@@ -244,7 +310,7 @@ fn mcp_serve_survives_invalid_request_and_executes_next_call() {
             }
         }),
     );
-    let invalid = read_mcp_message(&mut stdout);
+    let invalid = recv_mcp_message(&receiver, &mut child, "invalid tools/call");
     assert_eq!(invalid["id"], 2);
     assert_eq!(invalid["error"]["code"], -32602);
     assert_eq!(invalid["error"]["message"], "argv entries must be strings");
@@ -264,7 +330,7 @@ fn mcp_serve_survives_invalid_request_and_executes_next_call() {
             }
         }),
     );
-    let success = read_mcp_message(&mut stdout);
+    let success = recv_mcp_message(&receiver, &mut child, "successful tools/call");
     let text = success["result"]["content"][0]["text"].as_str().unwrap();
     assert_eq!(success["id"], 3);
     assert!(success["error"].is_null());
