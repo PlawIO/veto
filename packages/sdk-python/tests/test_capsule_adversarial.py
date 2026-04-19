@@ -334,6 +334,19 @@ def test_issuer_rejects_port_out_of_range():
         )
 
 
+# Codex Round 8 P2: IPv6 bracket-form authority must be accepted by both
+# SDKs. Python used to reject because the hostname regex didn't allow
+# colons; ipaddress-based fallback now recognizes IPv6.
+
+
+def test_issuer_accepts_ipv6_loopback_bracket_form():
+    validate_capsule_payload(_fixed_capsule(issuer="https://[::1]:8443/"))
+
+
+def test_issuer_accepts_ipv6_full_address():
+    validate_capsule_payload(_fixed_capsule(issuer="https://[2001:db8::1]/"))
+
+
 # ---- P2: amount_ceiling additionalProperties:false --------------------------
 
 

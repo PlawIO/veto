@@ -152,14 +152,31 @@ def _require_issuer(value: Any, path: str) -> str:
         raise ValidationError(path, f"hostname is not parseable: {err}") from err
     if not hostname or len(hostname) == 0:
         raise ValidationError(path, "must have a non-empty host")
-    # Hostname charset: ASCII letters, digits, hyphens, and dots. No
-    # whitespace, no IDN unless punycode-encoded. TS's URL parser percent-
-    # encodes unusual bytes in a way the gateway never wants to see on
-    # the wire, so we require a strict domain-label form here.
-    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9.\-]*$", hostname):
+    # Hostname shape. Three valid forms:
+    #   1. DNS name: labels of [A-Za-z0-9-] separated by dots.
+    #   2. IPv4 literal: four dotted decimals (covered by form 1's charset).
+    #   3. IPv6 literal: `parsed.hostname` already strips the brackets,
+    #      so we get `::1` / `2001:db8::1` / `fe80::1%eth0` back. Accept
+    #      when the string parses as IPv6.
+    # Codex Round 8 P2: TS's `new URL("https://[::1]:8443/")` parses fine
+    # and reports `url.host = "[::1]:8443"`. Python urlparse's `.hostname`
+    # returns `::1` (brackets stripped, case-lowered). Both SDKs must
+    # accept the same shape, so we allow IPv6 when ipaddress.ip_address()
+    # succeeds.
+    import ipaddress as _ip
+
+    is_dns = re.match(r"^[a-zA-Z0-9][a-zA-Z0-9.\-]*$", hostname) is not None
+    is_ipv6 = False
+    if not is_dns:
+        try:
+            addr = _ip.ip_address(hostname)
+            is_ipv6 = isinstance(addr, _ip.IPv6Address)
+        except ValueError:
+            is_ipv6 = False
+    if not is_dns and not is_ipv6:
         raise ValidationError(
             path,
-            f"hostname {hostname!r} contains characters outside [a-zA-Z0-9.-]",
+            f"hostname {hostname!r} is not a DNS name or IPv6 address",
         )
     try:
         port = parsed.port

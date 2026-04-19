@@ -414,6 +414,19 @@ describe("P2: issuer URL tightening", () => {
       ),
     ).toThrow();
   });
+  // Codex Round 8 P2: IPv6 bracket-form authority must be accepted by BOTH
+  // SDKs (TS accepts via new URL(); Python previously rejected via a too-
+  // strict hostname regex).
+  it("accepts IPv6 bracket-form authority 'https://[::1]:8443/'", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https://[::1]:8443/" })),
+    ).not.toThrow();
+  });
+  it("accepts full IPv6 address 'https://[2001:db8::1]/'", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https://[2001:db8::1]/" })),
+    ).not.toThrow();
+  });
 });
 
 describe("P2: amount_ceiling additionalProperties:false", () => {
