@@ -99,16 +99,33 @@ export function parseRfc3339Strict(value: string): ParsedRfc3339 {
   }
   if (second === 60) {
     // RFC 3339 §5.6: leap seconds occur ONLY at 23:59:60 UTC on the last
-    // day of a UTC month. Anything else is impossible and must be rejected
-    // rather than silently coerced to :59 — otherwise a forged "12:34:60"
-    // timestamp verifies identically to "12:34:59", which makes two
-    // semantically-distinct payloads hash-equal after canonicalization.
+    // UTC day of a UTC month. Anything else is impossible and must be
+    // rejected rather than silently coerced to :59 — otherwise a forged
+    // "12:34:60" timestamp verifies identically to "12:34:59", which makes
+    // two semantically-distinct payloads hash-equal after canonicalization.
+    //
+    // Codex full-sweep P1-5: we previously only checked hour/minute, so
+    // "2026-01-30T23:59:60Z" (non-month-end, but at 23:59:60) was accepted
+    // and clamped. Now: day must equal the last day of the month AND the
+    // offset must be UTC ("Z" or "+00:00"/"-00:00"). Non-UTC "23:59:60+01:00"
+    // is semantically meaningless.
     if (hour !== 23 || minute !== 59) {
       throw new Rfc3339ParseError(
         `leap second :60 is only legal at 23:59:60; got ${hourStr}:${minStr}:${secStr}`,
       );
     }
-    second = 59; // clamp ONLY at 23:59:60
+    if (day !== daysInMonth(year, month)) {
+      throw new Rfc3339ParseError(
+        `leap second :60 is only legal on the last day of the UTC month; ` +
+          `got ${yearStr}-${monthStr}-${dayStr}`,
+      );
+    }
+    if (offset !== "Z" && offset !== "+00:00" && offset !== "-00:00") {
+      throw new Rfc3339ParseError(
+        `leap second :60 is only legal at UTC offset; got ${offset}`,
+      );
+    }
+    second = 59; // clamp ONLY when all above hold
   }
 
   // Offset validation.

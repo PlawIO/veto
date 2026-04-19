@@ -23,6 +23,7 @@ const CAPSULE_REQUIRED = [
   "issuer",
   "entity_id",
   "agent_id",
+  "tool",
   "rail_allowlist",
   "counterparty_hash",
   "amount_ceiling",
@@ -121,6 +122,17 @@ function requireRfc3339(value: unknown, path: string): string {
  */
 function requireIssuer(value: unknown, path: string): string {
   const s = requireString(value, path, undefined, 2048, 1);
+  // Codex full-sweep P1-4: `new URL("https:evil.com")` and
+  // `new URL("https:///evil.com")` both "succeed" in TS (WHATWG URL) and
+  // quietly lose their authority, while Python's urllib rejects them —
+  // cross-language verifiers disagree. Require an explicit "://" plus a
+  // non-empty, non-userinfo host before accepting.
+  if (!/^https:\/\/[^/\s@?#]+(?::\d+)?(?:\/)?$/.test(s)) {
+    throw new ValidationError(
+      path,
+      'must be an https:// origin with explicit authority and no path/userinfo/query/fragment (e.g., "https://gateway.veto.so")',
+    );
+  }
   let url: URL;
   try {
     url = new URL(s);
@@ -130,6 +142,9 @@ function requireIssuer(value: unknown, path: string): string {
   if (url.protocol !== "https:") {
     throw new ValidationError(path, `must use https:// scheme; got ${url.protocol}`);
   }
+  if (!url.host || url.host.length === 0) {
+    throw new ValidationError(path, "must have a non-empty host");
+  }
   if (url.username || url.password) {
     throw new ValidationError(path, "must not contain userinfo (user:pass@)");
   }
@@ -138,6 +153,9 @@ function requireIssuer(value: unknown, path: string): string {
   }
   if (url.hash) {
     throw new ValidationError(path, "must not contain a fragment");
+  }
+  if (url.pathname !== "" && url.pathname !== "/") {
+    throw new ValidationError(path, "must not contain a path");
   }
   return s;
 }
@@ -172,6 +190,9 @@ export function validateCapsulePayload(input: unknown): CapsulePayload {
   requireString(obj.entity_id, "$.entity_id", undefined, 128, 1);
   requireString(obj.agent_id, "$.agent_id", undefined, 128, 1);
   if (obj.session_id !== undefined) requireString(obj.session_id, "$.session_id", undefined, 128, 1);
+  // Tool name matches the receipt-side regex so tool-identity is stable
+  // across the sign ↔ consume ↔ receipt triangle.
+  requireString(obj.tool, "$.tool", /^[a-z][a-z0-9_.:-]{0,127}$/);
 
   if (!Array.isArray(obj.rail_allowlist) || obj.rail_allowlist.length < 1) {
     throw new ValidationError("$.rail_allowlist", "must be a non-empty array");
@@ -229,10 +250,15 @@ export function validateCapsulePayload(input: unknown): CapsulePayload {
   }
 
   if (obj.max_uses !== undefined) {
-    if (typeof obj.max_uses !== "number" || !Number.isInteger(obj.max_uses) || obj.max_uses < 1) {
+    // Codex full-sweep P1-3: the consume path is one-shot (nonce-burn +
+    // capsule status → "consumed"). Multi-use was considered but was
+    // removed pre-ship because the nonce table cannot atomically gate
+    // retries AND decrement a counter. Pin to exactly 1 at the protocol
+    // layer so a misconfigured caller can't mint an impossible capsule.
+    if (obj.max_uses !== 1) {
       throw new ValidationError(
         "$.max_uses",
-        "must be a positive integer (>= 1); null/0 are not allowed",
+        "must be exactly 1 in veto.capsule/1; multi-use is not supported",
       );
     }
   }

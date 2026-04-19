@@ -64,6 +64,7 @@ def _fixed_capsule(**overrides) -> dict:
         "entity_id": "ent_abc",
         "agent_id": "claude-code-ci-bot",
         "session_id": "sess_01hy2z3qrstuvwx",
+        "tool": "meow.pay",
         "rail_allowlist": ["ach"],
         "counterparty_hash": "sha256:3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855e",
         "amount_ceiling": {"currency": "USD", "amount": "12500.00"},

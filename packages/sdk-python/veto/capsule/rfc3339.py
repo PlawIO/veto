@@ -62,13 +62,23 @@ def parse_rfc3339_strict(value: str) -> ParsedRfc3339:
         raise Rfc3339ParseError(f"second must be 00..60; got {sec_s}")
     if second == 60:
         # RFC 3339 §5.6: leap seconds occur ONLY at 23:59:60 UTC on the last
-        # day of a UTC month. Anything else silently collapsing to :59 makes
-        # two semantically-distinct payloads hash-equal after canonicalization.
+        # UTC day of a UTC month. Codex full-sweep P1-5: prior version only
+        # checked hour/minute, so non-month-end :60 was accepted and
+        # silently clamped. Require last-day + UTC offset.
         if hour != 23 or minute != 59:
             raise Rfc3339ParseError(
                 f"leap second :60 is only legal at 23:59:60; got {hour_s}:{min_s}:{sec_s}"
             )
-        second = 59  # clamp ONLY at 23:59:60
+        if day != max_day:
+            raise Rfc3339ParseError(
+                f"leap second :60 is only legal on the last day of the UTC month; "
+                f"got {year_s}-{month_s}-{day_s}"
+            )
+        if offset not in ("Z", "+00:00", "-00:00"):
+            raise Rfc3339ParseError(
+                f"leap second :60 is only legal at UTC offset; got {offset}"
+            )
+        second = 59  # clamp ONLY when all above hold
 
     offset_minutes = 0
     if offset != "Z":

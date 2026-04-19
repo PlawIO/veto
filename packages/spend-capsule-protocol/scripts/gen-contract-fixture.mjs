@@ -37,6 +37,7 @@ const capsule = {
   entity_id: "ent_abc",
   agent_id: "claude-code-ci-bot",
   session_id: "sess_01hy2z3qrstuvwx",
+  tool: "meow.pay",
   rail_allowlist: ["ach"],
   counterparty_hash: hashBeneficiary({
     type: "bank_us",

@@ -44,6 +44,9 @@ class CapsulePayload(TypedDict, total=False):
     entity_id: str
     agent_id: str
     session_id: str
+    # Exact tool name authorized by this capsule (codex full-sweep P0-2).
+    # Verifiers enforce runtime `tool == payload["tool"]` byte-for-byte.
+    tool: str
     rail_allowlist: list[Rail]
     counterparty_hash: str
     amount_ceiling: AmountCeiling

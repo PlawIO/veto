@@ -27,6 +27,14 @@ export interface CapsulePayload {
   entity_id: string;
   agent_id: string;
   session_id?: string;
+  /**
+   * Exact tool name this capsule authorizes (e.g., "meow.pay"). Codex
+   * full-sweep P0-2: without `tool` in the signed payload, a capsule
+   * minted for `meow.pay` could be replayed against a different money-
+   * moving tool the policy pack explicitly denies. Verifiers MUST enforce
+   * runtime `tool === payload.tool` byte-for-byte.
+   */
+  tool: string;
   rail_allowlist: Rail[];
   counterparty_hash: string;
   amount_ceiling: AmountCeiling;
@@ -38,6 +46,12 @@ export interface CapsulePayload {
   dual_control_ref?: string | null;
   issued_at: string;
   expires_at: string;
+  /**
+   * Single-use is the only supported semantics in veto.capsule/1. Multi-use
+   * was considered but removed before ship because the consume path cannot
+   * atomically decrement a counter while also enforcing nonce replay.
+   * Schema-allowed for forward compat; validator pins to 1.
+   */
   max_uses?: number;
   nonce: string;
 }

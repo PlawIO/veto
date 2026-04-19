@@ -30,6 +30,7 @@ _CAPSULE_REQUIRED = (
     "issuer",
     "entity_id",
     "agent_id",
+    "tool",
     "rail_allowlist",
     "counterparty_hash",
     "amount_ceiling",
@@ -113,8 +114,20 @@ def _require_rfc3339(value: Any, path: str) -> str:
     return value
 
 
+_RE_ISSUER = re.compile(r"^https://[^/\s@?#]+(?::\d+)?/?$")
+
+
 def _require_issuer(value: Any, path: str) -> str:
     s = _require_str(value, path, max_len=2048, min_len=1)
+    # Codex full-sweep P1-4: require explicit "://" + non-empty authority
+    # + no path/userinfo/query/fragment. This is the same regex the TS
+    # validator uses — the two implementations must accept and reject the
+    # same byte strings.
+    if not _RE_ISSUER.match(s):
+        raise ValidationError(
+            path,
+            'must be an https:// origin with explicit authority and no path/userinfo/query/fragment (e.g., "https://gateway.veto.so")',
+        )
     parsed = urlparse(s)
     if parsed.scheme != "https":
         raise ValidationError(path, f"must use https:// scheme; got {parsed.scheme!r}")
@@ -126,6 +139,8 @@ def _require_issuer(value: Any, path: str) -> str:
         raise ValidationError(path, "must not contain a query string")
     if parsed.fragment:
         raise ValidationError(path, "must not contain a fragment")
+    if parsed.path not in ("", "/"):
+        raise ValidationError(path, "must not contain a path")
     return s
 
 
@@ -148,6 +163,8 @@ def validate_capsule_payload(input: Any) -> CapsulePayload:
     _require_str(input["agent_id"], "$.agent_id", max_len=128, min_len=1)
     if "session_id" in input:
         _require_str(input["session_id"], "$.session_id", max_len=128, min_len=1)
+    # Exact tool name authorized by this capsule (codex full-sweep P0-2).
+    _require_str(input["tool"], "$.tool", _RE_TOOL)
 
     rails = input["rail_allowlist"]
     if not isinstance(rails, list) or not rails:
@@ -197,9 +214,13 @@ def validate_capsule_payload(input: Any) -> CapsulePayload:
 
     if "max_uses" in input:
         mu = input["max_uses"]
-        if not isinstance(mu, int) or isinstance(mu, bool) or mu < 1:
+        # Codex full-sweep P1-3: protocol pins single-use. Multi-use is not
+        # supported because the consume path can't atomically decrement a
+        # counter while also enforcing nonce replay.
+        if not isinstance(mu, int) or isinstance(mu, bool) or mu != 1:
             raise ValidationError(
-                "$.max_uses", "must be a positive integer (>= 1); null/0 are not allowed"
+                "$.max_uses",
+                "must be exactly 1 in veto.capsule/1; multi-use is not supported",
             )
 
     nonce = _require_str(input["nonce"], "$.nonce")
