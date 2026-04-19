@@ -34,11 +34,18 @@ export {
 
 export {
   CapsuleVerificationError,
+  jwkThumbprint,
   publicJwkFromPrivate,
   signCapsule,
   verifyCapsule,
 } from "./sign.js";
-export type { PrivateSigningKey } from "./sign.js";
+export type {
+  AuthorizedJwks,
+  AuthorizedJwksEntry,
+  CapsuleErrorCode,
+  PrivateSigningKey,
+  TrustAnchor,
+} from "./sign.js";
 
 export {
   anchorBlock,
@@ -50,7 +57,15 @@ export {
   MERKLE_BLOCK_SIZE,
   verifyReceiptChain,
 } from "./merkle.js";
-export type { BuildReceiptInput, MerkleAnchor, ReceiptDraft } from "./merkle.js";
+export type {
+  BuildReceiptInput,
+  ChainVerifyOptions,
+  MerkleAnchor,
+  ReceiptDraft,
+} from "./merkle.js";
+
+export { parseRfc3339Strict, isValidRfc3339, Rfc3339ParseError } from "./rfc3339.js";
+export type { ParsedRfc3339 } from "./rfc3339.js";
 
 export {
   ValidationError,

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .hash import canonicalize, sha256_prefixed
+from .rfc3339 import parse_rfc3339_strict
 from .types import (
     GENESIS_PREV_RECEIPT_HASH,
     RECEIPT_VERSION,
@@ -25,10 +26,17 @@ MERKLE_BLOCK_SIZE = 1024
 _DOMAIN_LEAF = 0x00
 _DOMAIN_NODE = 0x01
 _DOMAIN_ANCHOR = 0x02
+_DOMAIN_ROOT = 0x03
 
 
 def _tagged_hash(domain: int, *parts: bytes) -> bytes:
     return hashlib.sha256(bytes([domain]) + b"".join(parts)).digest()
+
+
+def _u64_bytes(n: int) -> bytes:
+    if n < 0 or n > 2**64 - 1:
+        raise ValueError(f"_u64_bytes requires 0 <= n < 2^64; got {n}")
+    return n.to_bytes(8, "big")
 
 
 GENESIS_MERKLE_ROOT: str = "sha256:" + _tagged_hash(
@@ -54,6 +62,12 @@ def _strip_prefix(h: str) -> bytes:
 
 
 def compute_merkle_root(leaves: list[str]) -> str:
+    """Compute merkle root with leaf count bound into the output.
+
+    The DOMAIN_ROOT wrapper closes CVE-2012-2459-style duplicate-last
+    ambiguity: `[a, b, c]` and `[a, b, c, c]` would otherwise produce
+    identical inner roots.
+    """
     if not leaves:
         return GENESIS_MERKLE_ROOT
     level = [_tagged_hash(_DOMAIN_LEAF, _strip_prefix(leaf)) for leaf in leaves]
@@ -64,7 +78,9 @@ def compute_merkle_root(leaves: list[str]) -> str:
             right = level[i + 1] if i + 1 < len(level) else left
             nxt.append(_tagged_hash(_DOMAIN_NODE, left, right))
         level = nxt
-    return "sha256:" + level[0].hex()
+    inner = level[0]
+    root = _tagged_hash(_DOMAIN_ROOT, _u64_bytes(len(leaves)), inner)
+    return "sha256:" + root.hex()
 
 
 def combine_anchors(prev: str, nxt: str) -> str:
@@ -102,17 +118,39 @@ def build_receipt(
     return receipt
 
 
-def verify_receipt_chain(receipts: list[ReceiptPayload]) -> ChainVerifyResult:
+def verify_receipt_chain(
+    receipts: list[ReceiptPayload],
+    *,
+    timestamp_skew_seconds: int = 5,
+) -> ChainVerifyResult:
+    """Verify a per-entity receipt chain end-to-end.
+
+    Enforces: structural validation, version, hash-link continuity,
+    monotonic issued_at (tolerating `timestamp_skew_seconds` backward drift),
+    and merkle_root progression (root only changes at block boundaries).
+    """
     if not receipts:
         return {"ok": True}
+    skew_ms = timestamp_skew_seconds * 1000
+    prev_issued_ms: float = float("-inf")
+    prev_root: str | None = None
 
     for i, r in enumerate(receipts):
+        # (1) Structural validation.
+        try:
+            validate_receipt_payload(r)
+        except ValidationError as err:
+            return {"ok": False, "breakAt": i, "reason": f"receipt[{i}] invalid: {err}"}
+
+        # (2) Version.
         if r.get("version") != RECEIPT_VERSION:
             return {
                 "ok": False,
                 "breakAt": i,
                 "reason": f"receipt[{i}] has unsupported version {r.get('version')}",
             }
+
+        # (3) Hash-link continuity.
         expected_prev = GENESIS_PREV_RECEIPT_HASH if i == 0 else hash_receipt(receipts[i - 1])
         if r["prev_receipt_hash"] != expected_prev:
             return {
@@ -124,6 +162,34 @@ def verify_receipt_chain(receipts: list[ReceiptPayload]) -> ChainVerifyResult:
                     else f"receipt[{i}] prev_receipt_hash does not match sha256 of receipt[{i - 1}]"
                 ),
             }
+
+        # (4) Monotonic issued_at.
+        issued_ms = parse_rfc3339_strict(r["issued_at"]).epoch_ms
+        if issued_ms + skew_ms < prev_issued_ms:
+            return {
+                "ok": False,
+                "breakAt": i,
+                "reason": (
+                    f"receipt[{i}] issued_at {r['issued_at']} precedes "
+                    f"receipt[{i - 1}].issued_at beyond tolerated skew"
+                ),
+            }
+        prev_issued_ms = max(prev_issued_ms, issued_ms)
+
+        # (5) Merkle root progression.
+        if prev_root is not None and r["merkle_root"] != prev_root:
+            at_boundary = i % MERKLE_BLOCK_SIZE == 0
+            if not at_boundary:
+                return {
+                    "ok": False,
+                    "breakAt": i,
+                    "reason": (
+                        f"receipt[{i}] merkle_root changed mid-block "
+                        f"(position {i % MERKLE_BLOCK_SIZE})"
+                    ),
+                }
+        prev_root = r["merkle_root"]
+
     return {"ok": True}
 
 

@@ -8,6 +8,7 @@ import {
   RECEIPT_VERSION,
 } from "./types.js";
 import { ValidationError, validateReceiptPayload } from "./validate.js";
+import { parseRfc3339Strict } from "./rfc3339.js";
 
 // Domain-separation tags prevent cross-context collisions. Without these, a
 // 32-byte value that happens to equal a leaf hash could be reinterpreted as
@@ -16,6 +17,7 @@ import { ValidationError, validateReceiptPayload } from "./validate.js";
 const DOMAIN_LEAF = 0x00;
 const DOMAIN_NODE = 0x01;
 const DOMAIN_ANCHOR = 0x02;
+const DOMAIN_ROOT = 0x03;
 
 export const MERKLE_BLOCK_SIZE = 1024;
 
@@ -58,6 +60,28 @@ function taggedHash(domain: number, ...parts: Uint8Array[]): Uint8Array {
   return sha256(buf);
 }
 
+function u64Bytes(n: number): Uint8Array {
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new Error(`u64Bytes requires a non-negative safe integer; got ${n}`);
+  }
+  const out = new Uint8Array(8);
+  // Big-endian 64-bit encoding. Safe up to 2^53 which is far more than any
+  // realistic chain length.
+  for (let i = 7; i >= 0; i--) {
+    out[i] = n & 0xff;
+    n = Math.floor(n / 256);
+  }
+  return out;
+}
+
+/**
+ * Compute a merkle root over leaf receipt hashes.
+ *
+ * Leaf count is bound into the root via a DOMAIN_ROOT wrapper. This closes
+ * CVE-2012-2459-style duplicate-last ambiguity, where `[a, b, c]` and
+ * `[a, b, c, c]` would otherwise produce identical inner roots and leave the
+ * membership size uncommitted.
+ */
 export function computeMerkleRoot(leaves: string[]): string {
   if (leaves.length === 0) return GENESIS_MERKLE_ROOT;
   // Leaves are already sha256(canonical(receipt)); re-hash each under the
@@ -72,7 +96,11 @@ export function computeMerkleRoot(leaves: string[]): string {
     }
     level = next;
   }
-  return `sha256:${bytesToHex(level[0]!)}`;
+  const inner = level[0]!;
+  // Wrap inner root with explicit leaf count. Any two chains that differ in
+  // size MUST produce a different root.
+  const rootBytes = taggedHash(DOMAIN_ROOT, u64Bytes(leaves.length), inner);
+  return `sha256:${bytesToHex(rootBytes)}`;
 }
 
 /**
@@ -113,11 +141,50 @@ export function buildReceipt(input: BuildReceiptInput): ReceiptPayload {
   return built;
 }
 
-export function verifyReceiptChain(receipts: ReceiptPayload[]): ChainVerifyResult {
+export interface ChainVerifyOptions {
+  /**
+   * Maximum allowed backward skew when comparing consecutive `issued_at`
+   * timestamps. Chains are expected to be monotonically non-decreasing;
+   * minor clock drift within this window is tolerated (default: 5s).
+   */
+  timestampSkewSeconds?: number;
+}
+
+/**
+ * Verify a per-entity receipt chain end-to-end. Enforces:
+ *   1. Every receipt passes structural validation.
+ *   2. `version` matches the expected protocol constant.
+ *   3. `prev_receipt_hash` links to the previous receipt (or genesis at i=0).
+ *   4. `issued_at` is non-decreasing (allows equal; rejects backward jumps
+ *      beyond `timestampSkewSeconds`).
+ *   5. `merkle_root` only changes at block boundaries — within a block it
+ *      must match the previous receipt's root. This makes inserting a
+ *      forged root mid-chain detectable without the verifier needing a
+ *      separate anchor log.
+ */
+export function verifyReceiptChain(
+  receipts: ReceiptPayload[],
+  options: ChainVerifyOptions = {},
+): ChainVerifyResult {
   if (receipts.length === 0) return { ok: true };
+  const skewMs = (options.timestampSkewSeconds ?? 5) * 1000;
+
+  let prevIssuedMs = -Infinity;
+  let prevRoot: string | null = null;
 
   for (let i = 0; i < receipts.length; i++) {
     const r = receipts[i]!;
+
+    // (1) Structural validation. A receipt that doesn't pass its own schema
+    // is not "valid, just in a broken chain" — it's not a receipt at all.
+    try {
+      validateReceiptPayload(r);
+    } catch (err) {
+      const msg = err instanceof ValidationError ? err.message : String(err);
+      return { ok: false, breakAt: i, reason: `receipt[${i}] invalid: ${msg}` };
+    }
+
+    // (2) Version.
     if (r.version !== RECEIPT_VERSION) {
       return {
         ok: false,
@@ -125,6 +192,8 @@ export function verifyReceiptChain(receipts: ReceiptPayload[]): ChainVerifyResul
         reason: `receipt[${i}] has unsupported version ${r.version}`,
       };
     }
+
+    // (3) Hash-link continuity.
     const expectedPrev = i === 0 ? GENESIS_PREV_RECEIPT_HASH : hashReceipt(receipts[i - 1]!);
     if (r.prev_receipt_hash !== expectedPrev) {
       return {
@@ -136,6 +205,36 @@ export function verifyReceiptChain(receipts: ReceiptPayload[]): ChainVerifyResul
             : `receipt[${i}] prev_receipt_hash does not match sha256 of receipt[${i - 1}]`,
       };
     }
+
+    // (4) Monotonic issued_at.
+    const issuedMs = parseRfc3339Strict(r.issued_at).epochMs;
+    if (issuedMs + skewMs < prevIssuedMs) {
+      return {
+        ok: false,
+        breakAt: i,
+        reason: `receipt[${i}] issued_at ${r.issued_at} precedes receipt[${i - 1}].issued_at beyond tolerated skew`,
+      };
+    }
+    prevIssuedMs = Math.max(prevIssuedMs, issuedMs);
+
+    // (5) Merkle root progression.
+    //
+    // A merkle_root change mid-chain is only legitimate at a block boundary
+    // (every MERKLE_BLOCK_SIZE receipts). Within a block the root is the
+    // previous block's root — receipts commit to their latest anchor. A
+    // silent root swap mid-block indicates tampering or an out-of-band
+    // anchor insertion.
+    if (prevRoot !== null && r.merkle_root !== prevRoot) {
+      const atBoundary = i % MERKLE_BLOCK_SIZE === 0;
+      if (!atBoundary) {
+        return {
+          ok: false,
+          breakAt: i,
+          reason: `receipt[${i}] merkle_root changed mid-block (position ${i % MERKLE_BLOCK_SIZE})`,
+        };
+      }
+    }
+    prevRoot = r.merkle_root;
   }
   return { ok: true };
 }

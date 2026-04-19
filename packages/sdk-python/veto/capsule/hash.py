@@ -17,19 +17,38 @@ import jcs
 from .types import Beneficiary
 
 _WS_RE = re.compile(r"\s+")
-_ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\uFEFF]")
-_EVM_CHAINS = {"eth", "ethereum", "base", "arbitrum", "arb", "optimism", "polygon"}
+# Default-ignorable code points that are invisible to humans but change the
+# hash input. Covers ZWSP/ZWNJ/ZWJ/ZWNBSP, BOM variants, bidi formatting and
+# isolate controls, Mongolian vowel separator, variation selectors, tag
+# characters, and soft hyphen. Without bidi stripping,
+# "ACME\u202EinvoiceCORP\u202C" and "ACMEinvoiceCORP" hash differently even
+# though they render identically.
+_DEFAULT_IGNORABLE_RE = re.compile(
+    "["
+    "\u00AD"              # soft hyphen
+    "\u061C"              # arabic letter mark
+    "\u180E"              # mongolian vowel separator
+    "\u200B-\u200F"       # ZW*, LRM, RLM
+    "\u202A-\u202E"       # bidi formatting
+    "\u2066-\u2069"       # bidi isolates
+    "\uFEFF"              # BOM / ZWNBSP
+    "\uFE00-\uFE0F"       # variation selectors
+    "]"
+    "|[\U000E0000-\U000E007F]"   # tag characters
+    "|[\U000E0100-\U000E01EF]"   # variation selector supplement
+)
 
 
 def _normalize_name(raw: str) -> str:
-    """NFC + strip zero-width joiners + lowercase + whitespace-collapse.
+    """NFC + strip default-ignorable code points + lowercase + ws-collapse.
 
     Matches the TypeScript `normalizeName` in sign-capsule-protocol. Applied
-    to every beneficiary name so NFC/NFD variants or zero-width-joiner attacks
-    can't produce distinct hashes for visually identical counterparties.
+    to every beneficiary name so NFC/NFD variants, zero-width joiners, and
+    bidi controls can't produce distinct hashes for visually identical
+    counterparties.
     """
     nfc = unicodedata.normalize("NFC", raw)
-    stripped = _ZERO_WIDTH_RE.sub("", nfc)
+    stripped = _DEFAULT_IGNORABLE_RE.sub("", nfc)
     return _WS_RE.sub(" ", stripped.lower()).strip()
 
 
@@ -61,12 +80,53 @@ def hash_canonical(value: Any) -> str:
 # --- beneficiary normalization ---------------------------------------------
 
 
+def _is_valid_aba_routing(routing: str) -> bool:
+    """ABA weighted 3/7/1 mod-10 checksum."""
+    if not re.fullmatch(r"[0-9]{9}", routing):
+        return False
+    weights = (3, 7, 1, 3, 7, 1, 3, 7, 1)
+    total = sum(int(d) * w for d, w in zip(routing, weights))
+    return total % 10 == 0
+
+
+def _is_valid_iban_checksum(iban: str) -> bool:
+    """ISO 13616 mod-97 check."""
+    if not re.fullmatch(r"[A-Z0-9]{5,34}", iban):
+        return False
+    rearranged = iban[4:] + iban[:4]
+    remainder = 0
+    for ch in rearranged:
+        code = ord(ch)
+        digit = code - 55 if code >= 65 else code - 48
+        if digit < 0 or digit > 35:
+            return False
+        remainder = (remainder * (100 if digit > 9 else 10) + digit) % 97
+    return remainder == 1
+
+
 def _normalize_bank_us(name: str, routing: str, account_last4: str) -> dict[str, str]:
+    # Cleanup limited to whitespace/hyphens/dots; arbitrary non-digit junk
+    # must fail loudly rather than collapse into a valid-looking field.
+    cleaned_routing = re.sub(r"[\s\-.]", "", routing)
+    if not re.fullmatch(r"[0-9]{9}", cleaned_routing):
+        raise ValueError(
+            f"invalid US routing number: must be exactly 9 digits after trimming "
+            f"whitespace/dashes; got {routing!r}"
+        )
+    if not _is_valid_aba_routing(cleaned_routing):
+        raise ValueError(
+            f"invalid US routing number: ABA checksum failed for {cleaned_routing!r}"
+        )
+    cleaned_last4 = re.sub(r"[\s\-]", "", account_last4)
+    if not re.fullmatch(r"[0-9]{4}", cleaned_last4):
+        raise ValueError(
+            f"invalid account_last4: must be exactly 4 digits; got {account_last4!r}"
+        )
     return {
         "type": "bank_us",
         "name": _normalize_name(name),
-        "routing": re.sub(r"\D", "", routing),
-        "account_last4": account_last4[-4:],
+        "routing": cleaned_routing,
+        "account_last4": cleaned_last4,
     }
 
 
@@ -76,11 +136,22 @@ def _normalize_bank_intl(b: dict[str, Any]) -> dict[str, str]:
         "name": _normalize_name(b["name"]),
     }
     if "iban" in b and b["iban"]:
-        out["iban"] = re.sub(r"\s+", "", b["iban"]).upper()
+        cleaned = re.sub(r"\s+", "", b["iban"]).upper()
+        if not _is_valid_iban_checksum(cleaned):
+            raise ValueError(f"invalid IBAN: checksum failed for {b['iban']!r}")
+        out["iban"] = cleaned
     if "swift_bic" in b and b["swift_bic"]:
-        out["swift_bic"] = re.sub(r"\s+", "", b["swift_bic"]).upper()
+        cleaned = re.sub(r"\s+", "", b["swift_bic"]).upper()
+        if not re.fullmatch(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?", cleaned):
+            raise ValueError(f"invalid SWIFT/BIC: {b['swift_bic']!r}")
+        out["swift_bic"] = cleaned
     if "country_iso" in b and b["country_iso"]:
-        out["country_iso"] = b["country_iso"].upper()
+        cleaned = b["country_iso"].upper()
+        if not re.fullmatch(r"[A-Z]{2}", cleaned):
+            raise ValueError(
+                f"invalid ISO 3166-1 alpha-2 country code: {b['country_iso']!r}"
+            )
+        out["country_iso"] = cleaned
     return out
 
 
@@ -208,15 +279,38 @@ def _normalize_solana(address: str) -> str:
     return address
 
 
+# Closed-world chain registry. A typo in `chain` MUST fail closed; silently
+# passing the raw address through for an unknown chain would make two
+# visually-identical beneficiaries hash differently without any warning.
+_CHAIN_REGISTRY: dict[str, tuple[str, str]] = {
+    "eth": ("eth", "evm"),
+    "ethereum": ("eth", "evm"),
+    "base": ("base", "evm"),
+    "arb": ("arb", "evm"),
+    "arbitrum": ("arb", "evm"),
+    "optimism": ("optimism", "evm"),
+    "op": ("optimism", "evm"),
+    "polygon": ("polygon", "evm"),
+    "matic": ("polygon", "evm"),
+    "sol": ("sol", "solana"),
+    "solana": ("sol", "solana"),
+}
+
+
 def _normalize_crypto(chain: str, address: str) -> dict[str, str]:
-    chain_norm = chain.lower()
-    if chain_norm in _EVM_CHAINS:
+    key = chain.lower().strip()
+    entry = _CHAIN_REGISTRY.get(key)
+    if entry is None:
+        raise ValueError(
+            f"unsupported crypto chain: {chain!r}. "
+            f"Known chains: {', '.join(sorted(_CHAIN_REGISTRY.keys()))}"
+        )
+    canonical, kind = entry
+    if kind == "evm":
         addr_norm = _to_eip55(address)
-    elif chain_norm in ("solana", "sol"):
-        addr_norm = _normalize_solana(address)
     else:
-        addr_norm = address
-    return {"type": "crypto", "chain": chain_norm, "address": addr_norm}
+        addr_norm = _normalize_solana(address)
+    return {"type": "crypto", "chain": canonical, "address": addr_norm}
 
 
 def normalize_beneficiary(b: Beneficiary) -> dict[str, Any]:

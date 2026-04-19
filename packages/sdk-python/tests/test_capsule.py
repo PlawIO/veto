@@ -104,12 +104,14 @@ def test_genesis_prev_receipt_hash_matches_spec_A5():
 
 
 def test_bank_us_normalization():
+    # Whitespace/dashes/dots in routing are trimmed, but non-digit junk and
+    # wrong-length account_last4 MUST now fail closed (see /codex P1-K).
     n = normalize_beneficiary(
         {
             "type": "bank_us",
             "name": "  Acme   Supplies LLC  ",
             "routing": "121-000-248",
-            "account_last4": "000004821",
+            "account_last4": "4821",
         }
     )
     assert n == {
@@ -126,11 +128,55 @@ def test_bank_us_normalization():
             "type": "bank_us",
             "name": "  ACME supplies   llc ",
             "routing": "121 000 248",
-            "account_last4": "00004821",
+            "account_last4": "4821",
         }
     )
     assert a == b
     assert a.startswith("sha256:")
+
+
+def test_bank_us_rejects_invalid_routing():
+    import pytest
+    with pytest.raises(ValueError, match="9 digits"):
+        hash_beneficiary(
+            {"type": "bank_us", "name": "Acme", "routing": "abc12345", "account_last4": "4821"}
+        )
+    with pytest.raises(ValueError, match="ABA checksum"):
+        hash_beneficiary(
+            {"type": "bank_us", "name": "Acme", "routing": "123456789", "account_last4": "4821"}
+        )
+
+
+def test_bank_us_rejects_invalid_last4():
+    import pytest
+    with pytest.raises(ValueError, match="4 digits"):
+        hash_beneficiary(
+            {"type": "bank_us", "name": "Acme", "routing": "121000248", "account_last4": "12345"}
+        )
+
+
+def test_crypto_unknown_chain_fails_closed():
+    import pytest
+    with pytest.raises(ValueError, match="unsupported crypto chain"):
+        hash_beneficiary(
+            {"type": "crypto", "chain": "some-new-chain", "address": "custom"}
+        )
+
+
+def test_bidi_control_stripping_in_names():
+    # "ACME\u202EinvoiceCORP\u202C" renders like "ACMEinvoiceCORP". Without
+    # bidi stripping, these hash differently.
+    plain = hash_beneficiary(
+        {"type": "bank_intl", "name": "ACMEinvoiceCORP", "iban": "DE89370400440532013000"}
+    )
+    with_rle = hash_beneficiary(
+        {
+            "type": "bank_intl",
+            "name": "ACME\u202EinvoiceCORP\u202C",
+            "iban": "DE89370400440532013000",
+        }
+    )
+    assert plain == with_rle
 
 
 def test_bank_intl_normalization():

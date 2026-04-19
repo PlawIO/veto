@@ -1,4 +1,5 @@
 import { CompactSign, compactVerify, importJWK } from "jose";
+import { sha256 } from "@noble/hashes/sha2";
 import type {
   CapsulePayload,
   Jwks,
@@ -9,6 +10,7 @@ import type {
 import { JWS_TYP } from "./types.js";
 import { canonicalize } from "./hash.js";
 import { ValidationError, validateCapsulePayload } from "./validate.js";
+import { parseRfc3339Strict, Rfc3339ParseError } from "./rfc3339.js";
 
 const DEFAULT_SKEW_SECONDS = 30;
 
@@ -23,6 +25,7 @@ export type CapsuleErrorCode =
   | "signature_typ_invalid"
   | "signature_kid_missing"
   | "signature_kid_unknown"
+  | "signature_kid_mismatch"
   | "signature_invalid"
   | "jwks_key_invalid"
   | "payload_invalid_json"
@@ -32,7 +35,9 @@ export type CapsuleErrorCode =
   | "capsule_expires_at_invalid"
   | "capsule_issued_at_invalid"
   | "capsule_expired"
-  | "capsule_issued_in_future";
+  | "capsule_issued_in_future"
+  | "capsule_issuer_not_authorized"
+  | "capsule_entity_not_authorized";
 
 export class CapsuleVerificationError extends Error {
   readonly code: CapsuleErrorCode;
@@ -43,6 +48,54 @@ export class CapsuleVerificationError extends Error {
   }
 }
 
+/**
+ * RFC 7638 JWK thumbprint. For Ed25519 the required members are
+ * {crv, kty, x}. We compute sha256 of the canonical JSON and base64url-encode.
+ * This binds a `kid` to the actual JWK material: callers that want tamper-
+ * evident key IDs can derive kid = thumbprint(jwk).
+ */
+export function jwkThumbprint(jwk: JwksKey): string {
+  const minimal = { crv: jwk.crv, kty: jwk.kty, x: jwk.x };
+  const bytes = new TextEncoder().encode(canonicalize(minimal));
+  const digest = sha256(bytes);
+  return base64urlEncode(digest);
+}
+
+/**
+ * Verifier trust anchor. A JWKS alone says "this key signed something"; an
+ * AuthorizedJwks binds each key to the issuer (and optionally the entity)
+ * it is authorized to sign for. The verifier rejects capsules whose signed
+ * `issuer`/`entity_id` don't match the authorization entry for the key's kid.
+ */
+export interface AuthorizedJwksEntry {
+  kid: string;
+  issuer: string;
+  /** If set, the key is restricted to signing for these entity_ids. */
+  entity_ids?: string[];
+}
+
+export interface AuthorizedJwks {
+  keys: JwksKey[];
+  /** kid → trust metadata. Every kid in `keys` SHOULD appear here. */
+  authorizations: AuthorizedJwksEntry[];
+}
+
+export interface TrustAnchor {
+  /** Either a raw JWKS (no issuer binding; dev/testing only) or AuthorizedJwks. */
+  jwks: Jwks | AuthorizedJwks;
+  /**
+   * If true (default), verifier refuses to accept keys without an
+   * AuthorizedJwksEntry. Set false to explicitly opt into the legacy
+   * "any trusted key can sign for any issuer" posture. Not recommended
+   * for production.
+   */
+  requireIssuerBinding?: boolean;
+}
+
+function isAuthorized(jwks: Jwks | AuthorizedJwks): jwks is AuthorizedJwks {
+  return Array.isArray((jwks as AuthorizedJwks).authorizations);
+}
+
 export async function signCapsule(
   payload: CapsulePayload,
   key: PrivateSigningKey,
@@ -51,6 +104,15 @@ export async function signCapsule(
   // issuing side before bad capsules hit the wire.
   validateCapsulePayload(payload);
 
+  // Bind kid to JWK material. If the caller supplied a separate `kid` that
+  // doesn't match an embedded `jwk.kid`, refuse — silent relabel has caused
+  // real rotation-audit drift.
+  if (key.jwk.kid !== undefined && key.jwk.kid !== key.kid) {
+    throw new Error(
+      `PrivateSigningKey.kid ("${key.kid}") must equal PrivateSigningKey.jwk.kid ("${key.jwk.kid}")`,
+    );
+  }
+
   const cryptoKey = await importJWK(key.jwk, "EdDSA");
   const body = new TextEncoder().encode(canonicalize(payload));
   return await new CompactSign(body)
@@ -58,38 +120,7 @@ export async function signCapsule(
     .sign(cryptoKey);
 }
 
-function parseProtectedHeader(jws: string): {
-  alg?: unknown;
-  typ?: unknown;
-  kid?: unknown;
-} {
-  const firstDot = jws.indexOf(".");
-  if (firstDot < 0) {
-    throw new CapsuleVerificationError("jws_malformed", "JWS has no header segment");
-  }
-  const headerB64 = jws.slice(0, firstDot);
-  let json: string;
-  try {
-    const padded = headerB64 + "=".repeat((4 - (headerB64.length % 4)) % 4);
-    const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
-    json =
-      typeof atob === "function"
-        ? atob(normalized)
-        : Buffer.from(normalized, "base64").toString("utf8");
-  } catch {
-    throw new CapsuleVerificationError(
-      "jws_malformed",
-      "JWS header is not valid base64url",
-    );
-  }
-  try {
-    return JSON.parse(json);
-  } catch {
-    throw new CapsuleVerificationError("jws_malformed", "JWS header is not valid JSON");
-  }
-}
-
-function decodeBase64Url(s: string): Uint8Array {
+function base64urlDecodeToBytes(s: string): Uint8Array {
   const padded = s + "=".repeat((4 - (s.length % 4)) % 4);
   const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
   try {
@@ -105,34 +136,67 @@ function decodeBase64Url(s: string): Uint8Array {
   }
 }
 
-function parseRfc3339(value: string, code: CapsuleErrorCode): Date {
-  // Reject naive datetimes without explicit UTC or ±HH:MM offset.
-  // `new Date("2026-04-17T14:00:00")` silently interprets as LOCAL time,
-  // which differs between hosts and has caused real drift bugs.
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
-    throw new CapsuleVerificationError(
-      code,
-      `timestamp must be RFC 3339 with explicit offset; got "${value}"`,
-    );
-  }
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) {
-    throw new CapsuleVerificationError(code, `invalid datetime: "${value}"`);
-  }
-  return d;
+function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  const b64 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
+  return b64.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
-function secondsBetween(a: Date, b: Date): number {
-  return (a.getTime() - b.getTime()) / 1000;
+function decodeUtf8(bytes: Uint8Array): string {
+  // TextDecoder("utf-8", {fatal: true}) rejects malformed UTF-8 instead of
+  // silently substituting U+FFFD. Cross-language parity with Python's strict
+  // json.loads(bytes.decode("utf-8")).
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new CapsuleVerificationError("jws_malformed", "JWS segment is not valid UTF-8");
+  }
+}
+
+function parseProtectedHeader(jws: string): {
+  alg?: unknown;
+  typ?: unknown;
+  kid?: unknown;
+} {
+  const firstDot = jws.indexOf(".");
+  if (firstDot < 0) {
+    throw new CapsuleVerificationError("jws_malformed", "JWS has no header segment");
+  }
+  const headerB64 = jws.slice(0, firstDot);
+  const headerBytes = base64urlDecodeToBytes(headerB64);
+  const headerJson = decodeUtf8(headerBytes);
+  try {
+    return JSON.parse(headerJson);
+  } catch {
+    throw new CapsuleVerificationError("jws_malformed", "JWS header is not valid JSON");
+  }
+}
+
+function secondsBetween(aMs: number, bMs: number): number {
+  return (aMs - bMs) / 1000;
 }
 
 export async function verifyCapsule(
   jws: string,
-  jwks: Jwks,
+  trust: Jwks | AuthorizedJwks | TrustAnchor,
   options: VerifyOptions = {},
 ): Promise<VerifyCapsuleResult> {
   const skew = options.clockSkewSeconds ?? DEFAULT_SKEW_SECONDS;
   const now = options.now ?? new Date();
+
+  // Accept three shapes for backwards-compat:
+  //   1. Plain Jwks                (legacy; no issuer binding — warn-worthy)
+  //   2. AuthorizedJwks            (has authorizations[])
+  //   3. TrustAnchor { jwks, ... } (full control over requireIssuerBinding)
+  let anchor: TrustAnchor;
+  if ("jwks" in (trust as TrustAnchor)) {
+    anchor = trust as TrustAnchor;
+  } else {
+    anchor = { jwks: trust as Jwks | AuthorizedJwks };
+  }
+  const requireBinding =
+    anchor.requireIssuerBinding ?? isAuthorized(anchor.jwks);
 
   const parts = jws.split(".");
   if (parts.length !== 3) {
@@ -159,11 +223,12 @@ export async function verifyCapsule(
       `unexpected typ: ${String(header.typ)}`,
     );
   }
-  if (typeof header.kid !== "string") {
+  if (typeof header.kid !== "string" || header.kid.length === 0) {
     throw new CapsuleVerificationError("signature_kid_missing", "missing kid in JWS header");
   }
 
-  const jwk = jwks.keys.find((k) => k.kid === header.kid);
+  const keys = anchor.jwks.keys;
+  const jwk = keys.find((k) => k.kid === header.kid);
   if (!jwk) {
     throw new CapsuleVerificationError(
       "signature_kid_unknown",
@@ -174,6 +239,13 @@ export async function verifyCapsule(
     throw new CapsuleVerificationError(
       "jwks_key_invalid",
       `JWKS key for kid=${header.kid} must be OKP/Ed25519`,
+    );
+  }
+  if (jwk.kid !== header.kid) {
+    // The key entry's self-reported kid diverges from the lookup key. Abort.
+    throw new CapsuleVerificationError(
+      "signature_kid_mismatch",
+      `JWKS entry kid "${jwk.kid}" disagrees with header kid "${header.kid}"`,
     );
   }
 
@@ -197,25 +269,25 @@ export async function verifyCapsule(
     );
   }
 
+  // Parse payload bytes once under a typed error umbrella. Any subsequent
+  // decoding/canonicalization failure is deterministically mapped.
+  const signedCanonical = decodeUtf8(verified.payload);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(signedCanonical);
+  } catch {
+    throw new CapsuleVerificationError("payload_invalid_json", "payload is not JSON");
+  }
+
   // Canonical-form enforcement. The signer commits to JCS-canonicalized bytes;
   // the verifier MUST reject a valid-signature-over-non-canonical payload so
   // there is exactly one wire encoding per semantic capsule.
-  const expectedCanonical = canonicalize(
-    JSON.parse(new TextDecoder().decode(verified.payload)),
-  );
-  const signedCanonical = new TextDecoder().decode(verified.payload);
+  const expectedCanonical = canonicalize(parsed);
   if (expectedCanonical !== signedCanonical) {
     throw new CapsuleVerificationError(
       "payload_not_canonical",
       "capsule payload is valid JSON but not JCS-canonical",
     );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(verified.payload));
-  } catch {
-    throw new CapsuleVerificationError("payload_invalid_json", "payload is not JSON");
   }
 
   let payload: CapsulePayload;
@@ -238,26 +310,74 @@ export async function verifyCapsule(
     );
   }
 
-  const expiresAt = parseRfc3339(payload.expires_at, "capsule_expires_at_invalid");
-  const issuedAt = parseRfc3339(payload.issued_at, "capsule_issued_at_invalid");
+  // ---- Trust-anchor binding ----
+  // A key proven to have signed the capsule is not enough. The trust anchor
+  // MUST also authorize this key to sign for the claimed (issuer, entity_id).
+  // Without this check, any trusted key in an aggregated JWKS could mint a
+  // capsule for an issuer it was never authorized for.
+  if (isAuthorized(anchor.jwks)) {
+    const auth = anchor.jwks.authorizations.find((a) => a.kid === header.kid);
+    if (!auth) {
+      if (requireBinding) {
+        throw new CapsuleVerificationError(
+          "signature_kid_unknown",
+          `kid "${header.kid}" has no authorization entry in trust anchor`,
+        );
+      }
+    } else {
+      if (auth.issuer !== payload.issuer) {
+        throw new CapsuleVerificationError(
+          "capsule_issuer_not_authorized",
+          `kid "${header.kid}" is not authorized to sign for issuer "${payload.issuer}" (expected "${auth.issuer}")`,
+        );
+      }
+      if (auth.entity_ids && !auth.entity_ids.includes(payload.entity_id)) {
+        throw new CapsuleVerificationError(
+          "capsule_entity_not_authorized",
+          `kid "${header.kid}" is not authorized for entity_id "${payload.entity_id}"`,
+        );
+      }
+    }
+  } else if (requireBinding) {
+    throw new CapsuleVerificationError(
+      "signature_kid_unknown",
+      "trust anchor has no authorizations; pass AuthorizedJwks or set requireIssuerBinding=false explicitly",
+    );
+  }
 
-  if (secondsBetween(now, expiresAt) > skew) {
+  // ---- Temporal validation ----
+  let expiresMs: number;
+  let issuedMs: number;
+  try {
+    expiresMs = parseRfc3339Strict(payload.expires_at).epochMs;
+  } catch (err) {
+    const msg = err instanceof Rfc3339ParseError ? err.message : String(err);
+    throw new CapsuleVerificationError("capsule_expires_at_invalid", msg);
+  }
+  try {
+    issuedMs = parseRfc3339Strict(payload.issued_at).epochMs;
+  } catch (err) {
+    const msg = err instanceof Rfc3339ParseError ? err.message : String(err);
+    throw new CapsuleVerificationError("capsule_issued_at_invalid", msg);
+  }
+
+  const nowMs = now.getTime();
+  if (secondsBetween(nowMs, expiresMs) > skew) {
     throw new CapsuleVerificationError(
       "capsule_expired",
       `capsule expired at ${payload.expires_at}`,
     );
   }
-  if (secondsBetween(issuedAt, now) > skew) {
+  if (secondsBetween(issuedMs, nowMs) > skew) {
     throw new CapsuleVerificationError(
       "capsule_issued_in_future",
       `capsule issued_at ${payload.issued_at} is beyond tolerated skew`,
     );
   }
 
-  // Decode sig segment just to confirm it's well-formed base64url — already
-  // consumed by compactVerify but we expose a clear error if the caller
-  // hand-crafted something malformed.
-  decodeBase64Url(parts[2]!);
+  // Validate signature segment is well-formed base64url (already consumed by
+  // compactVerify, but surface a clear error if caller hand-crafted garbage).
+  base64urlDecodeToBytes(parts[2]!);
 
   return {
     payload,

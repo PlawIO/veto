@@ -31,11 +31,16 @@ from .hash import (
     sha256_prefixed,
 )
 from .sign import (
+    AuthorizedJwks,
+    AuthorizedJwksEntry,
     CapsuleVerificationError,
+    TrustAnchor,
+    jwk_thumbprint,
     public_jwk_from_private,
     sign_capsule,
     verify_capsule,
 )
+from .rfc3339 import Rfc3339ParseError, is_valid_rfc3339, parse_rfc3339_strict
 from .merkle import (
     GENESIS_MERKLE_ROOT,
     MERKLE_BLOCK_SIZE,
@@ -53,6 +58,8 @@ from .validate import (
 )
 
 __all__ = [
+    "AuthorizedJwks",
+    "AuthorizedJwksEntry",
     "CAPSULE_VERSION",
     "CapsulePayload",
     "CapsuleVerificationError",
@@ -66,6 +73,8 @@ __all__ = [
     "PrivateSigningKey",
     "RECEIPT_VERSION",
     "ReceiptPayload",
+    "Rfc3339ParseError",
+    "TrustAnchor",
     "BankInternationalBeneficiary",
     "BankUsBeneficiary",
     "CryptoBeneficiary",
@@ -77,7 +86,10 @@ __all__ = [
     "hash_beneficiary",
     "hash_canonical",
     "hash_receipt",
+    "is_valid_rfc3339",
+    "jwk_thumbprint",
     "normalize_beneficiary",
+    "parse_rfc3339_strict",
     "public_jwk_from_private",
     "sha256_hex",
     "sha256_prefixed",

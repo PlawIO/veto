@@ -33,12 +33,12 @@ describe("sha256 of empty == genesis prev_receipt_hash (A5 golden vector)", () =
 });
 
 describe("hashBeneficiary normalization", () => {
-  it("bank_us: strips non-digit routing, lowercases name, collapses whitespace, uses last4 only", () => {
+  it("bank_us: trims whitespace/dashes from routing, lowercases name, enforces exact 4-digit last4", () => {
     const n = normalizeBeneficiary({
       type: "bank_us",
       name: "  Acme   Supplies LLC  ",
       routing: "121-000-248",
-      account_last4: "000004821",
+      account_last4: "4821",
     });
     expect(n).toEqual({
       type: "bank_us",
@@ -55,12 +55,12 @@ describe("hashBeneficiary normalization", () => {
     });
     expect(h).toMatch(/^sha256:[0-9a-f]{64}$/);
 
-    // Alternate spellings/formatting hash identically.
+    // Alternate spellings/formatting hash identically (whitespace trim only).
     const h2 = hashBeneficiary({
       type: "bank_us",
       name: "  ACME supplies   llc ",
       routing: "121 000 248",
-      account_last4: "00004821",
+      account_last4: "4821",
     });
     expect(h2).toBe(h);
   });

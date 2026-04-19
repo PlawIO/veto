@@ -46,17 +46,17 @@ describe("hash.ts — beneficiary normalization edge paths", () => {
     expect(a).toBe(b);
   });
 
-  it("crypto: unknown chain passes address through unchanged", () => {
-    const n = normalizeBeneficiary({
-      type: "crypto",
-      chain: "some-new-chain",
-      address: "custom-address-format",
-    });
-    expect(n).toEqual({
-      type: "crypto",
-      chain: "some-new-chain",
-      address: "custom-address-format",
-    });
+  it("crypto: unknown chain fails closed (no silent pass-through)", () => {
+    // Typos and unsupported chains MUST throw — otherwise two
+    // visually-identical beneficiaries could hash differently just because
+    // the caller typed "etherium" instead of "ethereum".
+    expect(() =>
+      normalizeBeneficiary({
+        type: "crypto",
+        chain: "some-new-chain",
+        address: "custom-address-format",
+      }),
+    ).toThrow(/unsupported crypto chain/);
   });
 
   it("crypto EVM: rejects malformed address length", () => {
@@ -191,21 +191,22 @@ describe("sign.ts — header + payload error paths", () => {
   it("verifyCapsule rejects non-canonical payload even when signature is valid", async () => {
     const key = await buildTestSigningKey();
     const { CompactSign, importJWK } = await import("jose");
+    const { canonicalize } = await import("../src/index.js");
     const cryptoKey = await importJWK(key.jwk, "EdDSA");
-    // Sign non-canonical bytes (keys not in sorted order).
-    const nonCanonical = JSON.stringify({ ...fixedCapsule() });
-    const canonicalBytes = new TextEncoder().encode(nonCanonical);
-    const jws = await new CompactSign(canonicalBytes)
+    // Handcraft a guaranteed non-canonical form: JCS requires keys in
+    // lexicographic order. Prepend an extra space after the opening brace
+    // so the bytes can never equal any canonical encoding.
+    const canonicalBytes = new TextEncoder().encode(canonicalize(fixedCapsule()));
+    const nonCanonicalBytes = new Uint8Array(canonicalBytes.length + 1);
+    nonCanonicalBytes[0] = 0x7b; // '{'
+    nonCanonicalBytes[1] = 0x20; // extra space
+    nonCanonicalBytes.set(canonicalBytes.slice(1), 2);
+    const jws = await new CompactSign(nonCanonicalBytes)
       .setProtectedHeader({ alg: "EdDSA", typ: "veto.capsule+jws", kid: key.kid })
       .sign(cryptoKey);
-    // Only assert a rejection if JSON.stringify's key order happens to differ
-    // from JCS — for this fixture it should. If they happen to align, the
-    // verifier will accept cleanly and this test is a no-op.
-    try {
-      await verifyCapsule(jws, await jwksFromKey(), { now: REFERENCE_NOW });
-    } catch (err) {
-      expect((err as { code: string }).code).toBe("payload_not_canonical");
-    }
+    await expect(
+      verifyCapsule(jws, await jwksFromKey(), { now: REFERENCE_NOW }),
+    ).rejects.toMatchObject({ code: "payload_not_canonical" });
   });
 
   it("verifyCapsule rejects max_uses = 0", async () => {

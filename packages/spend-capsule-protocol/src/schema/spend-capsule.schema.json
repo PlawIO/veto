@@ -23,10 +23,17 @@
   "properties": {
     "version": { "const": "veto.capsule/1" },
     "capsule_id": { "type": "string", "pattern": "^cap_[0-9a-z]{24}$" },
-    "issuer": { "type": "string", "format": "uri" },
-    "entity_id": { "type": "string" },
-    "agent_id": { "type": "string" },
-    "session_id": { "type": "string" },
+    "issuer": {
+      "type": "string",
+      "format": "uri",
+      "description": "HTTPS origin only. Runtime validators additionally reject userinfo/query/fragment.",
+      "pattern": "^https://[^?#@]+$",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "entity_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "agent_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "session_id": { "type": "string", "minLength": 1, "maxLength": 128 },
     "rail_allowlist": {
       "type": "array",
       "items": {
@@ -41,7 +48,8 @@
           "usdc.arb"
         ]
       },
-      "minItems": 1
+      "minItems": 1,
+      "uniqueItems": true
     },
     "counterparty_hash": {
       "type": "string",
@@ -53,16 +61,24 @@
       "properties": {
         "currency": { "type": "string", "pattern": "^[A-Z]{3,10}$" },
         "amount": { "type": "string", "pattern": "^\\d+(\\.\\d{1,18})?$" }
-      }
+      },
+      "additionalProperties": false
     },
     "memo_template": { "type": "string", "maxLength": 140 },
     "invoice_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "workflow_id": { "type": "string", "pattern": "^wf_[0-9a-z]{24}$" },
     "policy_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "approval_ref": { "type": ["string", "null"] },
-    "dual_control_ref": { "type": ["string", "null"] },
-    "issued_at": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": "string", "format": "date-time" },
+    "approval_ref": { "type": ["string", "null"], "minLength": 1 },
+    "dual_control_ref": { "type": ["string", "null"], "minLength": 1 },
+    "issued_at": {
+      "type": "string",
+      "description": "RFC 3339 with explicit offset. Runtime parser rejects impossible dates and out-of-range offsets.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "expires_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(Z|[+-]\\d{2}:\\d{2})$"
+    },
     "max_uses": { "type": "integer", "minimum": 1, "default": 1 },
     "nonce": { "type": "string", "minLength": 16 }
   },

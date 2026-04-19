@@ -24,6 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "fixture:gen": "node scripts/gen-contract-fixture.mjs > ../sdk-python/tests/fixtures/contract-capsule.json",
+    "fixture:check": "node scripts/check-contract-fixture.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
