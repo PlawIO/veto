@@ -172,12 +172,24 @@ def _parse_header(jws: str) -> dict[str, Any]:
 
 
 def _resolve_trust(
-    trust: Jwks | AuthorizedJwks | TrustAnchor,
+    trust: Jwks | AuthorizedJwks | TrustAnchor | dict,
 ) -> tuple[list[JwksKey], list[AuthorizedJwksEntry] | None, bool]:
-    """Return (keys, authorizations_or_None, require_binding)."""
+    """Return (keys, authorizations_or_None, require_binding).
+
+    Accepts four shapes:
+      - TrustAnchor dataclass
+      - AuthorizedJwks dataclass
+      - Plain dict JWKS (may carry `authorizations` from JSON fixtures)
+      - Dict-shaped TrustAnchor with `jwks` + optional `require_issuer_binding`
+    """
     if isinstance(trust, TrustAnchor):
         inner = trust.jwks
         req_override = trust.require_issuer_binding
+    elif isinstance(trust, dict) and "jwks" in trust and "keys" not in trust:
+        # Dict-shaped TrustAnchor. Distinguishable from a plain JWKS because
+        # a JWKS MUST have a top-level `keys` array.
+        inner = trust["jwks"]
+        req_override = trust.get("require_issuer_binding")
     else:
         inner = trust
         req_override = None
