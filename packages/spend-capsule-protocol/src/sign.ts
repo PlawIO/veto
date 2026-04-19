@@ -185,10 +185,18 @@ export async function verifyCapsule(
   const skew = options.clockSkewSeconds ?? DEFAULT_SKEW_SECONDS;
   const now = options.now ?? new Date();
 
-  // Accept three shapes for backwards-compat:
-  //   1. Plain Jwks                (legacy; no issuer binding — warn-worthy)
-  //   2. AuthorizedJwks            (has authorizations[])
+  // Accept three shapes:
+  //   1. Plain Jwks                (legacy; caller has NOT declared issuer
+  //                                  binding — REJECTED by default)
+  //   2. AuthorizedJwks            (has authorizations[] — binding on)
   //   3. TrustAnchor { jwks, ... } (full control over requireIssuerBinding)
+  //
+  // Default posture is binding-required. A caller that really wants the
+  // legacy "any trusted key for any issuer" behavior must pass an explicit
+  // `TrustAnchor { jwks, requireIssuerBinding: false }`. This is a
+  // production-safety default — a codex repro showed that defaulting-off
+  // for plain Jwks accepted capsules for https://attacker.example using a
+  // trusted signing key.
   let anchor: TrustAnchor;
   if ("jwks" in (trust as TrustAnchor)) {
     anchor = trust as TrustAnchor;
@@ -196,7 +204,10 @@ export async function verifyCapsule(
     anchor = { jwks: trust as Jwks | AuthorizedJwks };
   }
   const requireBinding =
-    anchor.requireIssuerBinding ?? isAuthorized(anchor.jwks);
+    anchor.requireIssuerBinding ??
+    // Binding on when authorizations are present OR when the caller passed
+    // a plain Jwks. To opt OUT, set requireIssuerBinding:false explicitly.
+    true;
 
   const parts = jws.split(".");
   if (parts.length !== 3) {

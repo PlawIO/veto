@@ -12,6 +12,12 @@
         "alg": "EdDSA",
         "use": "sig"
       }
+    ],
+    "authorizations": [
+      {
+        "kid": "veto-gateway-test",
+        "issuer": "https://gateway.veto.so"
+      }
     ]
   },
   "payload": {

@@ -61,7 +61,14 @@ def parse_rfc3339_strict(value: str) -> ParsedRfc3339:
     if second > 60:
         raise Rfc3339ParseError(f"second must be 00..60; got {sec_s}")
     if second == 60:
-        second = 59  # clamp leap second
+        # RFC 3339 §5.6: leap seconds occur ONLY at 23:59:60 UTC on the last
+        # day of a UTC month. Anything else silently collapsing to :59 makes
+        # two semantically-distinct payloads hash-equal after canonicalization.
+        if hour != 23 or minute != 59:
+            raise Rfc3339ParseError(
+                f"leap second :60 is only legal at 23:59:60; got {hour_s}:{min_s}:{sec_s}"
+            )
+        second = 59  # clamp ONLY at 23:59:60
 
     offset_minutes = 0
     if offset != "Z":
@@ -75,7 +82,11 @@ def parse_rfc3339_strict(value: str) -> ParsedRfc3339:
         offset_minutes = sign * (o_hour * 60 + o_min)
 
     utc_naive = _dt.datetime(year, month, day, hour, minute, second, tzinfo=_dt.timezone.utc)
-    frac_ms = int(round(float("0." + frac_s) * 1000)) if frac_s else 0
+    # Use floor (not round) so TS and Python produce the same epoch_ms for
+    # every fractional input. Math.floor vs Python round() caused a 1ms
+    # drift at boundaries like .123500 — flagged by adversarial codex pass.
+    import math as _math
+    frac_ms = _math.floor(float("0." + frac_s) * 1000) if frac_s else 0
     epoch_ms = int(utc_naive.timestamp() * 1000) + frac_ms - offset_minutes * 60 * 1000
 
     # Round-trip canonical UTC form with no trailing-zero fraction.

@@ -9,9 +9,16 @@ import {
 } from "../src/index.js";
 import { REFERENCE_NOW, buildTestSigningKey, fixedCapsule } from "./fixtures.js";
 
-async function jwksFromKey() {
+import type { AuthorizedJwks } from "../src/index.js";
+
+async function jwksFromKey(): Promise<AuthorizedJwks> {
   const key = await buildTestSigningKey();
-  return { keys: [publicJwkFromPrivate(key)] };
+  return {
+    keys: [publicJwkFromPrivate(key)],
+    authorizations: [
+      { kid: key.kid, issuer: "https://gateway.veto.so" },
+    ],
+  };
 }
 
 describe("hash.ts — beneficiary normalization edge paths", () => {

@@ -228,7 +228,11 @@ def test_round_trip_sign_and_verify():
     jws = sign_capsule(payload, key)
     assert jws.count(".") == 2
 
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     result = verify_capsule(jws, jwks, now=REFERENCE_NOW)
     assert result.payload == payload
     assert result.protected_header == {
@@ -251,7 +255,11 @@ def test_sign_is_deterministic_across_calls():
 def test_reject_after_skew_window_past_expiry():
     key = _build_test_key()
     jws = sign_capsule(_fixed_capsule(), key)
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     with pytest.raises(CapsuleVerificationError) as exc:
         verify_capsule(jws, jwks, now=dt.datetime(2026, 4, 17, 14, 16, 0, tzinfo=dt.timezone.utc))
     assert exc.value.code == "capsule_expired"
@@ -260,7 +268,11 @@ def test_reject_after_skew_window_past_expiry():
 def test_accept_within_default_30s_skew():
     key = _build_test_key()
     jws = sign_capsule(_fixed_capsule(), key)
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     # expiry + 20s, still inside 30s window
     verify_capsule(jws, jwks, now=dt.datetime(2026, 4, 17, 14, 15, 20, tzinfo=dt.timezone.utc))
 
@@ -268,7 +280,11 @@ def test_accept_within_default_30s_skew():
 def test_reject_capsule_issued_in_future():
     key = _build_test_key()
     jws = sign_capsule(_fixed_capsule(), key)
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     with pytest.raises(CapsuleVerificationError) as exc:
         verify_capsule(jws, jwks, now=dt.datetime(2026, 4, 17, 13, 59, 0, tzinfo=dt.timezone.utc))
     assert exc.value.code == "capsule_issued_in_future"
@@ -278,7 +294,11 @@ def test_reject_unknown_kid():
     unknown_key = _build_test_key("unknown-kid")
     known_key = _build_test_key()
     jws = sign_capsule(_fixed_capsule(), unknown_key)
-    jwks = {"keys": [public_jwk_from_private(known_key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(known_key)],
+        authorizations=[AuthorizedJwksEntry(kid=known_key["kid"], issuer="https://gateway.veto.so")],
+    )
     with pytest.raises(CapsuleVerificationError) as exc:
         verify_capsule(jws, jwks, now=REFERENCE_NOW)
     assert exc.value.code == "signature_kid_unknown"
@@ -287,7 +307,11 @@ def test_reject_unknown_kid():
 def test_reject_tampered_signature():
     key = _build_test_key()
     jws = sign_capsule(_fixed_capsule(), key)
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     parts = jws.split(".")
     last = parts[2]
     parts[2] = ("B" + last[1:]) if last.startswith("A") else ("A" + last[1:])
@@ -299,7 +323,11 @@ def test_reject_tampered_signature():
 def test_reject_tampered_payload():
     key = _build_test_key()
     jws = sign_capsule(_fixed_capsule(), key)
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     parts = jws.split(".")
     tampered = _fixed_capsule(amount_ceiling={"currency": "USD", "amount": "99999.00"})
     parts[1] = _b64url(json.dumps(tampered).encode("utf-8"))
@@ -310,7 +338,11 @@ def test_reject_tampered_payload():
 
 def test_reject_wrong_alg():
     key = _build_test_key()
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     header_b64 = _b64url(json.dumps({"alg": "HS256", "typ": "veto.capsule+jws", "kid": "x"}).encode())
     body_b64 = _b64url(json.dumps(_fixed_capsule()).encode())
     jws = f"{header_b64}.{body_b64}.AAAA"
@@ -425,7 +457,11 @@ def test_reject_max_uses_zero():
 def test_reject_additional_property_at_verify_time():
     # Simulate a peer that crafts a JWS bypassing our signer's schema check.
     key = _build_test_key()
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     from veto.capsule import canonicalize
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -448,7 +484,11 @@ def test_reject_additional_property_at_verify_time():
 
 def test_reject_non_canonical_payload_on_verify():
     key = _build_test_key()
-    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import AuthorizedJwks, AuthorizedJwksEntry
+    jwks = AuthorizedJwks(
+        keys=[public_jwk_from_private(key)],
+        authorizations=[AuthorizedJwksEntry(kid=key["kid"], issuer="https://gateway.veto.so")],
+    )
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(TEST_PRIVATE_SEED_HEX))

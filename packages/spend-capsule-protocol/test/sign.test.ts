@@ -7,9 +7,20 @@ import {
 } from "../src/index.js";
 import { REFERENCE_NOW, buildTestSigningKey, fixedCapsule } from "./fixtures.js";
 
-async function jwksFromKey() {
+import type { AuthorizedJwks } from "../src/index.js";
+
+// Tests use an AuthorizedJwks bound to the fixed fixture issuer so each
+// verifyCapsule call exercises the happy issuer-binding path. Passing a
+// plain Jwks would now be rejected as unsafe — that's the prod-safety
+// default we want.
+async function jwksFromKey(): Promise<AuthorizedJwks> {
   const key = await buildTestSigningKey();
-  return { keys: [publicJwkFromPrivate(key)] };
+  return {
+    keys: [publicJwkFromPrivate(key)],
+    authorizations: [
+      { kid: key.kid, issuer: "https://gateway.veto.so" },
+    ],
+  };
 }
 
 describe("signCapsule + verifyCapsule (happy path)", () => {

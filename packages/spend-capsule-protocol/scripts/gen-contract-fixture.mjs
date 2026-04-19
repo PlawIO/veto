@@ -58,7 +58,13 @@ const capsule = {
 };
 
 const jws = await signCapsule(capsule, privateKey);
-const jwks = { keys: [publicJwkFromPrivate(privateKey)] };
+// AuthorizedJwks shape — production-safety default requires issuer binding.
+const jwks = {
+  keys: [publicJwkFromPrivate(privateKey)],
+  authorizations: [
+    { kid: privateKey.kid, issuer: "https://gateway.veto.so" },
+  ],
+};
 
 console.log(
   JSON.stringify(

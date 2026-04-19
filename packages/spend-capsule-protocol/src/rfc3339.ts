@@ -98,8 +98,17 @@ export function parseRfc3339Strict(value: string): ParsedRfc3339 {
     throw new Rfc3339ParseError(`second must be 00..60; got ${secStr}`);
   }
   if (second === 60) {
-    // Leap second: clamp to 59 for Date math. Both runtimes do the same.
-    second = 59;
+    // RFC 3339 §5.6: leap seconds occur ONLY at 23:59:60 UTC on the last
+    // day of a UTC month. Anything else is impossible and must be rejected
+    // rather than silently coerced to :59 — otherwise a forged "12:34:60"
+    // timestamp verifies identically to "12:34:59", which makes two
+    // semantically-distinct payloads hash-equal after canonicalization.
+    if (hour !== 23 || minute !== 59) {
+      throw new Rfc3339ParseError(
+        `leap second :60 is only legal at 23:59:60; got ${hourStr}:${minStr}:${secStr}`,
+      );
+    }
+    second = 59; // clamp ONLY at 23:59:60
   }
 
   // Offset validation.

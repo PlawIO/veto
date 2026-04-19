@@ -187,17 +187,25 @@ def _resolve_trust(
         auths = inner.authorizations
     elif isinstance(inner, dict):
         keys = inner["keys"]
-        auths = None
+        # A dict can carry `authorizations` — JSON-loaded fixtures and cross-
+        # language contract tests use this shape. Promote it to typed entries
+        # so the binding check fires correctly instead of silently fail-open.
+        auths_raw = inner.get("authorizations")
+        auths = (
+            [AuthorizedJwksEntry(**a) for a in auths_raw] if auths_raw else None
+        )
     else:
-        # Could be a duck-typed dict with `keys` + `authorizations` (from JSON).
         keys = inner["keys"]  # type: ignore[index]
         auths_raw = inner.get("authorizations") if hasattr(inner, "get") else None  # type: ignore[attr-defined]
         auths = (
             [AuthorizedJwksEntry(**a) for a in auths_raw] if auths_raw else None
         )
 
-    has_auth = auths is not None
-    require_binding = req_override if req_override is not None else has_auth
+    # Default posture: require issuer binding. Callers that really want the
+    # legacy "any trusted key for any issuer" behavior must pass an explicit
+    # TrustAnchor with require_issuer_binding=False. Matches the TS mirror's
+    # production-safety default (codex second-pass P0).
+    require_binding = req_override if req_override is not None else True
     return keys, auths, require_binding
 
 
