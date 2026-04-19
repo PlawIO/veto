@@ -141,6 +141,37 @@ importers:
         specifier: ^4.0.16
         version: 4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
 
+  packages/spend-capsule-protocol:
+    dependencies:
+      "@noble/ed25519":
+        specifier: ^2.3.0
+        version: 2.3.0
+      "@noble/hashes":
+        specifier: ^1.5.0
+        version: 1.8.0
+      "@scure/base":
+        specifier: ^1.1.9
+        version: 1.2.6
+      canonicalize:
+        specifier: ^2.1.0
+        version: 2.1.0
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
+    devDependencies:
+      "@types/node":
+        specifier: ^20.10.0
+        version: 20.19.27
+      "@vitest/coverage-v8":
+        specifier: ^4.0.16
+        version: 4.0.16(vitest@4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3))
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.16
+        version: 4.0.16(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.3)
+
 packages:
   "@ai-sdk/gateway@3.0.46":
     resolution:
@@ -1237,6 +1268,19 @@ packages:
         integrity: sha512-fo+QhuU3qE/2TQMQmbVMqaQ6EWbMhi4ABWP+O4AM1NqPBuy0OrApV5LO6BrrgnhtAHS2NH6RrVk9OL181tTi8A==,
       }
 
+  "@noble/ed25519@2.3.0":
+    resolution:
+      {
+        integrity: sha512-M7dvXL2B92/M7dw9+gzuydL8qn/jiqNHaoR3Q+cb1q1GHV7uwE17WCyFMG+Y+TZb5izcaXk5TdJRrDUxHXL78A==,
+      }
+
+  "@noble/hashes@1.8.0":
+    resolution:
+      {
+        integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==,
+      }
+    engines: { node: ^14.21.3 || >=16 }
+
   "@nodelib/fs.scandir@2.1.5":
     resolution:
       {
@@ -1581,6 +1625,12 @@ packages:
       }
     cpu: [x64]
     os: [win32]
+
+  "@scure/base@1.2.6":
+    resolution:
+      {
+        integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==,
+      }
 
   "@standard-schema/spec@1.1.0":
     resolution:
@@ -2144,6 +2194,13 @@ packages:
         integrity: sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA==,
       }
     engines: { node: ">=10" }
+
+  canonicalize@2.1.0:
+    resolution:
+      {
+        integrity: sha512-F705O3xrsUtgt98j7leetNhTWPe+5S72rlL5O4jA1pKqBVQ/dT1O1D6PFxmSXvc0SUOinWS57DKx0I3CHrXJHQ==,
+      }
+    hasBin: true
 
   chai@6.2.2:
     resolution:
@@ -2881,6 +2938,7 @@ packages:
       {
         integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==,
       }
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
   globals@14.0.0:
@@ -3207,6 +3265,12 @@ packages:
         integrity: sha512-/imKNG4EbWNrVjoNC/1H5/9GFy+tqjGBHCaSsN+P2RnPqjsLmv6UD3Ej+Kj8nBWaRAwyk7kK5ZUc+OEatnTR3A==,
       }
     hasBin: true
+
+  jose@5.10.0:
+    resolution:
+      {
+        integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==,
+      }
 
   jpeg-js@0.4.4:
     resolution:
@@ -5564,6 +5628,10 @@ snapshots:
       globby: 11.1.0
       read-yaml-file: 1.1.0
 
+  "@noble/ed25519@2.3.0": {}
+
+  "@noble/hashes@1.8.0": {}
+
   "@nodelib/fs.scandir@2.1.5":
     dependencies:
       "@nodelib/fs.stat": 2.0.5
@@ -5725,6 +5793,8 @@ snapshots:
 
   "@rollup/rollup-win32-x64-msvc@4.59.0":
     optional: true
+
+  "@scure/base@1.2.6": {}
 
   "@standard-schema/spec@1.1.0": {}
 
@@ -6075,6 +6145,8 @@ snapshots:
   callsites@3.1.0: {}
 
   camelcase@6.3.0: {}
+
+  canonicalize@2.1.0: {}
 
   chai@6.2.2: {}
 
@@ -6779,6 +6851,8 @@ snapshots:
 
   jiti@1.21.7:
     optional: true
+
+  jose@5.10.0: {}
 
   jpeg-js@0.4.4: {}
 

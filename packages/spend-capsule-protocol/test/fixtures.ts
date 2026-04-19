@@ -55,7 +55,7 @@ export async function buildTestJwks(kid = "veto-gateway-test"): Promise<Jwks> {
 export function fixedCapsule(overrides: Partial<CapsulePayload> = {}): CapsulePayload {
   return {
     version: "veto.capsule/1",
-    capsule_id: "cap_01hy2z3abcdefghijklmnop",
+    capsule_id: "cap_01hy2z3abcdefghijklmnop1",
     issuer: "https://gateway.veto.so",
     entity_id: "ent_abc",
     agent_id: "claude-code-ci-bot",
@@ -66,8 +66,8 @@ export function fixedCapsule(overrides: Partial<CapsulePayload> = {}): CapsulePa
     amount_ceiling: { currency: "USD", amount: "12500.00" },
     memo_template: "Invoice {{invoice_number}}",
     invoice_hash:
-      "sha256:84a0c6f1a1f8b80ec5d3abaf22b9c9e00000000000000000000000000000000",
-    workflow_id: "wf_01hy2z3abcdefghijklmnop",
+      "sha256:84a0c6f1a1f8b80ec5d3abaf22b9c9e0000000000000000000000000000000ff",
+    workflow_id: "wf_01hy2z3abcdefghijklmnop1",
     policy_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     approval_ref: null,
     dual_control_ref: null,

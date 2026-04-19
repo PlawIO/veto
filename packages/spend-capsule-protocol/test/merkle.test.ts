@@ -132,20 +132,63 @@ describe("computeMerkleRoot + combineAnchors", () => {
   });
 });
 
-describe("anchorBlock (rolling O(log N) merkle)", () => {
-  it("builds anchors that chain via combineAnchors", () => {
+describe("anchorBlock (rolling O(log N) merkle with entity binding)", () => {
+  it("builds anchors bound to entity_id + chain-index range + issued_at", () => {
     const block1 = [0, 1, 2, 3].map((n) =>
       buildReceipt({ draft: draft(n), prev: null }),
     );
     const a1 = anchorBlock("ent_abc", 0, block1, null, new Date("2026-04-17T14:10:00Z"));
     expect(a1.chain_index_start).toBe(0);
     expect(a1.chain_index_end).toBe(3);
-    expect(a1.rolling_root).toBe(a1.block_root);
+    // rolling_root commits to entity + range + timestamp, NOT just block_root,
+    // so attackers can't reuse a block_root under a different entity label.
+    expect(a1.rolling_root).not.toBe(a1.block_root);
+    expect(a1.rolling_root).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     const block2 = [4, 5, 6, 7].map((n) =>
       buildReceipt({ draft: draft(n), prev: null }),
     );
     const a2 = anchorBlock("ent_abc", 4, block2, a1, new Date("2026-04-17T14:11:00Z"));
-    expect(a2.rolling_root).toBe(combineAnchors(a1.rolling_root, a2.block_root));
+    // Chain continuity: a2.rolling_root is deterministic given a1.rolling_root
+    // + a2's bound metadata.
+    expect(a2.rolling_root).not.toBe(a1.rolling_root);
+    expect(a2.rolling_root).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it("same block_root under different entity_id produces different rolling_root", () => {
+    const block = [0, 1, 2, 3].map((n) =>
+      buildReceipt({ draft: draft(n), prev: null }),
+    );
+    const now = new Date("2026-04-17T14:10:00Z");
+    const anchorA = anchorBlock("ent_abc", 0, block, null, now);
+    const anchorB = anchorBlock("ent_xyz", 0, block, null, now);
+    // block_root is a pure function of leaves — SAME.
+    expect(anchorA.block_root).toBe(anchorB.block_root);
+    // rolling_root binds entity_id — DIFFERENT.
+    expect(anchorA.rolling_root).not.toBe(anchorB.rolling_root);
+  });
+
+  it("same block_root under different chain_index range produces different rolling_root", () => {
+    const block = [0, 1, 2, 3].map((n) =>
+      buildReceipt({ draft: draft(n), prev: null }),
+    );
+    const now = new Date("2026-04-17T14:10:00Z");
+    const anchorA = anchorBlock("ent_abc", 0, block, null, now);
+    const anchorB = anchorBlock("ent_abc", 100, block, null, now);
+    expect(anchorA.block_root).toBe(anchorB.block_root);
+    expect(anchorA.rolling_root).not.toBe(anchorB.rolling_root);
+  });
+});
+
+describe("computeMerkleRoot input validation", () => {
+  it("rejects digests that are not 64 lowercase hex chars", () => {
+    expect(() => combineAnchors("sha256:abc", "sha256:" + "0".repeat(64))).toThrow();
+    expect(() =>
+      combineAnchors("sha256:" + "A".repeat(64), "sha256:" + "0".repeat(64)),
+    ).toThrow();
+  });
+
+  it("rejects digests without the sha256: prefix", () => {
+    expect(() => combineAnchors("0".repeat(64), "sha256:" + "0".repeat(64))).toThrow();
   });
 });

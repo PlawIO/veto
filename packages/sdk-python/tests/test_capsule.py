@@ -61,7 +61,7 @@ def _build_test_key(kid: str = "veto-gateway-test") -> dict:
 def _fixed_capsule(**overrides) -> dict:
     base = {
         "version": "veto.capsule/1",
-        "capsule_id": "cap_01hy2z3abcdefghijklmnop",
+        "capsule_id": "cap_01hy2z3abcdefghijklmnop1",
         "issuer": "https://gateway.veto.so",
         "entity_id": "ent_abc",
         "agent_id": "claude-code-ci-bot",
@@ -70,8 +70,8 @@ def _fixed_capsule(**overrides) -> dict:
         "counterparty_hash": "sha256:3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855e",
         "amount_ceiling": {"currency": "USD", "amount": "12500.00"},
         "memo_template": "Invoice {{invoice_number}}",
-        "invoice_hash": "sha256:84a0c6f1a1f8b80ec5d3abaf22b9c9e00000000000000000000000000000000",
-        "workflow_id": "wf_01hy2z3abcdefghijklmnop",
+        "invoice_hash": "sha256:84a0c6f1a1f8b80ec5d3abaf22b9c9e0000000000000000000000000000000ff",
+        "workflow_id": "wf_01hy2z3abcdefghijklmnop1",
         "policy_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "approval_ref": None,
         "dual_control_ref": None,
@@ -278,14 +278,14 @@ def test_reject_wrong_alg():
 
 def _draft(n: int) -> dict:
     return {
-        "receipt_id": f"rcp_01hy2z3{str(n).zfill(17)}",
+        "receipt_id": f"rcp_01hy2z3a{str(n).zfill(16)}",
         "entity_id": "ent_abc",
         "agent_id": "claude-code-ci-bot",
         "tool": "meow.pay",
         "decision": "allow",
         "reason_code": "ok",
-        "args_hash": "sha256:" + str(n).zfill(64)[:64].replace("0", "a"),
-        "result_hash": "sha256:" + str(n).zfill(64)[:64].replace("0", "b"),
+        "args_hash": "sha256:" + ((str(n) + "a") * 64)[:64],
+        "result_hash": "sha256:" + ((str(n) + "b") * 64)[:64],
         "policy_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "policy_pack_id": "ap_strict_v1",
         "issued_at": f"2026-04-17T14:0{n % 10}:00Z",
@@ -356,6 +356,112 @@ def test_contract_byte_identical_jws_ts_and_python():
     assert py_jws == fx["jws"], (
         "Cross-language JWS divergence — Python signed != TypeScript signed."
     )
+
+
+def test_reject_naive_expires_at_at_sign_time():
+    key = _build_test_key()
+    with pytest.raises(Exception, match="RFC 3339"):
+        sign_capsule(_fixed_capsule(expires_at="2026-04-17T14:15:00"), key)
+
+
+def test_reject_naive_issued_at_at_sign_time():
+    key = _build_test_key()
+    with pytest.raises(Exception, match="RFC 3339"):
+        sign_capsule(_fixed_capsule(issued_at="2026-04-17T14:00:00"), key)
+
+
+def test_reject_max_uses_zero():
+    key = _build_test_key()
+    with pytest.raises(Exception, match="max_uses"):
+        sign_capsule(_fixed_capsule(max_uses=0), key)
+
+
+def test_reject_additional_property_at_verify_time():
+    # Simulate a peer that crafts a JWS bypassing our signer's schema check.
+    key = _build_test_key()
+    jwks = {"keys": [public_jwk_from_private(key)]}
+    from veto.capsule import canonicalize
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    payload = {**_fixed_capsule(), "extra_field": "nope"}
+    priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(TEST_PRIVATE_SEED_HEX))
+    header_b64 = _b64url(
+        json.dumps(
+            {"alg": "EdDSA", "typ": "veto.capsule+jws", "kid": key["kid"]},
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    )
+    body_b64 = _b64url(canonicalize(payload).encode())
+    sig = priv.sign(f"{header_b64}.{body_b64}".encode("ascii"))
+    jws = f"{header_b64}.{body_b64}.{_b64url(sig)}"
+    with pytest.raises(CapsuleVerificationError) as exc:
+        verify_capsule(jws, jwks, now=REFERENCE_NOW)
+    assert exc.value.code == "capsule_payload_invalid"
+
+
+def test_reject_non_canonical_payload_on_verify():
+    key = _build_test_key()
+    jwks = {"keys": [public_jwk_from_private(key)]}
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    priv = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(TEST_PRIVATE_SEED_HEX))
+    # Dump with sort_keys=False → keys likely not in JCS order.
+    body_bytes = json.dumps(_fixed_capsule(), separators=(",", ":"), sort_keys=False).encode()
+    body_b64 = _b64url(body_bytes)
+    header_b64 = _b64url(
+        json.dumps(
+            {"alg": "EdDSA", "typ": "veto.capsule+jws", "kid": key["kid"]},
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    )
+    sig = priv.sign(f"{header_b64}.{body_b64}".encode("ascii"))
+    jws = f"{header_b64}.{body_b64}.{_b64url(sig)}"
+    try:
+        verify_capsule(jws, jwks, now=REFERENCE_NOW)
+    except CapsuleVerificationError as exc:
+        assert exc.code == "payload_not_canonical"
+
+
+def test_unicode_nfc_normalization_beneficiary():
+    # 'é' can be NFC (U+00E9) or NFD ('e' + U+0301). Both must hash identically.
+    nfc = hash_beneficiary(
+        {"type": "bank_us", "name": "Café Supply", "routing": "121000248", "account_last4": "4821"}
+    )
+    nfd = hash_beneficiary(
+        {"type": "bank_us", "name": "Cafe\u0301 Supply", "routing": "121000248", "account_last4": "4821"}
+    )
+    assert nfc == nfd
+
+
+def test_solana_rejects_wrong_byte_length():
+    # "helloWorld" is valid base58 but decodes to 7 bytes, not 32.
+    with pytest.raises(ValueError, match="expected 32|invalid Solana"):
+        hash_beneficiary({"type": "crypto", "chain": "solana", "address": "helloWorld"})
+
+
+def test_anchor_binds_entity_id():
+    from veto.capsule import anchor_block, build_receipt
+    import datetime as dt
+
+    block = [build_receipt(_draft(n), None) for n in (0, 1, 2, 3)]
+    now = dt.datetime(2026, 4, 17, 14, 10, 0, tzinfo=dt.timezone.utc)
+    a = anchor_block("ent_abc", 0, block, None, now=now)
+    b = anchor_block("ent_xyz", 0, block, None, now=now)
+    assert a.block_root == b.block_root, "block_root is a pure function of leaves"
+    assert a.rolling_root != b.rolling_root, "rolling_root must bind entity_id"
+
+
+def test_merkle_rejects_malformed_digests():
+    from veto.capsule import combine_anchors
+
+    with pytest.raises(ValueError):
+        combine_anchors("sha256:abc", "sha256:" + "0" * 64)
+    with pytest.raises(ValueError):
+        combine_anchors("sha256:" + "A" * 64, "sha256:" + "0" * 64)
+    with pytest.raises(ValueError):
+        combine_anchors("0" * 64, "sha256:" + "0" * 64)
 
 
 def test_contract_hash_receipt_parity():

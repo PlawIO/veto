@@ -46,6 +46,11 @@ from .merkle import (
     hash_receipt,
     verify_receipt_chain,
 )
+from .validate import (
+    ValidationError,
+    validate_capsule_payload,
+    validate_receipt_payload,
+)
 
 __all__ = [
     "CAPSULE_VERSION",
@@ -79,4 +84,7 @@ __all__ = [
     "sign_capsule",
     "verify_capsule",
     "verify_receipt_chain",
+    "ValidationError",
+    "validate_capsule_payload",
+    "validate_receipt_payload",
 ]

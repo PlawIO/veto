@@ -1,6 +1,7 @@
 import canonicalizeModule from "canonicalize";
 import { sha256 } from "@noble/hashes/sha2";
 import { keccak_256 } from "@noble/hashes/sha3";
+import { base58 } from "@scure/base";
 import { bytesToHex } from "@noble/hashes/utils";
 import type { Beneficiary } from "./types.js";
 
@@ -29,6 +30,18 @@ export function hashCanonical(value: unknown): string {
   return sha256Prefixed(canonicalize(value));
 }
 
+// Strip zero-width joiners / BOMs etc. that are invisible to humans but
+// change hash input. Applied on top of NFC normalization for belt-and-
+// suspenders uniqueness of beneficiary names.
+function normalizeName(raw: string): string {
+  return raw
+    .normalize("NFC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeBankUs(name: string, routing: string, accountLast4: string): {
   type: "bank_us";
   name: string;
@@ -37,7 +50,7 @@ function normalizeBankUs(name: string, routing: string, accountLast4: string): {
 } {
   return {
     type: "bank_us",
-    name: name.toLowerCase().replace(/\s+/g, " ").trim(),
+    name: normalizeName(name),
     routing: routing.replace(/\D/g, ""),
     account_last4: accountLast4.slice(-4),
   };
@@ -63,7 +76,7 @@ function normalizeBankIntl(input: {
     country_iso?: string;
   } = {
     type: "bank_intl",
-    name: input.name.toLowerCase().replace(/\s+/g, " ").trim(),
+    name: normalizeName(input.name),
   };
   if (input.iban) result.iban = input.iban.replace(/\s+/g, "").toUpperCase();
   if (input.swift_bic) result.swift_bic = input.swift_bic.replace(/\s+/g, "").toUpperCase();
@@ -89,11 +102,20 @@ function toEip55(address: string): string {
   return `0x${out}`;
 }
 
-const BASE58_ALPHABET = /^[1-9A-HJ-NP-Za-km-z]+$/;
-
+// Solana addresses are base58-encoded 32-byte Ed25519 public keys (or derived
+// program addresses). Proper validation decodes and checks byte length —
+// regex-only validation lets random 32-44 char base58 strings through.
 function normalizeSolanaAddress(address: string): string {
-  if (!BASE58_ALPHABET.test(address) || address.length < 32 || address.length > 44) {
-    throw new Error(`invalid Solana (base58) address: ${address}`);
+  let decoded: Uint8Array;
+  try {
+    decoded = base58.decode(address);
+  } catch (err) {
+    throw new Error(`invalid Solana (base58) address: ${address}: ${(err as Error).message}`);
+  }
+  if (decoded.length !== 32) {
+    throw new Error(
+      `invalid Solana address: decoded to ${decoded.length} bytes, expected 32`,
+    );
   }
   return address;
 }

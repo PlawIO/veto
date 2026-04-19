@@ -8,15 +8,29 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from typing import Any, cast
 
+import base58
 import jcs
 
 from .types import Beneficiary
 
 _WS_RE = re.compile(r"\s+")
+_ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\uFEFF]")
 _EVM_CHAINS = {"eth", "ethereum", "base", "arbitrum", "arb", "optimism", "polygon"}
-_BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]+$")
+
+
+def _normalize_name(raw: str) -> str:
+    """NFC + strip zero-width joiners + lowercase + whitespace-collapse.
+
+    Matches the TypeScript `normalizeName` in sign-capsule-protocol. Applied
+    to every beneficiary name so NFC/NFD variants or zero-width-joiner attacks
+    can't produce distinct hashes for visually identical counterparties.
+    """
+    nfc = unicodedata.normalize("NFC", raw)
+    stripped = _ZERO_WIDTH_RE.sub("", nfc)
+    return _WS_RE.sub(" ", stripped.lower()).strip()
 
 
 def canonicalize(value: Any) -> str:
@@ -50,7 +64,7 @@ def hash_canonical(value: Any) -> str:
 def _normalize_bank_us(name: str, routing: str, account_last4: str) -> dict[str, str]:
     return {
         "type": "bank_us",
-        "name": _WS_RE.sub(" ", name.lower()).strip(),
+        "name": _normalize_name(name),
         "routing": re.sub(r"\D", "", routing),
         "account_last4": account_last4[-4:],
     }
@@ -59,7 +73,7 @@ def _normalize_bank_us(name: str, routing: str, account_last4: str) -> dict[str,
 def _normalize_bank_intl(b: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {
         "type": "bank_intl",
-        "name": _WS_RE.sub(" ", b["name"].lower()).strip(),
+        "name": _normalize_name(b["name"]),
     }
     if "iban" in b and b["iban"]:
         out["iban"] = re.sub(r"\s+", "", b["iban"]).upper()
@@ -180,8 +194,17 @@ def _to_eip55(address: str) -> str:
 
 
 def _normalize_solana(address: str) -> str:
-    if not _BASE58_RE.fullmatch(address) or not (32 <= len(address) <= 44):
-        raise ValueError(f"invalid Solana (base58) address: {address}")
+    # Solana addresses are base58-encoded 32-byte Ed25519 keys. Proper
+    # validation decodes and checks byte length — a regex would let random
+    # 32-44 char base58 strings pass.
+    try:
+        decoded = base58.b58decode(address)
+    except Exception as err:
+        raise ValueError(f"invalid Solana (base58) address: {address}: {err}") from err
+    if len(decoded) != 32:
+        raise ValueError(
+            f"invalid Solana address: decoded to {len(decoded)} bytes, expected 32"
+        )
     return address
 
 

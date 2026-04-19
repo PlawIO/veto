@@ -51,3 +51,9 @@ export {
   verifyReceiptChain,
 } from "./merkle.js";
 export type { BuildReceiptInput, MerkleAnchor, ReceiptDraft } from "./merkle.js";
+
+export {
+  ValidationError,
+  validateCapsulePayload,
+  validateReceiptPayload,
+} from "./validate.js";
