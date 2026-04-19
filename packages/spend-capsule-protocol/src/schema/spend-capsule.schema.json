@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veto.so/schemas/spend-capsule/v1.json",
+  "title": "Spend Capsule",
+  "description": "Delegated, signed, single-use authority to move value via an external rail.",
+  "type": "object",
+  "required": [
+    "version",
+    "capsule_id",
+    "issuer",
+    "entity_id",
+    "agent_id",
+    "rail_allowlist",
+    "counterparty_hash",
+    "amount_ceiling",
+    "invoice_hash",
+    "workflow_id",
+    "policy_sha256",
+    "issued_at",
+    "expires_at",
+    "nonce"
+  ],
+  "properties": {
+    "version": { "const": "veto.capsule/1" },
+    "capsule_id": { "type": "string", "pattern": "^cap_[0-9a-z]{24}$" },
+    "issuer": { "type": "string", "format": "uri" },
+    "entity_id": { "type": "string" },
+    "agent_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "rail_allowlist": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "ach",
+          "wire",
+          "international_wire",
+          "book",
+          "usdc.eth",
+          "usdc.sol",
+          "usdc.base",
+          "usdc.arb"
+        ]
+      },
+      "minItems": 1
+    },
+    "counterparty_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "amount_ceiling": {
+      "type": "object",
+      "required": ["currency", "amount"],
+      "properties": {
+        "currency": { "type": "string", "pattern": "^[A-Z]{3,10}$" },
+        "amount": { "type": "string", "pattern": "^\\d+(\\.\\d{1,18})?$" }
+      }
+    },
+    "memo_template": { "type": "string", "maxLength": 140 },
+    "invoice_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "workflow_id": { "type": "string", "pattern": "^wf_[0-9a-z]{24}$" },
+    "policy_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "approval_ref": { "type": ["string", "null"] },
+    "dual_control_ref": { "type": ["string", "null"] },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "max_uses": { "type": "integer", "minimum": 1, "default": 1 },
+    "nonce": { "type": "string", "minLength": 16 }
+  },
+  "additionalProperties": false
+}

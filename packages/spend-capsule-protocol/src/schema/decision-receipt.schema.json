@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veto.so/schemas/decision-receipt/v1.json",
+  "title": "Decision Receipt",
+  "type": "object",
+  "required": [
+    "version",
+    "receipt_id",
+    "entity_id",
+    "agent_id",
+    "tool",
+    "decision",
+    "issued_at",
+    "args_hash",
+    "result_hash",
+    "policy_hash",
+    "prev_receipt_hash",
+    "merkle_root"
+  ],
+  "properties": {
+    "version": { "const": "veto.receipt/1" },
+    "receipt_id": { "type": "string", "pattern": "^rcp_[0-9a-z]{24}$" },
+    "entity_id": { "type": "string" },
+    "agent_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "workflow_id": { "type": "string" },
+    "capsule_id": { "type": ["string", "null"] },
+    "tool": { "type": "string" },
+    "decision": { "enum": ["allow", "deny", "require_approval"] },
+    "reason_code": { "type": "string" },
+    "reason_detail": { "type": "string" },
+    "args_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "result_hash": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "approval_hash": { "type": ["string", "null"] },
+    "policy_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "policy_pack_id": { "type": "string" },
+    "counterparty_hash": { "type": ["string", "null"] },
+    "rail": { "type": ["string", "null"] },
+    "amount": { "type": ["object", "null"] },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "prev_receipt_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "merkle_root": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

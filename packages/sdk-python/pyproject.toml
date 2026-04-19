@@ -32,12 +32,16 @@ anthropic = ["anthropic>=0.20.0"]
 gemini = ["google-genai>=1.0.0"]
 otel = ["opentelemetry-api>=1.0.0"]
 redis = ["redis>=4.0.0"]
+capsule = ["cryptography>=42.0.0", "jcs>=0.2.1", "base58>=2.1.1"]
 all = [
     "openai>=1.0.0",
     "anthropic>=0.20.0",
     "google-genai>=1.0.0",
     "opentelemetry-api>=1.0.0",
     "redis>=4.0.0",
+    "cryptography>=42.0.0",
+    "jcs>=0.2.1",
+    "base58>=2.1.1",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -45,6 +49,9 @@ dev = [
     "mypy>=1.0.0",
     "ruff>=0.4.0",
     "types-PyYAML>=6.0.0",
+    "cryptography>=42.0.0",
+    "jcs>=0.2.1",
+    "base58>=2.1.1",
 ]
 
 [project.scripts]
