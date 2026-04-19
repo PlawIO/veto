@@ -179,6 +179,37 @@ describe("P1: strict RFC 3339 parsing", () => {
     const r = parseRfc3339Strict("2026-01-01T12:00:00.123456Z");
     expect(r.epochMs).toBeGreaterThan(0);
   });
+  // Codex Round 6 P2: non-month-end leap second must fail. Previously
+  // only hour/minute were checked; "2026-01-30T23:59:60Z" was accepted.
+  it("rejects leap second on non-month-end date (2026-01-30T23:59:60Z)", () => {
+    expect(() => parseRfc3339Strict("2026-01-30T23:59:60Z")).toThrow(
+      Rfc3339ParseError,
+    );
+  });
+  it("rejects leap second on non-last February day (2026-02-27T23:59:60Z)", () => {
+    expect(() => parseRfc3339Strict("2026-02-27T23:59:60Z")).toThrow(
+      Rfc3339ParseError,
+    );
+  });
+  it("accepts leap second on last UTC day of month (2026-12-31T23:59:60Z)", () => {
+    const r = parseRfc3339Strict("2026-12-31T23:59:60Z");
+    // Clamped to :59 — round-trip canonical confirms.
+    expect(r.canonical).toBe("2026-12-31T23:59:59Z");
+  });
+  it("rejects leap second on Feb 28 of a leap year (Feb 29 is the true month-end)", () => {
+    expect(() => parseRfc3339Strict("2024-02-28T23:59:60Z")).toThrow(
+      Rfc3339ParseError,
+    );
+  });
+  it("accepts leap second on Feb 29 of a leap year (month end)", () => {
+    const r = parseRfc3339Strict("2024-02-29T23:59:60Z");
+    expect(r.canonical).toBe("2024-02-29T23:59:59Z");
+  });
+  it("rejects leap second with non-UTC offset (2026-12-31T23:59:60+01:00)", () => {
+    expect(() =>
+      parseRfc3339Strict("2026-12-31T23:59:60+01:00"),
+    ).toThrow(Rfc3339ParseError);
+  });
 });
 
 describe("P1: merkle leaf-count binding", () => {
@@ -339,6 +370,35 @@ describe("P2: issuer URL tightening", () => {
     expect(() =>
       validateCapsulePayload(fixedCapsule({ issuer: "https://gateway.veto.so#frag" })),
     ).toThrow(/fragment/);
+  });
+  // Codex Round 6 P2: the bugs TS used to accept that Python rejected.
+  it("rejects scheme-only issuer (no //, no authority) — 'https:evil.com'", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https:evil.com" })),
+    ).toThrow();
+  });
+  it("rejects empty-authority form — 'https:///evil.com'", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https:///evil.com" })),
+    ).toThrow();
+  });
+  it("rejects issuer with a path — 'https://good.com/path'", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https://good.com/path" })),
+    ).toThrow();
+  });
+  it("accepts issuer with a port and trailing slash", () => {
+    // Regex tolerates these; parser must too.
+    expect(() =>
+      validateCapsulePayload(
+        fixedCapsule({ issuer: "https://gateway.veto.so:8443/" }),
+      ),
+    ).not.toThrow();
+  });
+  it("rejects whitespace/control chars inside issuer authority", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https://gateway. veto.so" })),
+    ).toThrow();
   });
 });
 

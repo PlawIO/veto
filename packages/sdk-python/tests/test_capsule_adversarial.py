@@ -215,6 +215,40 @@ def test_rfc3339_accepts_6_digit_fractional():
     assert r.epoch_ms > 0
 
 
+# Codex Round 6 P2: leap second must only be legal on the last UTC day of
+# the UTC month. Non-month-end :60 previously parsed and clamped to :59.
+
+
+def test_rfc3339_rejects_leap_second_non_month_end():
+    with pytest.raises(Rfc3339ParseError):
+        parse_rfc3339_strict("2026-01-30T23:59:60Z")
+
+
+def test_rfc3339_rejects_leap_second_feb_non_leap_year_non_month_end():
+    with pytest.raises(Rfc3339ParseError):
+        parse_rfc3339_strict("2026-02-27T23:59:60Z")
+
+
+def test_rfc3339_accepts_leap_second_last_day_dec():
+    r = parse_rfc3339_strict("2026-12-31T23:59:60Z")
+    assert r.canonical == "2026-12-31T23:59:59Z"
+
+
+def test_rfc3339_rejects_leap_second_feb28_leap_year():
+    with pytest.raises(Rfc3339ParseError):
+        parse_rfc3339_strict("2024-02-28T23:59:60Z")
+
+
+def test_rfc3339_accepts_leap_second_feb29_leap_year():
+    r = parse_rfc3339_strict("2024-02-29T23:59:60Z")
+    assert r.canonical == "2024-02-29T23:59:59Z"
+
+
+def test_rfc3339_rejects_leap_second_non_utc_offset():
+    with pytest.raises(Rfc3339ParseError):
+        parse_rfc3339_strict("2026-12-31T23:59:60+01:00")
+
+
 # ---- P1: merkle leaf-count binding -----------------------------------------
 
 
@@ -254,6 +288,35 @@ def test_issuer_rejects_query():
 def test_issuer_rejects_fragment():
     with pytest.raises(Exception, match="fragment"):
         validate_capsule_payload(_fixed_capsule(issuer="https://gateway.veto.so#f"))
+
+
+# Codex Round 6 P2: bugs TS used to accept that Python rejected. Now both
+# parsers must reject byte-for-byte identically.
+
+
+def test_issuer_rejects_scheme_only_no_authority():
+    with pytest.raises(Exception):
+        validate_capsule_payload(_fixed_capsule(issuer="https:evil.com"))
+
+
+def test_issuer_rejects_empty_authority():
+    with pytest.raises(Exception):
+        validate_capsule_payload(_fixed_capsule(issuer="https:///evil.com"))
+
+
+def test_issuer_rejects_path():
+    with pytest.raises(Exception):
+        validate_capsule_payload(_fixed_capsule(issuer="https://good.com/path"))
+
+
+def test_issuer_accepts_port_and_trailing_slash():
+    # Tolerated by both the TS regex and the Python regex.
+    validate_capsule_payload(_fixed_capsule(issuer="https://gateway.veto.so:8443/"))
+
+
+def test_issuer_rejects_internal_whitespace():
+    with pytest.raises(Exception):
+        validate_capsule_payload(_fixed_capsule(issuer="https://gateway. veto.so"))
 
 
 # ---- P2: amount_ceiling additionalProperties:false --------------------------
