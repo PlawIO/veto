@@ -34,13 +34,11 @@ All hashing uses **JCS (RFC 8785)** via the `canonicalize` npm package. All sign
 
 ## Trust anchors
 
-`verifyCapsule` accepts three input shapes:
+`verifyCapsule` accepts three input shapes, but only two are safe for production:
 
-1. **Plain `Jwks`** — legacy, every trusted key can sign for any issuer. Dev only.
-2. **`AuthorizedJwks`** — pairs each `kid` with an `issuer` (and optional `entity_ids` allowlist).
-3. **`TrustAnchor`** — full control: wraps either of the above plus `requireIssuerBinding`.
-
-Production code MUST use `AuthorizedJwks` or `TrustAnchor { requireIssuerBinding: true }`. A plain `Jwks` will be accepted only in dev/test environments.
+1. **`AuthorizedJwks`** — pairs each `kid` with an `issuer` (and optional `entity_ids` allowlist). **Use this.**
+2. **`TrustAnchor { jwks, requireIssuerBinding? }`** — wrap an `AuthorizedJwks` (binding enforced) when you want to be explicit, or pass a plain `Jwks` with `requireIssuerBinding: false` for the dev-only legacy path.
+3. **Plain `Jwks`** — `{ keys: [...] }`. **Rejected by default.** A plain JWKS has no issuer binding, so any trusted key could sign a capsule for any issuer — a production risk we now block. You will see `CapsuleVerificationError({ code: "signature_kid_unknown" })` until you migrate to `AuthorizedJwks` or explicitly opt out via `TrustAnchor { jwks, requireIssuerBinding: false }`.
 
 ```ts
 import {
