@@ -319,6 +319,21 @@ def test_issuer_rejects_internal_whitespace():
         validate_capsule_payload(_fixed_capsule(issuer="https://gateway. veto.so"))
 
 
+# Codex Round 7 P2: Python's urlparse used to accept these.
+
+
+def test_issuer_rejects_empty_host_port_only():
+    with pytest.raises(Exception):
+        validate_capsule_payload(_fixed_capsule(issuer="https://:443/"))
+
+
+def test_issuer_rejects_port_out_of_range():
+    with pytest.raises(Exception):
+        validate_capsule_payload(
+            _fixed_capsule(issuer="https://gateway.veto.so:99999/")
+        )
+
+
 # ---- P2: amount_ceiling additionalProperties:false --------------------------
 
 

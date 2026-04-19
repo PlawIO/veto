@@ -119,10 +119,9 @@ _RE_ISSUER = re.compile(r"^https://[^/\s@?#]+(?::\d+)?/?$")
 
 def _require_issuer(value: Any, path: str) -> str:
     s = _require_str(value, path, max_len=2048, min_len=1)
-    # Codex full-sweep P1-4: require explicit "://" + non-empty authority
-    # + no path/userinfo/query/fragment. This is the same regex the TS
-    # validator uses — the two implementations must accept and reject the
-    # same byte strings.
+    # Same structural regex TS uses for a quick first gate (explicit "://",
+    # non-empty authority block, no path/userinfo/query/fragment except an
+    # optional trailing slash).
     if not _RE_ISSUER.match(s):
         raise ValidationError(
             path,
@@ -141,6 +140,37 @@ def _require_issuer(value: Any, path: str) -> str:
         raise ValidationError(path, "must not contain a fragment")
     if parsed.path not in ("", "/"):
         raise ValidationError(path, "must not contain a path")
+
+    # Codex Round 7 P2: Python's urlparse is permissive and accepts inputs
+    # TS's `new URL()` rejects (e.g., `https://:443/` has an empty host,
+    # `https://host:99999/` has an out-of-range port). Both paths are
+    # caught cheaply by explicit hostname + port checks so the two
+    # SDK issuer validators accept and reject the same byte strings.
+    try:
+        hostname = parsed.hostname
+    except ValueError as err:
+        raise ValidationError(path, f"hostname is not parseable: {err}") from err
+    if not hostname or len(hostname) == 0:
+        raise ValidationError(path, "must have a non-empty host")
+    # Hostname charset: ASCII letters, digits, hyphens, and dots. No
+    # whitespace, no IDN unless punycode-encoded. TS's URL parser percent-
+    # encodes unusual bytes in a way the gateway never wants to see on
+    # the wire, so we require a strict domain-label form here.
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9.\-]*$", hostname):
+        raise ValidationError(
+            path,
+            f"hostname {hostname!r} contains characters outside [a-zA-Z0-9.-]",
+        )
+    try:
+        port = parsed.port
+    except ValueError as err:
+        # urlparse raises ValueError for ports outside 0..65535 when
+        # .port is accessed. Treat that as a hard reject.
+        raise ValidationError(path, f"port is out of range: {err}") from err
+    if port is not None and (port < 1 or port > 65535):
+        raise ValidationError(
+            path, f"port must be in 1..65535; got {port}"
+        )
     return s
 
 

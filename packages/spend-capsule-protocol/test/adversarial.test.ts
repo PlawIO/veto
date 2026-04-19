@@ -400,6 +400,20 @@ describe("P2: issuer URL tightening", () => {
       validateCapsulePayload(fixedCapsule({ issuer: "https://gateway. veto.so" })),
     ).toThrow();
   });
+  // Codex Round 7 P2: Python's urlparse is permissive and used to accept
+  // these. Both SDKs now reject.
+  it("rejects empty-host port-only authority — 'https://:443/'", () => {
+    expect(() =>
+      validateCapsulePayload(fixedCapsule({ issuer: "https://:443/" })),
+    ).toThrow();
+  });
+  it("rejects out-of-range port (99999)", () => {
+    expect(() =>
+      validateCapsulePayload(
+        fixedCapsule({ issuer: "https://gateway.veto.so:99999/" }),
+      ),
+    ).toThrow();
+  });
 });
 
 describe("P2: amount_ceiling additionalProperties:false", () => {
