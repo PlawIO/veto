@@ -16,7 +16,8 @@
     "build": "node ./scripts/build.mjs",
     "dev": "tsc --watch",
     "lint": "eslint src scripts --ext .ts,.mjs",
-    "test": "cargo test --manifest-path ../../crates/veto-bash/Cargo.toml"
+    "test": "cargo test --manifest-path ../../crates/veto-bash/Cargo.toml",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
