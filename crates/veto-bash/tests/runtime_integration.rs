@@ -8,6 +8,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MCP_MESSAGE_TIMEOUT: Duration = Duration::from_secs(5);
+const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+const MCP_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_veto-bash-native")
@@ -120,6 +122,40 @@ fn spawn_mcp_reader(mut reader: impl Read + Send + 'static) -> Receiver<Result<V
         }
     });
     receiver
+}
+
+fn wait_for_child_with_timeout(
+    child: &mut Child,
+    stderr: &mut impl Read,
+    timeout: Duration,
+    label: &str,
+) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let mut stderr_text = String::new();
+                    let _ = stderr.read_to_string(&mut stderr_text);
+                    panic!(
+                        "child process did not exit within {:?} ({label}); stderr: {stderr_text}",
+                        timeout
+                    );
+                }
+                thread::sleep(MCP_SHUTDOWN_POLL_INTERVAL);
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let mut stderr_text = String::new();
+                let _ = stderr.read_to_string(&mut stderr_text);
+                panic!("failed to poll child status ({label}): {error}; stderr: {stderr_text}");
+            }
+        }
+    }
 }
 
 fn recv_mcp_message(
@@ -300,6 +336,15 @@ fn mcp_serve_survives_invalid_request_and_executes_next_call() {
         &mut stdin,
         &json!({
             "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+    );
+
+    write_mcp_message(
+        &mut stdin,
+        &json!({
+            "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
             "params": {
@@ -341,7 +386,12 @@ fn mcp_serve_survives_invalid_request_and_executes_next_call() {
     );
 
     drop(stdin);
-    let status = child.wait().unwrap();
+    let status = wait_for_child_with_timeout(
+        &mut child,
+        &mut stderr,
+        MCP_SHUTDOWN_TIMEOUT,
+        "mcp serve shutdown after stdin close",
+    );
     let mut stderr_text = String::new();
     stderr.read_to_string(&mut stderr_text).unwrap();
     assert!(status.success(), "stderr: {stderr_text}");
