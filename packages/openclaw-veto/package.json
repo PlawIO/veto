@@ -1,6 +1,6 @@
 {
   "name": "openclaw-veto",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Veto guardrails plugin for OpenClaw — intercept, validate, and control every agent tool call",
   "type": "module",
   "main": "./dist/index.js",
