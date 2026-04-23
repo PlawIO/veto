@@ -55,6 +55,95 @@ export interface TimeWindowConditionValue {
 }
 
 /**
+ * Behavior when a feed snapshot is missing or stale.
+ *
+ * - `fail_open`: treat as unmatched (rule does not trigger). Use when the
+ *   rule is a block-list and availability matters more than precision.
+ * - `fail_closed`: treat as matched (rule triggers). Use when the rule is
+ *   an allow-list and missing data must not silently permit.
+ * - `last_known_good`: use the most recent snapshot irrespective of age.
+ *   The provider is responsible for holding the last snapshot; the
+ *   evaluator only distinguishes "snapshot present" vs "absent".
+ */
+export type FeedFallback = 'fail_open' | 'fail_closed' | 'last_known_good';
+
+/**
+ * Condition value referencing a dynamic pipeline feed.
+ *
+ * The comparand is resolved at evaluation time from a FeedProvider.
+ * Used with set-membership operators (`in`, `not_in`, `contains`,
+ * `not_contains`).
+ */
+export interface FeedConditionValue {
+  kind: 'feed';
+  /** Content-addressable pipeline/feed identifier. */
+  feed_id: string;
+  /** Version pinning: semver, `"latest"`, or `"pinned"` (immutable). */
+  version: string | 'latest' | 'pinned';
+  /** Max age in seconds before the snapshot is considered stale. */
+  max_staleness_sec: number;
+  /** Behavior on missing or stale snapshot. */
+  fallback: FeedFallback;
+}
+
+/**
+ * Condition value referencing a pipeline by id. Equivalent to a FeedRef
+ * whose feed_id is the pipeline's content hash — kept as a distinct
+ * variant so compilers can emit either shape depending on whether the
+ * policy references the pipeline itself or a downstream feed.
+ */
+export interface PipelineConditionValue {
+  kind: 'pipeline';
+  pipeline_id: string;
+  version: string | 'latest' | 'pinned';
+  max_staleness_sec: number;
+  fallback: FeedFallback;
+}
+
+/**
+ * Union of the typed condition-value variants. A literal value in
+ * `RuleCondition.value` is not wrapped; only references are tagged.
+ * Use `isConditionValueRef(v)` at runtime to narrow.
+ */
+export type ConditionValueRef = FeedConditionValue | PipelineConditionValue;
+
+/**
+ * Runtime narrowing guard for typed condition-value references.
+ *
+ * Returns true when `value` is a tagged FeedRef or PipelineRef.
+ * Literal values, arrays, TimeWindowConditionValue, and other plain
+ * objects return false and are treated as bare comparands.
+ */
+export function isConditionValueRef(value: unknown): value is ConditionValueRef {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const kind = (value as { kind?: unknown }).kind;
+  return kind === 'feed' || kind === 'pipeline';
+}
+
+/**
+ * Snapshot returned by a FeedProvider.
+ */
+export interface FeedSnapshot {
+  /** Resolved snapshot data — usually a list of strings or objects. */
+  data: unknown[];
+  /** Unix ms timestamp when the snapshot was produced upstream. */
+  refreshed_at_ms: number;
+  /** Semver or content-hash version of the producing pipeline spec. */
+  version?: string;
+}
+
+/**
+ * Read-only feed-snapshot provider injected into the local evaluator.
+ *
+ * Intentionally synchronous: the evaluator must remain sub-millisecond.
+ * Async refresh is the caller's responsibility — the provider should
+ * hand back the most recent pre-fetched snapshot or `undefined`.
+ */
+export interface FeedProvider {
+  get(feedId: string, version?: string): FeedSnapshot | undefined;
+}
+
+/**
  * A single condition within a rule.
  *
  * Conditions can be specified in two ways:

@@ -1,0 +1,50 @@
+{
+  "description": "Cross-language contract fixture. Produced by the TS reference impl; consumed by the Python mirror's test_capsule_contract.py.",
+  "seed_hex": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+  "kid": "veto-gateway-test",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "kid": "veto-gateway-test",
+        "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+        "alg": "EdDSA",
+        "use": "sig"
+      }
+    ],
+    "authorizations": [
+      {
+        "kid": "veto-gateway-test",
+        "issuer": "https://gateway.veto.so"
+      }
+    ]
+  },
+  "payload": {
+    "version": "veto.capsule/1",
+    "capsule_id": "cap_01hy2z3abcdefghijklmnop1",
+    "issuer": "https://gateway.veto.so",
+    "entity_id": "ent_abc",
+    "agent_id": "claude-code-ci-bot",
+    "session_id": "sess_01hy2z3qrstuvwx",
+    "tool": "meow.pay",
+    "rail_allowlist": ["ach"],
+    "counterparty_hash": "sha256:3b85fa317421a95ed371a637e88f54247bcacb9c9b21a8c9624a8fd8f4144efe",
+    "amount_ceiling": {
+      "currency": "USD",
+      "amount": "12500.00"
+    },
+    "memo_template": "Invoice {{invoice_number}}",
+    "invoice_hash": "sha256:84a0c6f1a1f8b80ec5d3abaf22b9c9e0000000000000000000000000000000ff",
+    "workflow_id": "wf_01hy2z3abcdefghijklmnop1",
+    "policy_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "approval_ref": null,
+    "dual_control_ref": null,
+    "issued_at": "2026-04-17T14:00:00Z",
+    "expires_at": "2026-04-17T14:15:00Z",
+    "max_uses": 1,
+    "nonce": "7f3d9b2e1c8a4f60"
+  },
+  "jws": "eyJhbGciOiJFZERTQSIsInR5cCI6InZldG8uY2Fwc3VsZStqd3MiLCJraWQiOiJ2ZXRvLWdhdGV3YXktdGVzdCJ9.eyJhZ2VudF9pZCI6ImNsYXVkZS1jb2RlLWNpLWJvdCIsImFtb3VudF9jZWlsaW5nIjp7ImFtb3VudCI6IjEyNTAwLjAwIiwiY3VycmVuY3kiOiJVU0QifSwiYXBwcm92YWxfcmVmIjpudWxsLCJjYXBzdWxlX2lkIjoiY2FwXzAxaHkyejNhYmNkZWZnaGlqa2xtbm9wMSIsImNvdW50ZXJwYXJ0eV9oYXNoIjoic2hhMjU2OjNiODVmYTMxNzQyMWE5NWVkMzcxYTYzN2U4OGY1NDI0N2JjYWNiOWM5YjIxYThjOTYyNGE4ZmQ4ZjQxNDRlZmUiLCJkdWFsX2NvbnRyb2xfcmVmIjpudWxsLCJlbnRpdHlfaWQiOiJlbnRfYWJjIiwiZXhwaXJlc19hdCI6IjIwMjYtMDQtMTdUMTQ6MTU6MDBaIiwiaW52b2ljZV9oYXNoIjoic2hhMjU2Ojg0YTBjNmYxYTFmOGI4MGVjNWQzYWJhZjIyYjljOWUwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZmYiLCJpc3N1ZWRfYXQiOiIyMDI2LTA0LTE3VDE0OjAwOjAwWiIsImlzc3VlciI6Imh0dHBzOi8vZ2F0ZXdheS52ZXRvLnNvIiwibWF4X3VzZXMiOjEsIm1lbW9fdGVtcGxhdGUiOiJJbnZvaWNlIHt7aW52b2ljZV9udW1iZXJ9fSIsIm5vbmNlIjoiN2YzZDliMmUxYzhhNGY2MCIsInBvbGljeV9zaGEyNTYiOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwicmFpbF9hbGxvd2xpc3QiOlsiYWNoIl0sInNlc3Npb25faWQiOiJzZXNzXzAxaHkyejNxcnN0dXZ3eCIsInRvb2wiOiJtZW93LnBheSIsInZlcnNpb24iOiJ2ZXRvLmNhcHN1bGUvMSIsIndvcmtmbG93X2lkIjoid2ZfMDFoeTJ6M2FiY2RlZmdoaWprbG1ub3AxIn0.nT03l-OJx-iAO4P8m-fJBBeTQUERPCGalvwhsM1QOHst7RX0HoEJ3gtbArftEpWKCtzbqbbTtPW3IZPsdSbyBw",
+  "now_for_verify": "2026-04-17T14:05:00Z"
+}

@@ -18,13 +18,27 @@
  * @module rules/local-evaluator
  */
 
-import type { Rule, RuleCondition } from './types.js';
+import type { FeedProvider, Rule, RuleCondition } from './types.js';
+import { isConditionValueRef } from './types.js';
 import { createSafeRegex, evaluateTimeWindow } from './condition-evaluator.js';
+import { resolveFeedRef } from './feed-provider.js';
 
 export interface LocalEvalResult {
   decision: 'allow' | 'deny' | 'require_approval' | null;
   reason?: string;
   ruleId?: string;
+}
+
+/**
+ * Optional knobs for local evaluation.
+ *
+ * `feedProvider` is required for rules whose condition values reference
+ * dynamic feeds. When absent, feed-backed conditions apply their
+ * `fallback` behavior exactly as if the snapshot were missing.
+ */
+export interface LocalEvalOptions {
+  feedProvider?: FeedProvider;
+  now_ms?: number;
 }
 
 /**
@@ -70,13 +84,28 @@ export function resolveFieldPath(
 export function evaluateCondition(
   condition: RuleCondition,
   context: Record<string, unknown>,
+  options: LocalEvalOptions = {},
 ): boolean {
   if (!condition.field || !condition.operator) return false;
 
   const fieldValue = resolveFieldPath(condition.field, context);
-  const expected = condition.value;
+  let expected = condition.value;
 
   if (fieldValue === undefined && condition.operator !== 'not_exists') return false;
+
+  // Resolve typed FeedRef / PipelineRef comparands against the injected
+  // provider. On miss/stale we apply the fallback and return. On hit,
+  // `expected` is reassigned to the resolved array — set-membership
+  // operators use it normally; other operators compare against the
+  // array and correctly fail their type checks below.
+  if (isConditionValueRef(expected)) {
+    const outcome = resolveFeedRef(expected, options.feedProvider, options.now_ms);
+    if ('fallback' in outcome) {
+      // fail_open: do not match. fail_closed: match.
+      return outcome.fallback === 'fail_closed';
+    }
+    expected = outcome.resolved;
+  }
 
   switch (condition.operator) {
     case 'equals':
@@ -235,6 +264,7 @@ export function evaluateRulesLocally(
   rules: Rule[],
   toolName: string,
   args: Record<string, unknown>,
+  options: LocalEvalOptions = {},
 ): LocalEvalResult {
   for (const rule of rules) {
     if (!rule.enabled) continue;
@@ -245,11 +275,11 @@ export function evaluateRulesLocally(
     // If `conditions` is present and non-empty, evaluate only those.
     // Otherwise fall through to `condition_groups`.
     if (rule.conditions && rule.conditions.length > 0) {
-      const allMatch = rule.conditions.every(c => evaluateCondition(c, args));
+      const allMatch = rule.conditions.every(c => evaluateCondition(c, args, options));
       if (!allMatch) continue;
     } else if (rule.condition_groups && rule.condition_groups.length > 0) {
       const anyGroupMatch = rule.condition_groups.some(group =>
-        group.every(c => evaluateCondition(c, args)),
+        group.every(c => evaluateCondition(c, args, options)),
       );
       if (!anyGroupMatch) continue;
     }

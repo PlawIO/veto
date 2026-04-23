@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veto.so/schemas/decision-receipt/v1.json",
+  "title": "Decision Receipt",
+  "type": "object",
+  "required": [
+    "version",
+    "receipt_id",
+    "entity_id",
+    "agent_id",
+    "tool",
+    "decision",
+    "issued_at",
+    "args_hash",
+    "result_hash",
+    "policy_hash",
+    "prev_receipt_hash",
+    "merkle_root"
+  ],
+  "properties": {
+    "version": { "const": "veto.receipt/1" },
+    "receipt_id": { "type": "string", "pattern": "^rcp_[0-9a-z]{24}$" },
+    "entity_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "agent_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "session_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "workflow_id": { "type": "string", "pattern": "^wf_[0-9a-z]{24}$" },
+    "capsule_id": {
+      "type": ["string", "null"],
+      "pattern": "^cap_[0-9a-z]{24}$"
+    },
+    "tool": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.:\\-]{0,127}$"
+    },
+    "decision": { "enum": ["allow", "deny", "require_approval"] },
+    "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+    "reason_detail": { "type": "string", "maxLength": 1024 },
+    "args_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "result_hash": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "approval_hash": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "policy_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "policy_pack_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+    "counterparty_hash": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "rail": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "ach",
+        "wire",
+        "international_wire",
+        "book",
+        "usdc.eth",
+        "usdc.sol",
+        "usdc.base",
+        "usdc.arb"
+      ]
+    },
+    "amount": {
+      "type": ["object", "null"],
+      "required": ["currency", "amount"],
+      "properties": {
+        "currency": { "type": "string", "pattern": "^[A-Z]{3,10}$" },
+        "amount": { "type": "string", "pattern": "^\\d+(\\.\\d{1,18})?$" }
+      },
+      "additionalProperties": false
+    },
+    "issued_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "prev_receipt_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "merkle_root": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

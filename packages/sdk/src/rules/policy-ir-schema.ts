@@ -294,6 +294,64 @@ export const POLICY_IR_V1_SCHEMA = {
       ],
       additionalProperties: false,
     },
+    FeedRef: {
+      type: 'object',
+      required: ['kind', 'feed_id', 'version', 'max_staleness_sec', 'fallback'],
+      properties: {
+        kind: { const: 'feed' },
+        feed_id: {
+          type: 'string',
+          minLength: 1,
+          description: 'Content-addressable pipeline/feed identifier.',
+        },
+        version: {
+          type: 'string',
+          minLength: 1,
+          description: 'Version pin: semver, "latest", or "pinned".',
+        },
+        max_staleness_sec: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Max snapshot age in seconds before fallback applies.',
+        },
+        fallback: {
+          type: 'string',
+          enum: ['fail_open', 'fail_closed', 'last_known_good'],
+          description: 'Behavior when the snapshot is missing or stale.',
+        },
+      },
+      additionalProperties: false,
+      description: 'Typed reference to a dynamic pipeline feed. Used as a condition value for set-membership operators.',
+    },
+    PipelineRef: {
+      type: 'object',
+      required: ['kind', 'pipeline_id', 'version', 'max_staleness_sec', 'fallback'],
+      properties: {
+        kind: { const: 'pipeline' },
+        pipeline_id: {
+          type: 'string',
+          minLength: 1,
+          description: 'Content-addressable pipeline identifier.',
+        },
+        version: {
+          type: 'string',
+          minLength: 1,
+          description: 'Version pin: semver, "latest", or "pinned".',
+        },
+        max_staleness_sec: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Max snapshot age in seconds before fallback applies.',
+        },
+        fallback: {
+          type: 'string',
+          enum: ['fail_open', 'fail_closed', 'last_known_good'],
+          description: 'Behavior when the snapshot is missing or stale.',
+        },
+      },
+      additionalProperties: false,
+      description: 'Typed reference to a pipeline by id. Equivalent shape to FeedRef but kept distinct for compiler clarity.',
+    },
     TimeWindowValue: {
       type: 'object',
       required: ['start', 'end', 'timezone'],
