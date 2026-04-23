@@ -127,6 +127,10 @@
       "types": "./dist/rules/index.d.ts",
       "import": "./dist/rules/index.js"
     },
+    "./rules/pipeline-dsl": {
+      "types": "./dist/rules/pipeline-dsl.d.ts",
+      "import": "./dist/rules/pipeline-dsl.js"
+    },
     "./config": {
       "types": "./dist/cli/config.d.ts",
       "import": "./dist/cli/config.js"
