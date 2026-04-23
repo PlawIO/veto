@@ -31,7 +31,11 @@ packages/cli/bin/veto.exe
 *.swp
 *.swo
 
+# Agent / Claude Code
+.claude/
+
 # Test coverage
 coverage/
 .gstack/
 TODOS.md
+packages/spend-capsule-protocol/*.tgz

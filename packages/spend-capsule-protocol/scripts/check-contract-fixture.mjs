@@ -34,7 +34,7 @@ if (a.trim() !== b.trim()) {
   process.stderr.write(
     "\nCross-language contract fixture drift detected.\n" +
       "On-disk fixture does not match the current TS signer output.\n" +
-      "Regenerate: pnpm --filter @veto/spend-capsule-protocol fixture:gen\n",
+      "Regenerate: pnpm --filter veto-spend-capsule-protocol fixture:gen\n",
   );
   process.exit(1);
 }

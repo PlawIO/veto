@@ -1,4 +1,4 @@
-# @veto/spend-capsule-protocol
+# veto-spend-capsule-protocol
 
 Delegated-authority protocol for agentic money movement. Signed, short-lived, single-use authority objects plus a tamper-evident decision-receipt chain.
 
@@ -7,7 +7,7 @@ Delegated-authority protocol for agentic money movement. Signed, short-lived, si
 ## Install
 
 ```bash
-pnpm add @veto/spend-capsule-protocol
+pnpm add veto-spend-capsule-protocol
 ```
 
 ## What's in here
@@ -44,7 +44,7 @@ All hashing uses **JCS (RFC 8785)** via the `canonicalize` npm package. All sign
 import {
   verifyCapsule,
   type AuthorizedJwks,
-} from "@veto/spend-capsule-protocol";
+} from "veto-spend-capsule-protocol";
 
 const trust: AuthorizedJwks = {
   keys: [
@@ -72,7 +72,7 @@ import {
   hashBeneficiary,
   publicJwkFromPrivate,
   type AuthorizedJwks,
-} from "@veto/spend-capsule-protocol";
+} from "veto-spend-capsule-protocol";
 
 const privateKey = {
   kid: "veto-gateway-2026q2",
@@ -120,7 +120,7 @@ const { payload } = await verifyCapsule(jws, trust);
 ### Build and verify a receipt chain
 
 ```ts
-import { buildReceipt, verifyReceiptChain } from "@veto/spend-capsule-protocol";
+import { buildReceipt, verifyReceiptChain } from "veto-spend-capsule-protocol";
 
 const r1 = buildReceipt({
   draft: {
@@ -150,7 +150,7 @@ const result = verifyReceiptChain([r1, r2]);
 
 ## Wire-format guarantees
 
-Byte-for-byte identical output is produced across the TypeScript (`@veto/spend-capsule-protocol`) and Python (`veto.capsule`) reference implementations, for the same input. The test fixture at `test/fixtures/contract-capsule.json` locks this parity. CI regenerates it on every PR — a drift fails the build.
+Byte-for-byte identical output is produced across the TypeScript (`veto-spend-capsule-protocol`) and Python (`veto.capsule`) reference implementations, for the same input. The test fixture at `test/fixtures/contract-capsule.json` locks this parity. CI regenerates it on every PR — a drift fails the build.
 
 Timestamps are validated by a hand-rolled strict RFC 3339 parser. Cross-language drift vectors that previously passed (e.g., `2026-02-31` via `new Date()`, `+00:60` normalization, 7-digit fractional seconds) are now rejected before signing and on verification.
 
