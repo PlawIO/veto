@@ -16,6 +16,8 @@ Stop agents from deleting files, leaking secrets, or pushing to prod — without
 
 [**docs.veto.so**](https://docs.veto.so) · [veto.so](https://veto.so) · [npm](https://www.npmjs.com/package/veto-sdk) · [PyPI](https://pypi.org/project/veto)
 
+<img src="docs/assets/readme-demo.gif" alt="Veto blocking a recursive delete from an AI agent" width="820">
+
 </div>
 
 ---
@@ -132,7 +134,7 @@ const result = await veto.guard(
       payer: "team-wallet",
       protocol: "custom",
     },
-  }
+  },
 );
 // result.decision: 'allow' | 'deny' | 'require_approval'
 // (YAML uses action: block/ask — guard() returns the resolved decision)

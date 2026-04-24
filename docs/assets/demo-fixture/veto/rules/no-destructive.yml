@@ -1,0 +1,8 @@
+id: no-destructive-rm
+name: Block recursive deletes outside /tmp
+action: block
+tools: [bash]
+conditions:
+  - field: command
+    matches: 'rm\s+-rf?\s+(?!/tmp)'
+reason: "Recursive delete outside /tmp — ask a human."
