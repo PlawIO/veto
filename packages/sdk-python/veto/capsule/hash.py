@@ -14,7 +14,12 @@ from typing import Any, cast
 import base58
 import jcs
 
-from .types import Beneficiary
+from .types import (
+    BankInternationalBeneficiary,
+    BankUsBeneficiary,
+    Beneficiary,
+    CryptoBeneficiary,
+)
 
 _WS_RE = re.compile(r"\s+")
 # Default-ignorable code points that are invisible to humans but change the
@@ -130,23 +135,26 @@ def _normalize_bank_us(name: str, routing: str, account_last4: str) -> dict[str,
     }
 
 
-def _normalize_bank_intl(b: dict[str, Any]) -> dict[str, str]:
+def _normalize_bank_intl(b: BankInternationalBeneficiary) -> dict[str, str]:
     out: dict[str, str] = {
         "type": "bank_intl",
         "name": _normalize_name(b["name"]),
     }
-    if "iban" in b and b["iban"]:
-        cleaned = re.sub(r"\s+", "", b["iban"]).upper()
+    iban = b.get("iban")
+    if iban:
+        cleaned = re.sub(r"\s+", "", iban).upper()
         if not _is_valid_iban_checksum(cleaned):
             raise ValueError(f"invalid IBAN: checksum failed for {b['iban']!r}")
         out["iban"] = cleaned
-    if "swift_bic" in b and b["swift_bic"]:
-        cleaned = re.sub(r"\s+", "", b["swift_bic"]).upper()
+    swift_bic = b.get("swift_bic")
+    if swift_bic:
+        cleaned = re.sub(r"\s+", "", swift_bic).upper()
         if not re.fullmatch(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?", cleaned):
             raise ValueError(f"invalid SWIFT/BIC: {b['swift_bic']!r}")
         out["swift_bic"] = cleaned
-    if "country_iso" in b and b["country_iso"]:
-        cleaned = b["country_iso"].upper()
+    country_iso = b.get("country_iso")
+    if country_iso:
+        cleaned = country_iso.upper()
         if not re.fullmatch(r"[A-Z]{2}", cleaned):
             raise ValueError(
                 f"invalid ISO 3166-1 alpha-2 country code: {b['country_iso']!r}"
@@ -161,19 +169,20 @@ def _keccak256_hex(data: bytes) -> str:
     # cryptography.hazmat backend primitive via `hashlib` only if available,
     # else fall back to a tiny pure-python implementation.
     try:
-        from Crypto.Hash import keccak  # type: ignore[import-not-found]
+        from Crypto.Hash import keccak
 
         k = keccak.new(digest_bits=256)
         k.update(data)
-        return k.hexdigest()
+        return cast(str, k.hexdigest())
     except Exception:  # pragma: no cover — pycryptodome not installed
         pass
     # cryptography package provides Keccak via backends in some versions.
     try:
-        from cryptography.hazmat.primitives import hashes  # type: ignore[import-not-found]
+        from cryptography.hazmat.primitives import hashes
 
-        if hasattr(hashes, "Keccak256"):
-            digest = hashes.Hash(hashes.Keccak256())
+        keccak_cls = getattr(hashes, "Keccak256", None)
+        if keccak_cls is not None:
+            digest = hashes.Hash(keccak_cls())
             digest.update(data)
             return digest.finalize().hex()
     except Exception:  # pragma: no cover
@@ -314,13 +323,17 @@ def _normalize_crypto(chain: str, address: str) -> dict[str, str]:
 
 
 def normalize_beneficiary(b: Beneficiary) -> dict[str, Any]:
-    btype = b.get("type")  # type: ignore[union-attr]
+    btype = b.get("type")
     if btype == "bank_us":
-        return _normalize_bank_us(b["name"], b["routing"], b["account_last4"])  # type: ignore[typeddict-item]
+        bank_us = cast(BankUsBeneficiary, b)
+        return _normalize_bank_us(
+            bank_us["name"], bank_us["routing"], bank_us["account_last4"]
+        )
     if btype == "bank_intl":
-        return _normalize_bank_intl(cast(dict[str, Any], b))
+        return _normalize_bank_intl(cast(BankInternationalBeneficiary, b))
     if btype == "crypto":
-        return _normalize_crypto(b["chain"], b["address"])  # type: ignore[typeddict-item]
+        crypto = cast(CryptoBeneficiary, b)
+        return _normalize_crypto(crypto["chain"], crypto["address"])
     raise ValueError(f"unknown beneficiary type: {btype}")
 
 

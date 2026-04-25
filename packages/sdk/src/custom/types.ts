@@ -90,9 +90,6 @@ export const CUSTOM_DEFAULTS = {
   timeout: 30000,
 } as const;
 
-/**
- * Base error class for custom provider errors.
- */
 export class CustomError extends Error {
   readonly cause?: Error;
 
@@ -103,9 +100,13 @@ export class CustomError extends Error {
   }
 }
 
-/**
- * Error thrown when response parsing fails.
- */
+export class CustomConfigError extends CustomError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CustomConfigError';
+  }
+}
+
 export class CustomParseError extends CustomError {
   readonly rawResponse: string;
 
@@ -116,44 +117,104 @@ export class CustomParseError extends CustomError {
   }
 }
 
-/**
- * Error thrown when API key is missing.
- */
-export class CustomAPIKeyError extends CustomError {
+export class CustomAPIKeyError extends CustomConfigError {
   readonly provider: CustomProvider;
+  readonly envVar: string;
 
-  constructor(provider: CustomProvider, envVar: string) {
-    super(
-      `API key for ${provider} not found. Set ${envVar} environment variable or provide apiKey in config.`
-    );
+  constructor(provider: CustomProvider, envVar: string, configuredEnvVar = false) {
+    const message = configuredEnvVar
+      ? `API key env var ${envVar} for custom provider ${provider} is not set or empty. Set ${envVar} or configure custom.apiKey with a literal secret.`
+      : `Missing API key for custom provider ${provider}. Set ${envVar} environment variable or configure custom.apiKey.`;
+    super(message);
     this.name = 'CustomAPIKeyError';
     this.provider = provider;
+    this.envVar = envVar;
   }
 }
 
-/**
- * Resolve custom configuration with defaults and validation.
- *
- * @param config - User-provided configuration
- * @returns Resolved configuration with all required fields
- * @throws {CustomAPIKeyError} If API key is not found
- */
-export function resolveCustomConfig(config: CustomConfig): ResolvedCustomConfig {
-  // Resolve API key: use provided key or environment variable
-  const envVar = PROVIDER_ENV_VARS[config.provider];
-  const apiKey = config.apiKey || process.env[envVar];
+export class CustomProviderPackageError extends CustomError {
+  readonly provider: CustomProvider;
+  readonly packageName: string;
 
+  constructor(provider: CustomProvider, packageName: string, cause?: Error) {
+    super(
+      `Custom provider package "${packageName}" is not installed. Install ${packageName} to use custom.provider="${provider}".`,
+      cause
+    );
+    this.name = 'CustomProviderPackageError';
+    this.provider = provider;
+    this.packageName = packageName;
+  }
+}
+
+const ENV_VAR_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+const SUPPORTED_PROVIDERS = new Set<CustomProvider>([
+  'gemini',
+  'openrouter',
+  'openai',
+  'anthropic',
+]);
+
+function isSupportedProvider(provider: unknown): provider is CustomProvider {
+  return typeof provider === 'string' && SUPPORTED_PROVIDERS.has(provider as CustomProvider);
+}
+
+function looksLikeEnvVarName(value: string): boolean {
+  return ENV_VAR_NAME_PATTERN.test(value);
+}
+
+function resolveApiKey(provider: CustomProvider, configuredApiKey?: string): string {
+  const trimmedApiKey = configuredApiKey?.trim();
+
+  if (trimmedApiKey) {
+    if (looksLikeEnvVarName(trimmedApiKey)) {
+      const resolvedApiKey = process.env[trimmedApiKey];
+      if (!resolvedApiKey) {
+        throw new CustomAPIKeyError(provider, trimmedApiKey, true);
+      }
+      return resolvedApiKey;
+    }
+
+    return trimmedApiKey;
+  }
+
+  const envVar = PROVIDER_ENV_VARS[provider];
+  const apiKey = process.env[envVar];
   if (!apiKey) {
-    throw new CustomAPIKeyError(config.provider, envVar);
+    throw new CustomAPIKeyError(provider, envVar);
+  }
+
+  return apiKey;
+}
+
+export function resolveCustomConfig(config: CustomConfig): ResolvedCustomConfig {
+  const provider = (config as Partial<CustomConfig>).provider;
+  if (!provider) {
+    throw new CustomConfigError(
+      'Missing custom.provider for custom validation. Set custom.provider to one of: openai, anthropic, gemini, openrouter.'
+    );
+  }
+
+  if (!isSupportedProvider(provider)) {
+    throw new CustomConfigError(
+      `Unsupported custom.provider "${String(provider)}". Supported providers: openai, anthropic, gemini, openrouter.`
+    );
+  }
+
+  const model = (config as Partial<CustomConfig>).model;
+  if (!model || model.trim() === '') {
+    throw new CustomConfigError(
+      `Missing custom.model for custom provider ${provider}. Set custom.model in veto.config.yaml.`
+    );
   }
 
   return {
-    provider: config.provider,
-    model: config.model,
-    apiKey,
+    provider,
+    model,
+    apiKey: resolveApiKey(provider, config.apiKey),
     temperature: config.temperature ?? CUSTOM_DEFAULTS.temperature,
     maxTokens: config.maxTokens ?? CUSTOM_DEFAULTS.maxTokens,
     timeout: config.timeout ?? CUSTOM_DEFAULTS.timeout,
-    baseUrl: config.baseUrl ?? PROVIDER_BASE_URLS[config.provider],
+    baseUrl: config.baseUrl ?? PROVIDER_BASE_URLS[provider],
   };
 }

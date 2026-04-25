@@ -105,7 +105,7 @@ function resolveProvider(options: CompileOptions): CompileProviderConfig {
   const provider = options.provider ?? detectProvider();
   if (!provider) {
     throw new CompileError(
-      'No LLM provider configured. Set --provider or one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY'
+      'No LLM provider configured. Set --provider or one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY'
     );
   }
 

@@ -12,6 +12,9 @@ const BUILT_IN_POLICY_PACK_FILE_NAMES = {
   '@veto/communication': 'communication.yaml',
   '@veto/deployment': 'deployment.yaml',
   '@veto/economic-agent': 'economic-agent.yaml',
+  '@veto/soc2-lite': 'soc2-lite.yaml',
+  '@veto/hipaa-lite': 'hipaa-lite.yaml',
+  '@veto/eu-ai-act-starter': 'eu-ai-act-starter.yaml',
 } as const;
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));

@@ -138,7 +138,7 @@ ${cloudConfigYaml}
 # custom:
 #   provider: "openai"  # openai | anthropic | gemini | openrouter
 #   model: "gpt-5.4"
-#   # apiKey: "sk-..."  # Or set OPENAI_API_KEY env var
+#   # apiKey: "OPENAI_API_KEY"  # Env var names are supported and safer than literal secrets
 #   temperature: 0.1
 #   maxTokens: 500
 #   # baseUrl: "https://api.openai.com/v1"  # Optional override

@@ -11,7 +11,7 @@ import datetime as _dt
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -80,6 +80,9 @@ class TrustAnchor:
     to sign for."""
     jwks: Jwks | AuthorizedJwks
     require_issuer_binding: bool | None = None
+
+
+TrustInput = Jwks | AuthorizedJwks | TrustAnchor | dict[str, Any]
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -164,15 +167,97 @@ def _parse_header(jws: str) -> dict[str, Any]:
             raise CapsuleVerificationError(
                 "jws_malformed", "JWS segment is not valid UTF-8"
             ) from err
-        return json.loads(header_json)
+        return cast(dict[str, Any], json.loads(header_json))
     except CapsuleVerificationError:
         raise
     except Exception as err:
         raise CapsuleVerificationError("jws_malformed", "invalid JWS header") from err
 
 
+_AUTHORIZATIONS_ABSENT = object()
+_AUTHORIZATION_KEYS = {"kid", "issuer", "entity_ids"}
+
+
+def _object_dict(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise CapsuleVerificationError("jwks_key_invalid", f"{label} must be an object")
+    raw = cast(dict[object, object], value)
+    if any(not isinstance(key, str) for key in raw):
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", f"{label} object keys must be strings"
+        )
+    return cast(dict[str, object], raw)
+
+
+def _jwks_keys_from_dict(jwks: dict[str, object]) -> list[JwksKey]:
+    keys_raw = jwks.get("keys")
+    if not isinstance(keys_raw, list):
+        raise CapsuleVerificationError("jwks_key_invalid", "JWKS keys must be a list")
+    if any(not isinstance(key, dict) for key in keys_raw):
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", "JWKS keys entries must be objects"
+        )
+    return cast(list[JwksKey], keys_raw)
+
+
+def _authorization_entry_from_raw(raw: object) -> AuthorizedJwksEntry:
+    if isinstance(raw, AuthorizedJwksEntry):
+        return raw
+    entry = _object_dict(raw, "JWKS authorization entry")
+    extra_keys = set(entry) - _AUTHORIZATION_KEYS
+    if extra_keys:
+        raise CapsuleVerificationError(
+            "jwks_key_invalid",
+            f"JWKS authorization entry has unknown keys: {sorted(extra_keys)!r}",
+        )
+    kid = entry.get("kid")
+    issuer = entry.get("issuer")
+    entity_ids_raw = entry.get("entity_ids")
+    if not isinstance(kid, str):
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", "JWKS authorization entry kid must be a string"
+        )
+    if not isinstance(issuer, str):
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", "JWKS authorization entry issuer must be a string"
+        )
+    if entity_ids_raw is None:
+        entity_ids = None
+    elif isinstance(entity_ids_raw, list) and all(
+        isinstance(entity_id, str) for entity_id in entity_ids_raw
+    ):
+        entity_ids = cast(list[str], entity_ids_raw)
+    else:
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", "JWKS authorization entry entity_ids must be a list of strings"
+        )
+    return AuthorizedJwksEntry(kid=kid, issuer=issuer, entity_ids=entity_ids)
+
+
+def _authorizations_from_raw(raw: object) -> list[AuthorizedJwksEntry] | None:
+    if raw is _AUTHORIZATIONS_ABSENT or raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", "JWKS authorizations must be a list"
+        )
+    if not raw:
+        return None
+    return [_authorization_entry_from_raw(entry) for entry in raw]
+
+
+def _require_binding_override(raw: object) -> bool | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    raise CapsuleVerificationError(
+        "jwks_key_invalid", "require_issuer_binding must be a boolean"
+    )
+
+
 def _resolve_trust(
-    trust: Jwks | AuthorizedJwks | TrustAnchor | dict,
+    trust: TrustInput,
 ) -> tuple[list[JwksKey], list[AuthorizedJwksEntry] | None, bool]:
     """Return (keys, authorizations_or_None, require_binding).
 
@@ -182,35 +267,39 @@ def _resolve_trust(
       - Plain dict JWKS (may carry `authorizations` from JSON fixtures)
       - Dict-shaped TrustAnchor with `jwks` + optional `require_issuer_binding`
     """
+    inner: object
+    req_override: bool | None
     if isinstance(trust, TrustAnchor):
         inner = trust.jwks
         req_override = trust.require_issuer_binding
     elif isinstance(trust, dict) and "jwks" in trust and "keys" not in trust:
         # Dict-shaped TrustAnchor. Distinguishable from a plain JWKS because
         # a JWKS MUST have a top-level `keys` array.
-        inner = trust["jwks"]
-        req_override = trust.get("require_issuer_binding")
+        trust_dict = _object_dict(trust, "trust anchor")
+        inner = trust_dict["jwks"]
+        req_override = _require_binding_override(
+            trust_dict.get("require_issuer_binding")
+        )
     else:
         inner = trust
         req_override = None
 
+    auths: list[AuthorizedJwksEntry] | None
     if isinstance(inner, AuthorizedJwks):
         keys = inner.keys
         auths = inner.authorizations
     elif isinstance(inner, dict):
-        keys = inner["keys"]
+        inner_dict = _object_dict(inner, "JWKS")
+        keys = _jwks_keys_from_dict(inner_dict)
         # A dict can carry `authorizations` — JSON-loaded fixtures and cross-
         # language contract tests use this shape. Promote it to typed entries
         # so the binding check fires correctly instead of silently fail-open.
-        auths_raw = inner.get("authorizations")
-        auths = (
-            [AuthorizedJwksEntry(**a) for a in auths_raw] if auths_raw else None
+        auths = _authorizations_from_raw(
+            inner_dict.get("authorizations", _AUTHORIZATIONS_ABSENT)
         )
     else:
-        keys = inner["keys"]  # type: ignore[index]
-        auths_raw = inner.get("authorizations") if hasattr(inner, "get") else None  # type: ignore[attr-defined]
-        auths = (
-            [AuthorizedJwksEntry(**a) for a in auths_raw] if auths_raw else None
+        raise CapsuleVerificationError(
+            "jwks_key_invalid", "trust anchor jwks must be a JWKS object"
         )
 
     # Default posture: require issuer binding. Callers that really want the
@@ -223,7 +312,7 @@ def _resolve_trust(
 
 def verify_capsule(
     jws: str,
-    trust: Jwks | AuthorizedJwks | TrustAnchor,
+    trust: TrustInput,
     *,
     clock_skew_seconds: int = DEFAULT_SKEW_SECONDS,
     now: _dt.datetime | None = None,
@@ -368,9 +457,11 @@ def verify_capsule(
 
 def public_jwk_from_private(key: PrivateSigningKey) -> JwksKey:
     jwk = key["jwk"]
-    return JwksKey(  # type: ignore[typeddict-item]
-        kty=jwk["kty"],
-        crv=jwk["crv"],
+    kty: Literal["OKP"] = jwk["kty"]
+    crv: Literal["Ed25519"] = jwk["crv"]
+    return JwksKey(
+        kty=kty,
+        crv=crv,
         kid=key["kid"],
         x=jwk["x"],
         alg="EdDSA",
