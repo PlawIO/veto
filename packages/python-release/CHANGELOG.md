@@ -1,5 +1,13 @@
 # @veto/python-release
 
+## 0.5.1
+
+### Patch Changes
+
+- [#197](https://github.com/PlawIO/veto/pull/197) [`da432af`](https://github.com/PlawIO/veto/commit/da432afe7de659bad31a2686760030a5c4c76149) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add starter compliance policy packs, public built-in pack registry helpers, and clearer custom provider API-key resolution/retry errors.
+
+  Add create-veto-app for scaffolding minimal TypeScript Veto agent projects.
+
 ## 0.5.0
 
 ### Minor Changes

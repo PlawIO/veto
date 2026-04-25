@@ -1,5 +1,11 @@
 # veto (Python SDK)
 
+## 0.14.1
+
+### Patch Changes
+
+- Add starter compliance policy packs, public built-in pack registry helpers, and clearer custom provider API-key resolution/retry errors. Add create-veto-app for scaffolding minimal TypeScript Veto agent projects.
+
 ## 0.14.0
 
 ### Minor Changes
