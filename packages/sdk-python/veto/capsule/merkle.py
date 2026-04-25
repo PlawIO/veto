@@ -6,7 +6,7 @@ import datetime as _dt
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .hash import canonicalize, sha256_prefixed
 from .rfc3339 import parse_rfc3339_strict
@@ -105,12 +105,13 @@ def build_receipt(
         if merkle_root is not None
         else (prev["merkle_root"] if prev else GENESIS_MERKLE_ROOT)
     )
-    receipt: ReceiptPayload = {
+    receipt_data: dict[str, Any] = {
         "version": RECEIPT_VERSION,
-        **draft,  # type: ignore[misc]
+        **draft,
         "prev_receipt_hash": prev_hash,
         "merkle_root": resolved_root,
     }
+    receipt = cast(ReceiptPayload, receipt_data)
     try:
         validate_receipt_payload(receipt)
     except ValidationError as err:

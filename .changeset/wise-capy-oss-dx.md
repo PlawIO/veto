@@ -1,4 +1,5 @@
 ---
+"@veto/python-release": patch
 "veto-sdk": minor
 "create-veto-app": minor
 ---
