@@ -175,7 +175,7 @@ function resolveApiKey(provider: CustomProvider, configuredApiKey?: string): str
       return resolvedApiKey;
     }
 
-    return configuredApiKey ?? trimmedApiKey;
+    return trimmedApiKey;
   }
 
   const envVar = PROVIDER_ENV_VARS[provider];

@@ -56,6 +56,16 @@ describe('custom provider config resolution', () => {
     expect(resolved.apiKey).toBe('sk-literal-secret');
   });
 
+  it('trims whitespace around literal secrets', () => {
+    const resolved = resolveCustomConfig({
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
+      apiKey: '  sk-literal-secret  ',
+    });
+
+    expect(resolved.apiKey).toBe('sk-literal-secret');
+  });
+
   it('fails when a configured env var name is missing without treating it as a secret', () => {
     expect(() => resolveCustomConfig({
       provider: 'openai',
