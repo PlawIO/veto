@@ -42,15 +42,17 @@ rules:
       - http_request
       - upload_file
       - send_email
-    conditions:
-      - field: custom.phi_transfer_approved
-        operator: not_equals
-        value: true
     condition_groups:
-      - - field: arguments.contains_phi
+      - - field: custom.phi_transfer_approved
+          operator: not_equals
+          value: true
+        - field: arguments.contains_phi
           operator: equals
           value: true
-      - - field: arguments.data_classification
+      - - field: custom.phi_transfer_approved
+          operator: not_equals
+          value: true
+        - field: arguments.data_classification
           operator: matches
           value: '(?i)\b(phi|patient|medical)\b'
 
@@ -66,19 +68,24 @@ rules:
       - query_database
       - execute_sql
       - run_query
-    conditions:
-      - field: custom.phi_access_approved
-        operator: not_equals
-        value: true
     condition_groups:
       # Add role, purpose-of-use, and break-glass checks in project overrides.
-      - - field: arguments.record_type
+      - - field: custom.phi_access_approved
+          operator: not_equals
+          value: true
+        - field: arguments.record_type
           operator: matches
           value: '(?i)\b(patient|medical|clinical|encounter|claim)\b'
-      - - field: arguments.table
+      - - field: custom.phi_access_approved
+          operator: not_equals
+          value: true
+        - field: arguments.table
           operator: matches
           value: '(?i)\b(patient|medical|clinical|encounter|claim)s?\b'
-      - - field: arguments.query
+      - - field: custom.phi_access_approved
+          operator: not_equals
+          value: true
+        - field: arguments.query
           operator: matches
           value: '(?i)\b(patient|medical_record|diagnosis|medication|mrn)\b'
 
@@ -94,16 +101,18 @@ rules:
       - query_database
       - execute_sql
       - run_query
-    conditions:
-      # Tune this threshold to your minimum necessary access policy.
-      - field: arguments.limit
-        operator: greater_than
-        value: 100
     condition_groups:
-      - - field: arguments.dataset
+      # Tune this threshold to your minimum necessary access policy.
+      - - field: arguments.limit
+          operator: greater_than
+          value: 100
+        - field: arguments.dataset
           operator: matches
           value: '(?i)\b(patient|medical|clinical|phi)\b'
-      - - field: arguments.query
+      - - field: arguments.limit
+          operator: greater_than
+          value: 100
+        - field: arguments.query
           operator: matches
           value: '(?i)\b(patient|medical_record|diagnosis|medication|mrn)\b'
 

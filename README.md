@@ -51,13 +51,13 @@ The agent is unaware it's being governed. Your tools are unchanged. No behavior 
 
 ## Packages
 
-| Package                                         | Language    | Install                    | Description                               |
-| ----------------------------------------------- | ----------- | -------------------------- | ----------------------------------------- |
-| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | SDK for guarded agentic apps              |
-| [`veto`](./packages/sdk-python)                 | Python      | `pip install veto`         | Same API, all major LLM providers         |
-| [`veto-cli`](./packages/cli)                    | TypeScript  | `npm install -g veto-cli`  | Interactive studio + headless automation  |
-| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Scaffold a minimal guarded TypeScript app |
-| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install -g veto-bash` | Rust-first guarded `bash` runtime + MCP   |
+| Package                         | Language    | Install                    | Description                              |
+| ------------------------------- | ----------- | -------------------------- | ---------------------------------------- |
+| [`veto-sdk`](./packages/sdk)    | TypeScript  | `npm install veto-sdk`     | SDK for guarded agentic apps             |
+| [`veto`](./packages/sdk-python) | Python      | `pip install veto`         | Same API, all major LLM providers        |
+| [`veto-cli`](./packages/cli)    | TypeScript  | `npm install -g veto-cli`  | Interactive studio + headless automation |
+| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app` | Scaffold a minimal guarded TypeScript app |
+| [`veto-bash`](./packages/bash)  | Rust + Node | `npm install -g veto-bash` | Rust-first guarded `bash` runtime + MCP  |
 
 ## Quick start
 
@@ -135,7 +135,7 @@ const result = await veto.guard(
       payer: "team-wallet",
       protocol: "custom",
     },
-  }
+  },
 );
 // result.decision: 'allow' | 'deny' | 'require_approval'
 // (YAML uses action: block/ask — guard() returns the resolved decision)

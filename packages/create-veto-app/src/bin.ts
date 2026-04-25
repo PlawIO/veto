@@ -124,8 +124,80 @@ function withDefault(value: string | undefined, fallback: string): string {
   return value && value.trim() !== '' ? value : fallback;
 }
 
+type RawModeInput = typeof input & {
+  isRaw?: boolean;
+  setRawMode?: (mode: boolean) => void;
+};
+
+async function questionHidden(question: string): Promise<string> {
+  const ttyInput = input as RawModeInput;
+  if (typeof ttyInput.setRawMode !== 'function') {
+    throw new Error('Hidden API key input requires an interactive TTY.');
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let answer = '';
+    const wasRaw = ttyInput.isRaw === true;
+    const wasPaused = input.isPaused();
+    let settled = false;
+
+    function cleanup(): void {
+      input.off('data', onData);
+      ttyInput.setRawMode?.(wasRaw);
+      if (wasPaused) {
+        input.pause();
+      }
+    }
+
+    function settle(error?: Error): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      output.write('\n');
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(answer);
+    }
+
+    function onData(chunk: Buffer | string): void {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      for (const char of text) {
+        if (char === '\r' || char === '\n' || char === '\u0004') {
+          settle();
+          return;
+        }
+        if (char === '\u0003') {
+          settle(new Error('Interrupted.'));
+          return;
+        }
+        if (char === '\b' || char === '\u007f') {
+          answer = answer.slice(0, -1);
+          continue;
+        }
+        answer += char;
+      }
+    }
+
+    ttyInput.setRawMode(true);
+    input.resume();
+    input.on('data', onData);
+    output.write(question);
+  });
+}
+
 async function promptForOptions(parsed: ParsedArgs): Promise<ScaffoldCreateVetoAppOptions> {
   const rl = createInterface({ input, output });
+  let rlClosed = false;
+  const closeReadline = (): void => {
+    if (!rlClosed) {
+      rl.close();
+      rlClosed = true;
+    }
+  };
   try {
     const defaultProjectDir = parsed.projectDir ?? 'my-veto-agent';
     const projectDirAnswer = await rl.question(`Project directory (${defaultProjectDir}): `);
@@ -138,9 +210,11 @@ async function promptForOptions(parsed: ParsedArgs): Promise<ScaffoldCreateVetoA
     const cloudDefault = parsed.cloud === true ? 'y' : 'n';
     const cloudAnswer = await rl.question(`Use Veto Cloud mode? (${cloudDefault}): `);
     const cloud = withDefault(cloudAnswer, cloudDefault).toLowerCase().startsWith('y');
-    const apiKey = cloud
-      ? withDefault(await rl.question('Veto Cloud API key (optional, leave blank to use VETO_API_KEY): '), '')
-      : undefined;
+    let apiKey: string | undefined;
+    if (cloud) {
+      closeReadline();
+      apiKey = withDefault(await questionHidden('Veto Cloud API key (optional, leave blank to use VETO_API_KEY): '), '');
+    }
 
     return {
       projectDir: withDefault(projectDirAnswer, defaultProjectDir),
@@ -151,7 +225,7 @@ async function promptForOptions(parsed: ParsedArgs): Promise<ScaffoldCreateVetoA
       noInstall: parsed.noInstall,
     };
   } finally {
-    rl.close();
+    closeReadline();
   }
 }
 
