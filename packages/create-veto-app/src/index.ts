@@ -59,12 +59,28 @@ function normalizeOptionalPack(pack: string | undefined): string | undefined {
   return normalizedPack;
 }
 
+function trimEdgeHyphens(value: string): string {
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && value[start] === '-') {
+    start += 1;
+  }
+
+  while (end > start && value[end - 1] === '-') {
+    end -= 1;
+  }
+
+  return value.slice(start, end);
+}
+
 function toPackageName(projectName: string): string {
-  const normalized = projectName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  const normalized = trimEdgeHyphens(
+    projectName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+  );
   return normalized || 'veto-agent';
 }
 
