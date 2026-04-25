@@ -1,0 +1,136 @@
+# Starter guardrails inspired by SOC 2 control themes.
+# Operators must review, tune thresholds, and map rules to their own controls.
+version: "1.0"
+name: soc2-lite-pack
+description: Starter guardrails for change management, least-privilege operations, audit integrity, and secret handling. This pack is not a compliance certification.
+
+rules:
+  - id: soc2-require-approval-destructive-operations
+    name: Require approval for destructive operations
+    description: Route destructive shell, file, and database operations to human approval before execution.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - execute_command
+      - run_shell
+      - bash
+      - shell
+      - delete_file
+      - write_file
+      - edit_file
+      - query_database
+      - execute_sql
+      - run_query
+    condition_groups:
+      # Tune these command/data patterns for your runtime and database dialect.
+      - - field: arguments.command
+          operator: matches
+          value: '(?i)\b(rm\s+-rf|mkfs|shutdown|reboot|terraform\s+destroy|kubectl\s+delete)\b'
+      - - field: arguments.path
+          operator: matches
+          value: "(^|/)(prod|production|backups|audit|logs)(/|$)"
+      - - field: arguments.query
+          operator: matches
+          value: '(?i)\b(drop|truncate|delete\s+from|alter\s+table)\b'
+
+  - id: soc2-require-approval-production-release
+    name: Require approval for production release actions
+    description: Require human approval before production deploy, publish, release, or delete operations.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - deploy
+      - publish
+      - release
+      - push_to_production
+      - delete_file
+      - execute_command
+      - run_shell
+      - bash
+      - shell
+    condition_groups:
+      - - field: arguments.environment
+          operator: matches
+          value: "(?i)^(prod|production)$"
+      - - field: arguments.env
+          operator: matches
+          value: "(?i)^(prod|production)$"
+      - - field: arguments.target
+          operator: matches
+          value: '(?i)\b(prod|production)\b'
+      - - field: arguments.command
+          operator: matches
+          value: '(?i)\b(prod|production)\b.*\b(deploy|release|delete|destroy)\b'
+
+  - id: soc2-block-audit-log-tampering
+    name: Block audit log tampering
+    description: Prevent agents from deleting or mutating audit logs and evidence exports.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - delete_file
+      - write_file
+      - edit_file
+      - execute_command
+      - run_shell
+      - bash
+      - shell
+    condition_groups:
+      - - field: arguments.path
+          operator: matches
+          value: "(?i)(audit|evidence|security)[-_]?(log|trail|export)"
+      - - field: arguments.command
+          operator: matches
+          value: '(?i)\b(rm|truncate|shred)\b.*\b(audit|evidence|security)[-_]?(log|trail|export)\b'
+
+  - id: soc2-require-approval-audit-export
+    name: Require approval for audit exports
+    description: Require review before exporting audit logs or control evidence outside the system.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - export_data
+      - export_records
+      - upload_file
+      - http_request
+      - send_email
+    condition_groups:
+      # Add your internal-only domains or approved sinks in project-specific overrides.
+      - - field: arguments.dataset
+          operator: matches
+          value: '(?i)\b(audit|evidence|security|access)[-_ ]?(log|trail|export|review)\b'
+      - - field: arguments.path
+          operator: matches
+          value: '(?i)\b(audit|evidence|security)[-_ ]?(log|trail|export)\b'
+      - - field: arguments.body
+          operator: matches
+          value: '(?i)\b(audit|evidence|control|soc\s*2)\b'
+
+output_rules:
+  - id: soc2-redact-api-keys
+    name: Redact API keys and tokens
+    description: Redact common credential patterns from tool outputs.
+    enabled: true
+    severity: critical
+    action: redact
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '(?i)\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*[A-Za-z0-9_./+=-]{8,}'
+    redact_with: "[REDACTED_SECRET]"
+
+  - id: soc2-redact-private-keys
+    name: Redact private key material
+    description: Redact PEM private keys from tool outputs.
+    enabled: true
+    severity: critical
+    action: redact
+    output_conditions:
+      - field: output
+        operator: matches
+        value: "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    redact_with: "[REDACTED_PRIVATE_KEY]"

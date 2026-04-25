@@ -469,6 +469,7 @@ export class Veto {
   // Custom provider client (lazy initialized)
   private customClient: CustomClientType | null = null;
   private readonly customConfig: CustomConfig | null;
+  private readonly customConfigError: string | null;
 
   // Cloud client (lazy initialized or injected)
   private cloudClient: VetoCloudClient | null = null;
@@ -609,16 +610,25 @@ export class Veto {
     }
 
     // Resolve custom provider configuration
-    if (this.validationMode === 'custom' && config.custom?.provider && config.custom?.model) {
-      this.customConfig = {
-        provider: config.custom.provider,
-        model: config.custom.model,
-        apiKey: config.custom.apiKey,
-        temperature: config.custom.temperature,
-        maxTokens: config.custom.maxTokens,
-        timeout: config.custom.timeout,
-        baseUrl: config.custom.baseUrl,
-      };
+    this.customConfigError = null;
+    if (this.validationMode === 'custom') {
+      if (!config.custom?.provider) {
+        this.customConfig = null;
+        this.customConfigError = 'Missing custom.provider for custom validation. Set custom.provider in veto.config.yaml.';
+      } else if (!config.custom.model) {
+        this.customConfig = null;
+        this.customConfigError = `Missing custom.model for custom provider ${config.custom.provider}. Set custom.model in veto.config.yaml.`;
+      } else {
+        this.customConfig = {
+          provider: config.custom.provider,
+          model: config.custom.model,
+          apiKey: config.custom.apiKey,
+          temperature: config.custom.temperature,
+          maxTokens: config.custom.maxTokens,
+          timeout: config.custom.timeout,
+          baseUrl: config.custom.baseUrl,
+        };
+      }
     } else {
       this.customConfig = null;
     }
@@ -2201,7 +2211,8 @@ export class Veto {
 
     if (!this.customConfig) {
       throw new Error(
-        'Custom validation is not configured. Set validation.mode="custom" and provide custom.provider and custom.model in veto.config.yaml'
+        this.customConfigError
+          ?? 'Custom validation is not configured. Set validation.mode="custom" and provide custom.provider and custom.model in veto.config.yaml'
       );
     }
 
