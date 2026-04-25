@@ -77,6 +77,21 @@ def main() -> None:
         )
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read(500).decode("utf-8", errors="replace").strip()
+        except Exception:
+            body = ""
+        if body:
+            body = " ".join(body.split())
+        reason = f" {e.reason}" if e.reason else ""
+        body_suffix = f": {body}" if body else ""
+        fail_open(
+            f"guard daemon at {DAEMON_URL} returned HTTP {e.code}{reason}{body_suffix}; "
+            "allowing call."
+        )
+        return
     except (urllib.error.URLError, ConnectionRefusedError):
         fail_open(
             f"guard daemon unreachable at {DAEMON_URL}; allowing call. "

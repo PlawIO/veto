@@ -19,6 +19,8 @@ from veto.core.validator import ValidationEngine, AggregatedValidationResult
 from veto.core.history import HistoryTracker
 from veto.core.output_validator import OutputValidationResult
 
+AfterValidationHook = Callable[..., Union[None, Awaitable[None]]]
+
 
 class OutputValidationProtocol(Protocol):
     def validate(
@@ -43,10 +45,7 @@ class InterceptorOptions:
         Callable[[ValidationContext], Union[None, Awaitable[None]]]
     ] = None
     on_after_validation: Optional[
-        Callable[
-            [ValidationContext, ValidationResult, float],
-            Union[None, Awaitable[None]],
-        ]
+        AfterValidationHook
     ] = None
     on_denied: Optional[
         Callable[
@@ -78,6 +77,25 @@ class DenialDetails:
     matched_condition: Optional[str] = None
     docs_url: Optional[str] = None
     input: Optional[dict[str, Any]] = None
+
+
+def _after_validation_hook_accepts_duration(callback: AfterValidationHook) -> bool:
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return False
+
+    positional_count = 0
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional_count += 1
+
+    return positional_count >= 3
 
 
 class ToolCallDeniedError(Exception):
@@ -153,6 +171,11 @@ class Interceptor:
         self._custom_context = options.custom_context
         self._on_before_validation = options.on_before_validation
         self._on_after_validation = options.on_after_validation
+        self._on_after_validation_accepts_duration = (
+            _after_validation_hook_accepts_duration(options.on_after_validation)
+            if options.on_after_validation is not None
+            else False
+        )
         self._on_denied = options.on_denied
         self._output_validator = options.output_validator
 
@@ -233,13 +256,19 @@ class Interceptor:
             )
 
         # Run after hook
-        if self._on_after_validation:
+        if self._on_after_validation is not None:
             try:
-                result = self._on_after_validation(
-                    context,
-                    validation_result,
-                    aggregated_result.total_duration_ms,
-                )
+                if self._on_after_validation_accepts_duration:
+                    result = self._on_after_validation(
+                        context,
+                        validation_result,
+                        aggregated_result.total_duration_ms,
+                    )
+                else:
+                    result = self._on_after_validation(
+                        context,
+                        validation_result,
+                    )
                 if inspect.isawaitable(result):
                     await result
             except Exception as error:

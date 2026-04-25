@@ -14,6 +14,7 @@ from veto.utils.logger import (
     SilentLogger,
     MemoryLogger,
     StreamLogger,
+    parse_env_log_setting,
 )
 
 
@@ -96,6 +97,26 @@ class TestStreamLogger:
         assert "ERROR" in captured.err
         assert "Error message" in captured.err
         assert "boom" in captured.err
+
+
+class TestEnvLogSetting:
+    """Tests for VETO_LOG parsing."""
+
+    def test_parse_stream_modes(self):
+        """Should parse supported stream mode suffixes."""
+        verbose = parse_env_log_setting("stream:verbose")
+        compact = parse_env_log_setting("stream:compact")
+
+        assert verbose is not None
+        assert verbose.level == "stream"
+        assert verbose.stream_mode == "verbose"
+        assert compact is not None
+        assert compact.level == "stream"
+        assert compact.stream_mode == "compact"
+
+    def test_parse_unknown_stream_suffix_returns_none(self):
+        """Should reject unsupported stream mode suffixes."""
+        assert parse_env_log_setting("stream:nope") is None
 
 
 class TestSilentLogger:

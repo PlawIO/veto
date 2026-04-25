@@ -10,7 +10,7 @@ from typing import Any, Literal, Optional, Protocol, TypeVar, Union, cast, overl
 import yaml
 
 from veto.core.veto import Veto, VetoOptions
-from veto.types.config import LogLevel
+from veto.types.config import LogLevel, StreamLogMode
 
 ProtectMode = Literal["strict", "log", "shadow"]
 
@@ -297,11 +297,15 @@ def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[LogLevel]:
     return None
 
 
-def _resolve_protect_stream_mode(options: dict[str, Any]) -> Optional[str]:
+def _resolve_protect_stream_mode(options: dict[str, Any]) -> Optional[StreamLogMode]:
     """Pull ``stream_mode`` from explicit options, then VETO_LOG env var."""
     explicit = options.get("stream_mode")
-    if explicit:
-        return explicit
+    if isinstance(explicit, str):
+        if explicit in ("compact", "verbose"):
+            return cast(StreamLogMode, explicit)
+        return None
+    if explicit is not None:
+        return None
 
     import os
     from veto.utils.logger import parse_env_log_setting

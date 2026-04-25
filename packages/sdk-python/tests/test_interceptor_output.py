@@ -60,6 +60,54 @@ def _build_engine() -> ValidationEngine:
 
 
 class TestInterceptorOutputValidation:
+    async def test_on_after_validation_accepts_legacy_two_arg_callback(self) -> None:
+        logger = create_logger("silent")
+        calls: list[tuple[str, str]] = []
+
+        def after_validation(
+            context: ValidationContext,
+            result: ValidationResult,
+        ) -> None:
+            calls.append((context.tool_name, result.decision))
+
+        interceptor = Interceptor(
+            InterceptorOptions(
+                logger=logger,
+                validation_engine=_build_engine(),
+                on_after_validation=after_validation,
+            )
+        )
+
+        await interceptor.intercept(ToolCall(id="call-legacy", name="legacy", arguments={}))
+
+        assert calls == [("legacy", "allow")]
+
+    async def test_on_after_validation_passes_duration_to_three_arg_callback(self) -> None:
+        logger = create_logger("silent")
+        durations: list[float] = []
+
+        def after_validation(
+            context: ValidationContext,
+            result: ValidationResult,
+            duration_ms: float,
+        ) -> None:
+            _ = context
+            _ = result
+            durations.append(duration_ms)
+
+        interceptor = Interceptor(
+            InterceptorOptions(
+                logger=logger,
+                validation_engine=_build_engine(),
+                on_after_validation=after_validation,
+            )
+        )
+
+        await interceptor.intercept(ToolCall(id="call-duration", name="duration", arguments={}))
+
+        assert len(durations) == 1
+        assert durations[0] >= 0
+
     async def test_intercept_and_execute_transforms_output(self) -> None:
         logger = create_logger("silent")
         interceptor = Interceptor(

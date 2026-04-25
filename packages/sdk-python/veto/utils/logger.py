@@ -442,7 +442,7 @@ def parse_env_log_setting(value: Optional[str]) -> Optional[EnvLogSetting]:
             return EnvLogSetting(level="stream", stream_mode="verbose")
         if suffix == "compact":
             return EnvLogSetting(level="stream", stream_mode="compact")
-        return EnvLogSetting(level="stream", stream_mode="compact")
+        return None
 
     if raw in ("debug", "info", "warn", "error", "silent"):
         return EnvLogSetting(level=raw)  # type: ignore[arg-type]

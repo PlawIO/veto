@@ -37,6 +37,7 @@ from veto.types.config import (
     ValidationResult,
 )
 from veto.utils.logger import (
+    DecisionStreamDecision,
     DecisionStreamEvent,
     Logger,
     create_logger,
@@ -2137,7 +2138,7 @@ class Veto:
         if not is_decision_stream_logger(self._logger):
             return
 
-        decision = (
+        decision: DecisionStreamDecision = (
             "await"
             if result.decision == "require_approval"
             else "deny"
