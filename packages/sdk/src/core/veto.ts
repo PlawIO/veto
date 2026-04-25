@@ -23,6 +23,8 @@ import type {
 } from '../types/config.js';
 import {
   createLogger,
+  isDecisionStreamLogger,
+  type DecisionStreamEvent,
   type Logger,
 } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
@@ -806,8 +808,9 @@ export class Veto {
       agentId: this.agentId,
       userId: this.userId,
       role: this.role,
-      onAfterValidation: (context, result) => {
+      onAfterValidation: (context, result, durationMs) => {
         this.emitDecisionEvent(context, result);
+        this.streamDecisionRow(context, result, durationMs);
       },
       outputValidator: this.outputValidator,
     });
@@ -1818,11 +1821,15 @@ export class Veto {
         };
       }
 
-      this.logger.warn('Tool call blocked by local rule', {
-        tool: context.toolName,
-        ruleId: decisiveRule.id,
-        reason,
-      });
+      // The stream logger already prints a one-line deny row that covers this
+      // information; emitting a parallel warn would clutter stream-mode output.
+      if (!isDecisionStreamLogger(this.logger)) {
+        this.logger.warn('Tool call blocked by local rule', {
+          tool: context.toolName,
+          ruleId: decisiveRule.id,
+          reason,
+        });
+      }
       return {
         decision: 'deny',
         reason,
@@ -3090,6 +3097,52 @@ export class Veto {
     this.eventWebhookEmitter.emit(event);
   }
 
+  /**
+   * Emit a one-line decision row to the active stream logger (when configured
+   * via `logLevel: 'stream'` or `VETO_LOG=stream`). Fires for every decision —
+   * allow, deny, and require_approval — so developers see the full audit trail
+   * inline in their terminal.
+   */
+  private streamDecisionRow(
+    context: ValidationContext,
+    result: ValidationResult,
+    durationMs: number,
+  ): void {
+    if (!isDecisionStreamLogger(this.logger)) return;
+
+    const decision: DecisionStreamEvent['decision'] =
+      result.decision === 'require_approval'
+        ? 'await'
+        : result.decision === 'deny'
+          ? 'deny'
+          : 'allow';
+
+    const ruleId = this.extractMetadataString(result.metadata, ['ruleId', 'rule_id']);
+    const approvalId = this.extractMetadataString(result.metadata, ['approvalId', 'approval_id']);
+    const approver =
+      decision === 'allow'
+        ? this.extractMetadataString(result.metadata, ['approver', 'approverEmail', 'approver_email'])
+        : undefined;
+
+    const event: DecisionStreamEvent = {
+      decision,
+      toolName: context.toolName,
+      arguments: context.arguments,
+      reason: result.reason,
+      ruleId,
+      latencyMs: decision === 'await' ? undefined : durationMs,
+      approvalId,
+      approver,
+      timestamp: context.timestamp,
+    };
+
+    try {
+      this.logger.streamDecision(event);
+    } catch {
+      // Stream logging must never break the guard flow.
+    }
+  }
+
   private notifyDecisionMade(result: GuardResult, toolName: string): void {
     try {
       const maybePromise = this.onDecisionMade?.({ ...result, toolName });
@@ -3767,6 +3820,11 @@ export class Veto {
     const validationResult = aggregatedResult.finalResult;
 
     this.emitDecisionEvent(validationContext, validationResult);
+    this.streamDecisionRow(
+      validationContext,
+      validationResult,
+      aggregatedResult.totalDurationMs,
+    );
     this.logClientDecision(
       validationContext,
       validationResult,

@@ -36,6 +36,10 @@ export interface DecisionStreamEvent {
   ruleId?: string;
   latencyMs?: number;
   approvalId?: string;
+  /** Email or identifier of the approver that resolved an awaited decision. */
+  approver?: string;
+  /** Override for the timestamp shown in compact mode (defaults to "now"). */
+  timestamp?: Date;
 }
 
 /**
@@ -178,12 +182,62 @@ function formatCallArguments(args?: Record<string, unknown>, maxLength = 120): s
   return truncate(formatValue(args), maxLength);
 }
 
+/** JS-object-literal arg rendering: `{key: 'value', n: 1}`. Empty args render as `{}`. */
+function formatJsArgs(args?: Record<string, unknown>, maxLength = 80): string {
+  if (!args || Object.keys(args).length === 0) {
+    return '{}';
+  }
+  return truncate(formatValue(args), maxLength);
+}
+
 function formatDuration(latencyMs?: number): string | null {
   if (typeof latencyMs !== 'number' || !Number.isFinite(latencyMs) || latencyMs < 0) {
     return null;
   }
 
   return `${Math.round(latencyMs)}ms`;
+}
+
+/**
+ * Compact latency cell for the decision stream. Auto-scales: ms → s → m → h.
+ * Returns "-" when there's no measured latency (e.g. an `await` decision that
+ * hasn't resolved yet).
+ */
+function formatLatencyCell(latencyMs?: number): string {
+  if (typeof latencyMs !== 'number' || !Number.isFinite(latencyMs) || latencyMs < 0) {
+    return '-';
+  }
+  if (latencyMs < 1_000) return `${Math.round(latencyMs)}ms`;
+  if (latencyMs < 60_000) return `${Math.round(latencyMs / 1_000)}s`;
+  if (latencyMs < 3_600_000) return `${Math.round(latencyMs / 60_000)}m`;
+  return `${Math.round(latencyMs / 3_600_000)}h`;
+}
+
+/** HH:MM:SS, 24-hour, local time. */
+function formatTimeOfDay(date: Date = new Date()): string {
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+/**
+ * Trailing context tag for the compact stream:
+ *   deny  → `policy:<ruleId>` when known
+ *   await → `approval-required[:<approvalId>]`
+ *   allow → `approved[:<approver>]` when the result came from an approval
+ */
+function formatTrailingTag(event: DecisionStreamEvent): string | null {
+  if (event.decision === 'deny' && event.ruleId) {
+    return `policy:${event.ruleId}`;
+  }
+  if (event.decision === 'await') {
+    return event.approvalId ? `approval-required:${event.approvalId}` : 'approval-required';
+  }
+  if (event.decision === 'allow' && event.approver) {
+    return `approved:${event.approver}`;
+  }
+  return null;
 }
 
 function supportsColor(): boolean {
@@ -214,14 +268,16 @@ function bold(value: string): string {
   return `${ANSI_BOLD}${value}${ANSI_RESET}`;
 }
 
+/** Lowercase decision keyword, padded right to 5 chars, then colorized. */
 function getDecisionLabel(decision: DecisionStreamEvent['decision']): string {
+  const padded = decision.padEnd(5, ' ');
   switch (decision) {
     case 'allow':
-      return colorize('ALLOW', ANSI_GREEN);
+      return colorize(padded, ANSI_GREEN);
     case 'deny':
-      return colorize('DENY', ANSI_RED);
+      return colorize(padded, ANSI_RED);
     case 'await':
-      return colorize('AWAIT', ANSI_YELLOW);
+      return colorize(padded, ANSI_YELLOW);
   }
 }
 
@@ -233,35 +289,22 @@ function formatDecisionReason(reason: string | undefined, maxLength: number): st
   return truncate(reason.trim(), maxLength);
 }
 
+const COMPACT_CALL_MIN_WIDTH = 40;
+const COMPACT_LATENCY_WIDTH = 5;
+
+/**
+ * One-line decision row, formatted as:
+ *   `HH:MM:SS <decision> <tool>(<args>)              <latency>  <tag?>`
+ */
 function formatCompactDecision(event: DecisionStreamEvent): string {
-  const args = formatCallArguments(event.arguments, 140);
-  const call = args.length > 0 ? `${event.toolName}(${args})` : `${event.toolName}()`;
-  const metaParts: string[] = [];
-
-  if (event.decision !== 'await') {
-    metaParts.push(event.decision === 'allow' ? '✓' : '✗');
-  } else {
-    metaParts.push('…');
-  }
-
-  const duration = formatDuration(event.latencyMs);
-  if (duration) {
-    metaParts.push(duration);
-  }
-
-  if (event.ruleId) {
-    metaParts.push(`[rule: ${event.ruleId}]`);
-  }
-
-  if (event.approvalId && event.decision === 'await') {
-    metaParts.push(`[approval: ${event.approvalId}]`);
-  }
-
-  const reason = formatDecisionReason(event.reason, 140);
-  const meta = metaParts.length > 0 ? ` ${dim(metaParts.join(' '))}` : '';
-  const suffix = reason ? ` ${dim(`— ${reason}`)}` : '';
-
-  return `${getDecisionLabel(event.decision)} ${call}${meta}${suffix}`;
+  const time = dim(formatTimeOfDay(event.timestamp));
+  const label = getDecisionLabel(event.decision);
+  const call = `${event.toolName}(${formatJsArgs(event.arguments, 80)})`;
+  const callPadded = call.padEnd(COMPACT_CALL_MIN_WIDTH, ' ');
+  const latency = formatLatencyCell(event.latencyMs).padStart(COMPACT_LATENCY_WIDTH, ' ');
+  const tag = formatTrailingTag(event);
+  const tagSuffix = tag ? `  ${dim(tag)}` : '';
+  return `${time} ${label}  ${callPadded}  ${latency}${tagSuffix}`;
 }
 
 function formatVerboseDecision(event: DecisionStreamEvent): string {
@@ -269,7 +312,8 @@ function formatVerboseDecision(event: DecisionStreamEvent): string {
   const duration = formatDuration(event.latencyMs);
   const reason = formatDecisionReason(event.reason, 320) ?? 'n/a';
   const lines = [
-    `${bold('VETO DECISION')} ${getDecisionLabel(event.decision)}`,
+    `${bold('VETO DECISION')} ${getDecisionLabel(event.decision).trimEnd()}`,
+    `time: ${formatTimeOfDay(event.timestamp)}`,
     `tool: ${event.toolName}`,
     `args: ${args.length > 0 ? args : '(none)'}`,
     `reason: ${reason}`,
@@ -281,6 +325,10 @@ function formatVerboseDecision(event: DecisionStreamEvent): string {
 
   if (event.approvalId) {
     lines.push(`approval: ${event.approvalId}`);
+  }
+
+  if (event.approver) {
+    lines.push(`approver: ${event.approver}`);
   }
 
   if (duration) {

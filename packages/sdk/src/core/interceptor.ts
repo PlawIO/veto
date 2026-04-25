@@ -54,10 +54,11 @@ export interface InterceptorOptions {
   customContext?: Record<string, unknown>;
   /** Hook called before validation */
   onBeforeValidation?: (context: ValidationContext) => void | Promise<void>;
-  /** Hook called after validation */
+  /** Hook called after validation. `durationMs` is the total time spent inside the validation engine. */
   onAfterValidation?: (
     context: ValidationContext,
-    result: ValidationResult
+    result: ValidationResult,
+    durationMs: number
   ) => void | Promise<void>;
   /** Hook called when a call is denied */
   onDenied?: (
@@ -193,7 +194,8 @@ export class Interceptor {
   ) => void | Promise<void>;
   private readonly onAfterValidation?: (
     context: ValidationContext,
-    result: ValidationResult
+    result: ValidationResult,
+    durationMs: number
   ) => void | Promise<void>;
   private readonly onDenied?: (
     context: ValidationContext,
@@ -298,7 +300,11 @@ export class Interceptor {
     // Run after hook
     if (this.onAfterValidation) {
       try {
-        await this.onAfterValidation(context, validationResult);
+        await this.onAfterValidation(
+          context,
+          validationResult,
+          aggregatedResult.totalDurationMs,
+        );
       } catch (error) {
         this.logger.warn('onAfterValidation hook threw an error', {
           callId,

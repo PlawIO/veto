@@ -1,0 +1,353 @@
+version: "1.0"
+name: dev-essentials
+description: |
+  A practical, day-to-day Veto policy for Claude Code in a real dev workflow.
+  Tuned to catch the things engineers actually regret — leaked secrets,
+  force-pushed branches, unapproved prod ops, surprising new dependencies —
+  without nagging on normal coding flow.
+
+  Categories:
+    1. Secret hygiene
+    2. Git safety
+    3. Production ops
+    4. Database safety
+    5. Dependency hygiene
+    6. Supply-chain / network
+    7. Workspace boundaries
+    8. CI / infra config
+    9. Catch-all destructive
+
+rules:
+  # ────────────────────────────────────────────────────────
+  # 1. SECRET HYGIENE
+  # ────────────────────────────────────────────────────────
+  - id: deny-read-credentials
+    name: No reading credential files
+    description: |
+      Block direct reads of ~/.aws/credentials, ~/.ssh/id_*, ~/.netrc, kube
+      configs, gcloud creds, etc. The model rarely needs these and reading
+      them risks them ending up in transcripts or downstream tool calls.
+    tools: [Read]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.file_path
+        operator: matches
+        value: "(\\.aws/credentials|\\.ssh/id_[^/]+(\\.pub)?$|\\.netrc$|\\.pypirc$|\\.npmrc$|gcloud/(credentials|legacy_credentials)|/\\.kube/config|/\\.docker/config\\.json|/etc/shadow|service-account.*\\.json)"
+
+  - id: deny-shell-print-credentials
+    name: No piping credential files through the shell
+    description: Block `cat ~/.aws/credentials`, `xxd ~/.ssh/id_rsa`, etc.
+    tools: [Bash]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(cat|less|more|head|tail|xxd|base64|hexdump)\\s+[^|]*(\\.aws/credentials|\\.ssh/id_[^\\s]+|\\.netrc|\\.pypirc|\\.npmrc)"
+
+  - id: deny-echo-secret-envs
+    name: No echo-ing secret env vars
+    description: |
+      Block `echo $AWS_SECRET`, `printenv | grep TOKEN`, and the `env`-dump
+      idiom — these surface secrets into transcripts. Match the conventional
+      `<VENDOR>_(SECRET|TOKEN|KEY)` shape plus a few well-known names.
+    tools: [Bash]
+    action: block
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "\\b(echo|printf|printenv|env)\\b"
+      - field: arguments.command
+        operator: matches
+        value: "\\b((AWS|GITHUB|GH|OPENAI|ANTHROPIC|GEMINI|GOOGLE|STRIPE|TWILIO|SLACK)_(SECRET|TOKEN|KEY|API_KEY)|DATABASE_URL|PRIVATE_KEY)"
+
+  # ────────────────────────────────────────────────────────
+  # 2. GIT SAFETY — block the things you genuinely cannot un-do
+  # ────────────────────────────────────────────────────────
+  - id: deny-force-push-protected
+    name: No force-push to protected branches
+    description: |
+      Force-pushing main / master / production / release is almost always a
+      mistake. Two ANDed conditions: command contains a force flag AND
+      mentions a protected branch name.
+    tools: [Bash]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "git\\s+push\\b"
+      - field: arguments.command
+        operator: matches
+        value: "(--force\\b|--force-with-lease\\b|\\s-f\\b|\\s-fu\\b)"
+      - field: arguments.command
+        operator: matches
+        value: "\\b(main|master|production|prod|release)\\b"
+
+  - id: ask-rewrite-shared-history
+    name: Approval before rewriting shared history
+    description: |
+      `git rebase -i origin/main`, `git reset --hard origin/main`,
+      `git commit --amend` after a push — all classic foot-guns. Surface
+      to the human before proceeding.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "git\\s+(rebase\\s+-i|reset\\s+--hard\\s+(origin|upstream)/(main|master)|push\\s+.*--force-with-lease)"
+
+  # ────────────────────────────────────────────────────────
+  # 3. PRODUCTION OPS — always surface to a human
+  # ────────────────────────────────────────────────────────
+  - id: ask-prod-cli
+    name: Approval for any prod-targeted CLI
+    description: |
+      kubectl / gcloud / aws / fly / vercel / railway / heroku / doctl /
+      terraform — any of them mentioning prod-like context.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(kubectl|gcloud|aws|fly\\s|vercel\\s|railway\\s|heroku\\s|doctl|terraform)\\b"
+      - field: arguments.command
+        operator: matches
+        value: "\\b(prod|production|live|--context\\s+prod|--profile\\s+prod|--project[=\\s]prod)\\b"
+
+  - id: ask-cluster-destructive
+    name: Approval before destructive cluster ops
+    description: |
+      kubectl delete, helm uninstall, terraform destroy — surface even if
+      they don't explicitly mention prod.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(kubectl\\s+delete\\s+(deployment|statefulset|namespace|node|pvc)|helm\\s+uninstall|terraform\\s+destroy)"
+
+  - id: ask-publish
+    name: Approval before publishing a package
+    description: npm / pnpm / yarn / cargo / twine / uv publish — high-impact.
+    tools: [Bash]
+    action: require_approval
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "((npm|pnpm|yarn)\\s+publish|cargo\\s+publish|twine\\s+upload|uv\\s+publish|gh\\s+release\\s+create)"
+
+  # ────────────────────────────────────────────────────────
+  # 4. DATABASE SAFETY
+  # ────────────────────────────────────────────────────────
+  - id: ask-db-migrations
+    name: Approval before running migrations
+    description: |
+      Catches alembic / prisma / knex / sequelize / django / rails /
+      drizzle / sqlx migration runners. Migrations on the wrong env are
+      one of the most common production incidents.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(alembic\\s+(upgrade|downgrade)|prisma\\s+migrate\\s+(deploy|reset)|knex\\s+migrate|sequelize\\s+db:migrate|manage\\.py\\s+migrate|rails\\s+db:migrate|drizzle-kit\\s+(push|migrate)|sqlx\\s+migrate\\s+run|atlas\\s+migrate\\s+apply)"
+
+  - id: deny-destructive-sql-from-cli
+    name: No DROP / TRUNCATE from CLI
+    description: |
+      Catches `psql -c "drop table foo"` and similar — at the CLI level
+      where there's no transaction to roll back from.
+    tools: [Bash]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(psql|mysql|sqlite3|mongosh|mongo)\\s"
+      - field: arguments.command
+        operator: matches
+        value: "\\b(drop\\s+(table|database|schema)|truncate\\s+table)\\b"
+
+  # ────────────────────────────────────────────────────────
+  # 5. DEPENDENCY HYGIENE
+  # ────────────────────────────────────────────────────────
+  - id: ask-add-runtime-dep
+    name: Approval before adding a runtime dependency
+    description: |
+      New deps mean new attack surface, license, bundle weight. Surface
+      every install so the dev sees what's being added.
+    tools: [Bash]
+    action: require_approval
+    severity: medium
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(npm|pnpm|yarn)\\s+(install|i|add)\\s+[a-z@][^\\s\\-]"
+
+  - id: ask-add-python-dep
+    name: Approval before pip / uv / poetry add
+    description: Same idea, Python ecosystem.
+    tools: [Bash]
+    action: require_approval
+    severity: medium
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(pip\\s+install\\s+[^\\-]|uv\\s+add\\s+|poetry\\s+add\\s+|pipenv\\s+install\\s+[^\\-])"
+
+  - id: ask-global-installs
+    name: Approval for global package installs
+    description: npm -g, brew install, pip install --user, gem install -- broad-impact.
+    tools: [Bash]
+    action: require_approval
+    severity: medium
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(npm|pnpm|yarn)\\s+(install|i|add)\\s+.*-g\\b|brew\\s+install|pip\\s+install\\s+--user|gem\\s+install"
+
+  # ────────────────────────────────────────────────────────
+  # 6. SUPPLY-CHAIN / NETWORK
+  # ────────────────────────────────────────────────────────
+  - id: deny-curl-pipe-shell
+    name: No curl-to-shell
+    description: |
+      `curl ... | sh` and `wget ... | bash` — the canonical supply-chain
+      hazard. Always block.
+    tools: [Bash]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "(curl|wget)[^|]+\\|\\s*(ba)?sh"
+
+  - id: deny-non-https-fetch
+    name: HTTPS only (except localhost)
+    description: Block plaintext HTTP fetches outside localhost.
+    tools: [WebFetch]
+    action: block
+    severity: medium
+    conditions:
+      - field: arguments.url
+        operator: matches
+        value: "^http://(?!(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0))"
+
+  # Three sibling rules instead of one big alternation — the SDK's regex
+  # safety check rejects `.*…|…*.*`-shaped patterns to avoid ReDoS.
+  - id: ask-scp-remote-upload
+    name: Approval before scp to a remote host
+    description: scp could exfiltrate repo contents — surface every time.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "scp\\s+[^\\s]+\\s+[^\\s]+:"
+
+  - id: ask-rsync-remote-upload
+    name: Approval before rsync to a remote host
+    description: rsync to user@host:path could exfiltrate repo contents.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "rsync\\s+[^|]*\\s[^\\s]+@[^\\s]+:"
+
+  - id: ask-curl-upload
+    name: Approval before curl uploads
+    description: |
+      `curl --upload-file`, `-T`, `-F`, or `--data-binary @file` all upload
+      local data — surface so the user sees the destination.
+    tools: [Bash]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "\\bcurl\\b"
+      - field: arguments.command
+        operator: matches
+        value: "(--upload-file|\\s-T\\s|\\s-F\\s|--data-binary\\s+@)"
+
+  # ────────────────────────────────────────────────────────
+  # 7. WORKSPACE BOUNDARIES
+  # ────────────────────────────────────────────────────────
+  - id: ask-system-config-write
+    name: Approval before writing under sensitive dirs
+    description: ~/.ssh, ~/.aws, ~/.gnupg, /etc, ~/.config/gh, ~/.docker, ~/.kube
+    tools: [Write, Edit]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.file_path
+        operator: matches
+        value: "(/etc/|/\\.ssh/|/\\.aws/|/\\.gnupg/|/\\.config/gh/|/\\.docker/config|/\\.kube/config|/\\.netrc$)"
+
+  - id: ask-dotenv-write
+    name: Approval before writing .env files
+    description: |
+      `.env` files often hold secrets and feed into running services.
+      Surface every write so the dev sees what the agent's dropping in.
+    tools: [Write, Edit]
+    action: require_approval
+    severity: medium
+    conditions:
+      - field: arguments.file_path
+        operator: matches
+        value: "(^|/)\\.env(\\.[a-z]+)?$"
+
+  # ────────────────────────────────────────────────────────
+  # 8. CI / INFRA CONFIG
+  # ────────────────────────────────────────────────────────
+  - id: ask-ci-config-changes
+    name: Approval to modify CI configuration
+    description: |
+      Touching workflows, Dockerfiles, or infra config is high-impact —
+      auth, secrets, deploy targets all flow through here.
+    tools: [Write, Edit]
+    action: require_approval
+    severity: high
+    conditions:
+      - field: arguments.file_path
+        operator: matches
+        value: "(\\.github/workflows/|\\.gitlab-ci|\\.circleci/config|cloudbuild\\.|buildkite|Dockerfile($|\\.)|docker-compose\\.ya?ml$|terraform/.*\\.tf$|\\.tf$)"
+
+  # ────────────────────────────────────────────────────────
+  # 9. CATCH-ALL DESTRUCTIVE
+  # ────────────────────────────────────────────────────────
+  - id: deny-rm-rf-recursive
+    name: No `rm -rf`
+    description: |
+      Catches the canonical form. Variants like `find ... -delete` or
+      obfuscated chains will still get through — defense in depth, not
+      a complete sandbox.
+    tools: [Bash]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "rm\\s+(-[rR]f|-[fF][rR]|--recursive\\s+--force|--force\\s+--recursive)"
+
+  - id: deny-disk-wipe-shapes
+    name: No `dd if=… of=/dev/…`
+    description: Catches the disk-overwrite shape that ruins your day.
+    tools: [Bash]
+    action: block
+    severity: critical
+    conditions:
+      - field: arguments.command
+        operator: matches
+        value: "dd\\s+.*of=/dev/(sd|nvme|disk|hd)"

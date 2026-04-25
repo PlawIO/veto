@@ -44,7 +44,8 @@ class InterceptorOptions:
     ] = None
     on_after_validation: Optional[
         Callable[
-            [ValidationContext, ValidationResult], Union[None, Awaitable[None]]
+            [ValidationContext, ValidationResult, float],
+            Union[None, Awaitable[None]],
         ]
     ] = None
     on_denied: Optional[
@@ -234,7 +235,11 @@ class Interceptor:
         # Run after hook
         if self._on_after_validation:
             try:
-                result = self._on_after_validation(context, validation_result)
+                result = self._on_after_validation(
+                    context,
+                    validation_result,
+                    aggregated_result.total_duration_ms,
+                )
                 if inspect.isawaitable(result):
                     await result
             except Exception as error:

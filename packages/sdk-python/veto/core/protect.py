@@ -286,6 +286,29 @@ def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[LogLevel]:
     }:
         return cast(LogLevel, raw_log_level)
 
+    # Fall back to VETO_LOG env var (recognizes ``stream`` and ``stream:verbose``).
+    import os
+    from veto.utils.logger import parse_env_log_setting
+
+    env_setting = parse_env_log_setting(os.environ.get("VETO_LOG"))
+    if env_setting is not None:
+        return env_setting.level
+
+    return None
+
+
+def _resolve_protect_stream_mode(options: dict[str, Any]) -> Optional[str]:
+    """Pull ``stream_mode`` from explicit options, then VETO_LOG env var."""
+    explicit = options.get("stream_mode")
+    if explicit:
+        return explicit
+
+    import os
+    from veto.utils.logger import parse_env_log_setting
+
+    env_setting = parse_env_log_setting(os.environ.get("VETO_LOG"))
+    if env_setting is not None and env_setting.stream_mode is not None:
+        return env_setting.stream_mode
     return None
 
 
@@ -305,7 +328,7 @@ def _create_cache_key(
         "mode": options.get("mode"),
         "log_level": _resolve_protect_log_level(options),
         "stream": options.get("stream"),
-        "stream_mode": options.get("stream_mode"),
+        "stream_mode": _resolve_protect_stream_mode(options),
         "session_id": options.get("session_id"),
         "agent_id": options.get("agent_id"),
         "user_id": options.get("user_id"),
@@ -325,7 +348,7 @@ def _create_allow_all_instance(options: dict[str, Any]) -> Veto:
         output_rules=[],
         mode=options.get("mode"),
         log_level=_resolve_protect_log_level(options),
-        stream_mode=options.get("stream_mode"),
+        stream_mode=_resolve_protect_stream_mode(options),
         session_id=options.get("session_id"),
         agent_id=options.get("agent_id"),
         user_id=options.get("user_id"),
@@ -384,7 +407,7 @@ async def _initialize_veto(
                 output_rules=inline_output_rules,
                 mode=options.get("mode"),
                 log_level=_resolve_protect_log_level(options),
-                stream_mode=options.get("stream_mode"),
+                stream_mode=_resolve_protect_stream_mode(options),
                 session_id=options.get("session_id"),
                 agent_id=options.get("agent_id"),
                 user_id=options.get("user_id"),
@@ -399,7 +422,7 @@ async def _initialize_veto(
                     config_dir=options.get("config_dir"),
                     mode=options.get("mode"),
                     log_level=_resolve_protect_log_level(options),
-                    stream_mode=options.get("stream_mode"),
+                    stream_mode=_resolve_protect_stream_mode(options),
                     session_id=options.get("session_id"),
                     agent_id=options.get("agent_id"),
                     user_id=options.get("user_id"),
