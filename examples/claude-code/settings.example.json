@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/veto-hook.py",
+            "timeout_ms": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

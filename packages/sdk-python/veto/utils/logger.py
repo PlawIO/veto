@@ -39,6 +39,10 @@ class DecisionStreamEvent:
     rule_id: Optional[str] = None
     latency_ms: Optional[float] = None
     approval_id: Optional[str] = None
+    # Email or identifier of the approver that resolved an awaited decision.
+    approver: Optional[str] = None
+    # Override for the timestamp shown in compact mode (defaults to "now").
+    timestamp: Optional[datetime] = None
 
 
 class Logger(Protocol):
@@ -164,10 +168,60 @@ def _format_call_arguments(
     return _truncate(_format_value(arguments), max_length)
 
 
+def _format_js_args(
+    arguments: Optional[dict[str, Any]], max_length: int = 80
+) -> str:
+    """JS-object-literal arg rendering: ``{key: 'value', n: 1}``. Empty → ``{}``."""
+    if not arguments:
+        return "{}"
+    return _truncate(_format_value(arguments), max_length)
+
+
 def _format_duration(latency_ms: Optional[float]) -> Optional[str]:
     if latency_ms is None or latency_ms < 0:
         return None
     return f"{round(latency_ms)}ms"
+
+
+def _format_latency_cell(latency_ms: Optional[float]) -> str:
+    """
+    Compact latency cell. Auto-scales: ms → s → m → h. Returns ``-`` when there
+    is no measured latency (e.g. ``await`` decisions that haven't resolved).
+    """
+    if latency_ms is None or latency_ms < 0:
+        return "-"
+    if latency_ms < 1_000:
+        return f"{round(latency_ms)}ms"
+    if latency_ms < 60_000:
+        return f"{round(latency_ms / 1_000)}s"
+    if latency_ms < 3_600_000:
+        return f"{round(latency_ms / 60_000)}m"
+    return f"{round(latency_ms / 3_600_000)}h"
+
+
+def _format_time_of_day(date: Optional[datetime] = None) -> str:
+    """HH:MM:SS, 24-hour, local time."""
+    return (date or datetime.now()).strftime("%H:%M:%S")
+
+
+def _format_trailing_tag(event: DecisionStreamEvent) -> Optional[str]:
+    """
+    Trailing context tag for the compact stream:
+      * deny  → ``policy:<rule_id>`` when known
+      * await → ``approval-required[:<approval_id>]``
+      * allow → ``approved[:<approver>]`` when the result came from an approval
+    """
+    if event.decision == "deny" and event.rule_id:
+        return f"policy:{event.rule_id}"
+    if event.decision == "await":
+        return (
+            f"approval-required:{event.approval_id}"
+            if event.approval_id
+            else "approval-required"
+        )
+    if event.decision == "allow" and event.approver:
+        return f"approved:{event.approver}"
+    return None
 
 
 def _supports_color() -> bool:
@@ -193,11 +247,13 @@ def _bold(value: str) -> str:
 
 
 def _decision_label(decision: DecisionStreamDecision) -> str:
+    """Lowercase decision keyword, padded right to 5 chars, then colorized."""
+    padded = decision.ljust(5)
     if decision == "allow":
-        return _colorize("ALLOW", ANSI_GREEN)
+        return _colorize(padded, ANSI_GREEN)
     if decision == "deny":
-        return _colorize("DENY", ANSI_RED)
-    return _colorize("AWAIT", ANSI_YELLOW)
+        return _colorize(padded, ANSI_RED)
+    return _colorize(padded, ANSI_YELLOW)
 
 
 def _format_reason(reason: Optional[str], max_length: int) -> Optional[str]:
@@ -206,27 +262,23 @@ def _format_reason(reason: Optional[str], max_length: int) -> Optional[str]:
     return _truncate(reason.strip(), max_length)
 
 
+COMPACT_CALL_MIN_WIDTH = 40
+COMPACT_LATENCY_WIDTH = 5
+
+
 def format_compact_decision(event: DecisionStreamEvent) -> str:
-    args = _format_call_arguments(event.arguments, 140)
-    call = f"{event.tool_name}({args})" if args else f"{event.tool_name}()"
-    meta_parts: list[str] = []
-
-    meta_parts.append("✓" if event.decision == "allow" else "✗" if event.decision == "deny" else "…")
-
-    duration = _format_duration(event.latency_ms)
-    if duration:
-        meta_parts.append(duration)
-
-    if event.rule_id:
-        meta_parts.append(f"[rule: {event.rule_id}]")
-
-    if event.approval_id and event.decision == "await":
-        meta_parts.append(f"[approval: {event.approval_id}]")
-
-    reason = _format_reason(event.reason, 140)
-    meta = f" {_dim(' '.join(meta_parts))}" if meta_parts else ""
-    suffix = f" {_dim(f'— {reason}') }" if reason else ""
-    return f"{_decision_label(event.decision)} {call}{meta}{suffix}"
+    """
+    One-line decision row, formatted as:
+      ``HH:MM:SS <decision>  <tool>(<args>)              <latency>  <tag?>``
+    """
+    time_str = _dim(_format_time_of_day(event.timestamp))
+    label = _decision_label(event.decision)
+    call = f"{event.tool_name}({_format_js_args(event.arguments, 80)})"
+    call_padded = call.ljust(COMPACT_CALL_MIN_WIDTH)
+    latency = _format_latency_cell(event.latency_ms).rjust(COMPACT_LATENCY_WIDTH)
+    tag = _format_trailing_tag(event)
+    tag_suffix = f"  {_dim(tag)}" if tag else ""
+    return f"{time_str} {label}  {call_padded}  {latency}{tag_suffix}"
 
 
 def format_verbose_decision(event: DecisionStreamEvent) -> str:
@@ -234,7 +286,8 @@ def format_verbose_decision(event: DecisionStreamEvent) -> str:
     duration = _format_duration(event.latency_ms)
     reason = _format_reason(event.reason, 320) or "n/a"
     lines = [
-        f"{_bold('VETO DECISION')} {_decision_label(event.decision)}",
+        f"{_bold('VETO DECISION')} {_decision_label(event.decision).rstrip()}",
+        f"time: {_format_time_of_day(event.timestamp)}",
         f"tool: {event.tool_name}",
         f"args: {args or '(none)'}",
         f"reason: {reason}",
@@ -245,6 +298,9 @@ def format_verbose_decision(event: DecisionStreamEvent) -> str:
 
     if event.approval_id:
         lines.append(f"approval: {event.approval_id}")
+
+    if event.approver:
+        lines.append(f"approver: {event.approver}")
 
     if duration:
         lines.append(f"latency: {duration}")
@@ -352,6 +408,45 @@ class StreamLogger:
 
 def is_decision_stream_logger(logger: Logger) -> bool:
     return hasattr(logger, "stream_decision") and callable(getattr(logger, "stream_decision"))
+
+
+@dataclass
+class EnvLogSetting:
+    level: LogLevel
+    stream_mode: Optional[StreamLogMode] = None
+
+
+def parse_env_log_setting(value: Optional[str]) -> Optional[EnvLogSetting]:
+    """
+    Parse the ``VETO_LOG`` environment variable. Recognized forms:
+
+      * ``stream`` → compact stream mode
+      * ``stream:compact`` / ``stream:verbose`` → explicit stream mode
+      * ``debug`` / ``info`` / ``warn`` / ``error`` / ``silent`` → standard level
+
+    Returns ``None`` for unrecognized or absent values so callers can fall back
+    to other configuration sources.
+    """
+    if not value:
+        return None
+
+    raw = value.strip().lower()
+    if not raw:
+        return None
+
+    if raw == "stream":
+        return EnvLogSetting(level="stream", stream_mode="compact")
+    if raw.startswith("stream:"):
+        suffix = raw.split(":", 1)[1]
+        if suffix == "verbose":
+            return EnvLogSetting(level="stream", stream_mode="verbose")
+        if suffix == "compact":
+            return EnvLogSetting(level="stream", stream_mode="compact")
+        return None
+
+    if raw in ("debug", "info", "warn", "error", "silent"):
+        return EnvLogSetting(level=raw)  # type: ignore[arg-type]
+    return None
 
 
 def create_logger(level: LogLevel, stream_mode: StreamLogMode = "compact") -> Logger:

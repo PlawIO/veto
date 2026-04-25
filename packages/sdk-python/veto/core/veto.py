@@ -37,8 +37,12 @@ from veto.types.config import (
     ValidationResult,
 )
 from veto.utils.logger import (
+    DecisionStreamDecision,
+    DecisionStreamEvent,
     Logger,
     create_logger,
+    is_decision_stream_logger,
+    parse_env_log_setting,
 )
 from veto.utils.id import generate_tool_call_id
 from veto.core.validator import ValidationEngine, ValidationEngineOptions
@@ -348,19 +352,28 @@ class Veto:
         """
         options = options or VetoOptions()
 
-        # Determine log level
+        # Determine log level. Precedence: explicit options > VETO_LOG env var
+        # (which can also encode stream mode, e.g. ``stream:verbose``) >
+        # VETO_LOG_LEVEL > default ``info``.
+        env_log_setting = parse_env_log_setting(os.environ.get("VETO_LOG"))
         env_log_level = os.environ.get("VETO_LOG_LEVEL")
+        env_level_fallback: Optional[LogLevel] = (
+            env_log_level  # type: ignore[assignment]
+            if env_log_level in ("debug", "info", "stream", "warn", "error", "silent")
+            else None
+        )
         log_level: LogLevel = (
             options.log_level
-            or (
-                env_log_level
-                if env_log_level in ("debug", "info", "stream", "warn", "error", "silent")
-                else None
-            )  # type: ignore[assignment]
+            or (env_log_setting.level if env_log_setting else None)
+            or env_level_fallback
             or "info"
         )
 
-        stream_mode: StreamLogMode = options.stream_mode or "compact"
+        stream_mode: StreamLogMode = (
+            options.stream_mode
+            or (env_log_setting.stream_mode if env_log_setting and env_log_setting.stream_mode else None)
+            or "compact"
+        )
 
         logger = create_logger(log_level, stream_mode)
 
@@ -476,9 +489,21 @@ class Veto:
         approval_poll_interval: Optional[float] = None,
         approval_timeout: Optional[float] = None,
     ) -> "Veto":
-        resolved_log_level = log_level or "warn"
+        # Honor VETO_LOG (e.g. ``stream``, ``stream:verbose``) when no explicit
+        # log_level is passed, so the env-var contract holds for from_rules too.
+        env_log_setting = parse_env_log_setting(os.environ.get("VETO_LOG"))
+        resolved_log_level = (
+            log_level
+            or (env_log_setting.level if env_log_setting else None)
+            or "warn"
+        )
+        resolved_stream_mode = (
+            stream_mode
+            or (env_log_setting.stream_mode if env_log_setting and env_log_setting.stream_mode else None)
+            or "compact"
+        )
         resolved_mode = mode or cls._parse_mode(os.environ.get("VETO_MODE")) or "strict"
-        logger = create_logger(resolved_log_level, stream_mode or "compact")
+        logger = create_logger(resolved_log_level, resolved_stream_mode)
 
         cloud_config = VetoCloudConfig(
             api_key=api_key,
@@ -1309,14 +1334,18 @@ class Veto:
                         metadata={**metadata, "blocked_in_strict_mode": True},
                     )
 
-                self._logger.warn(
-                    "Tool call blocked by local rule",
-                    {
-                        "tool": context.tool_name,
-                        "rule_id": rule.get("id"),
-                        "reason": reason,
-                    },
-                )
+                # The stream logger already prints a one-line deny row that
+                # carries this information; emitting a parallel warn would
+                # clutter stream-mode output.
+                if not is_decision_stream_logger(self._logger):
+                    self._logger.warn(
+                        "Tool call blocked by local rule",
+                        {
+                            "tool": context.tool_name,
+                            "rule_id": rule.get("id"),
+                            "reason": reason,
+                        },
+                    )
                 return ValidationResult(
                     decision="deny",
                     reason=reason,
@@ -2063,7 +2092,13 @@ class Veto:
         self,
         context: ValidationContext,
         result: ValidationResult,
+        duration_ms: Optional[float] = None,
     ) -> None:
+        # Stream the row for every decision (allow / deny / await) — independent
+        # of the webhook event type filter below.
+        if duration_ms is not None:
+            self._stream_decision_row(context, result, duration_ms)
+
         event_type = self._resolve_decision_event_type(result)
         if event_type is None:
             return
@@ -2087,6 +2122,62 @@ class Veto:
                 shadow=True if self._mode == "shadow" else None,
             )
         )
+
+    def _stream_decision_row(
+        self,
+        context: ValidationContext,
+        result: ValidationResult,
+        duration_ms: float,
+    ) -> None:
+        """
+        Emit a one-line decision row to the active stream logger (when configured
+        via ``log_level='stream'`` or ``VETO_LOG=stream``). Fires for every
+        decision — allow, deny, and require_approval — so developers see the
+        full audit trail inline in their terminal.
+        """
+        if not is_decision_stream_logger(self._logger):
+            return
+
+        decision: DecisionStreamDecision = (
+            "await"
+            if result.decision == "require_approval"
+            else "deny"
+            if result.decision == "deny"
+            else "allow"
+        )
+
+        rule_id = self._extract_metadata_string(
+            result.metadata, ["ruleId", "rule_id"]
+        )
+        approval_id = self._extract_metadata_string(
+            result.metadata, ["approvalId", "approval_id"]
+        )
+        approver = (
+            self._extract_metadata_string(
+                result.metadata,
+                ["approver", "approverEmail", "approver_email"],
+            )
+            if decision == "allow"
+            else None
+        )
+
+        event = DecisionStreamEvent(
+            decision=decision,
+            tool_name=context.tool_name,
+            arguments=context.arguments,
+            reason=result.reason,
+            rule_id=rule_id,
+            latency_ms=None if decision == "await" else duration_ms,
+            approval_id=approval_id,
+            approver=approver,
+            timestamp=context.timestamp,
+        )
+
+        try:
+            self._logger.stream_decision(event)  # type: ignore[attr-defined]
+        except Exception:
+            # Stream logging must never break the guard flow.
+            pass
 
     @staticmethod
     def _extract_denial(result: InterceptionResult) -> Optional[DenialDetails]:
@@ -2174,7 +2265,11 @@ class Veto:
             aggregated_result.total_duration_ms,
         )
 
-        self._emit_decision_event(context, validation_result)
+        self._emit_decision_event(
+            context,
+            validation_result,
+            aggregated_result.total_duration_ms,
+        )
 
         return self._to_guard_result(validation_result)
 
