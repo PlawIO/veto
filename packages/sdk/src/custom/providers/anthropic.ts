@@ -1,61 +1,90 @@
-/**
- * Anthropic provider adapter for custom validation.
- *
- * @module custom/providers/anthropic
- */
-
 import type { Logger } from '../../utils/logger.js';
 import type { ResolvedCustomConfig } from '../types.js';
 import type { ProviderMessages } from '../prompt.js';
-import { CustomError } from '../types.js';
+import { CustomError, CustomProviderPackageError } from '../types.js';
+import { withProviderRetry } from './utils.js';
 
-/**
- * Call Anthropic API with the given prompt.
- *
- * @param messages - Provider-specific message structure
- * @param config - Resolved custom configuration
- * @param logger - Logger instance
- * @returns Raw text response from Anthropic
- */
+interface AnthropicTextBlock {
+  type: string;
+  text?: string;
+}
+
+interface AnthropicMessageResponse {
+  content: AnthropicTextBlock[];
+}
+
+interface AnthropicClient {
+  messages: {
+    create(
+      body: Record<string, unknown>,
+      options?: Record<string, unknown>
+    ): Promise<AnthropicMessageResponse>;
+  };
+}
+
+type AnthropicConstructor = new (options: {
+  apiKey: string;
+  timeout?: number;
+  maxRetries?: number;
+}) => AnthropicClient;
+
+async function loadAnthropic(): Promise<AnthropicConstructor> {
+  try {
+    const module = await import('@anthropic-ai/sdk') as unknown as { default: AnthropicConstructor };
+    return module.default;
+  } catch (error) {
+    throw new CustomProviderPackageError(
+      'anthropic',
+      '@anthropic-ai/sdk',
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
 export async function callAnthropic(
   messages: ProviderMessages,
   config: ResolvedCustomConfig,
   logger: Logger
 ): Promise<string> {
-  try {
-    const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    const client = new Anthropic({
-      apiKey: config.apiKey,
-    });
+  const Anthropic = await loadAnthropic();
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    timeout: config.timeout,
+    maxRetries: 0,
+  });
 
-    logger.debug('Calling Anthropic API', {
-      model: config.model,
-      temperature: config.temperature,
-      maxTokens: config.maxTokens,
-    });
+  logger.debug('Calling Anthropic API', {
+    model: config.model,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    timeout: config.timeout,
+  });
 
-    const response = await client.messages.create({
-      model: config.model,
-      system: messages.system,
-      messages: messages.messages as any,
-      temperature: config.temperature,
-      max_tokens: config.maxTokens,
-    });
-
-    const content = response.content[0];
-    if (!content || content.type !== 'text') {
-      throw new CustomError('Unexpected response type from Anthropic');
+  const response = await withProviderRetry(
+    () => client.messages.create(
+      {
+        model: config.model,
+        system: messages.system,
+        messages: messages.messages ?? [],
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+      },
+      {
+        timeout: config.timeout,
+        maxRetries: 0,
+      }
+    ),
+    {
+      providerLabel: 'Anthropic',
+      timeoutMs: config.timeout,
+      logger,
     }
+  );
 
-    return content.text;
-  } catch (error) {
-    if (error instanceof CustomError) {
-      throw error;
-    }
-
-    throw new CustomError(
-      `Anthropic API call failed: ${error instanceof Error ? error.message : String(error)}`,
-      error instanceof Error ? error : undefined
-    );
+  const content = response.content[0];
+  if (!content || content.type !== 'text' || typeof content.text !== 'string') {
+    throw new CustomError('Unexpected response type from Anthropic');
   }
+
+  return content.text;
 }

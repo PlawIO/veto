@@ -25,3 +25,8 @@ export {
   type LocalEvalResult,
   type LocalEvalOptions,
 } from './local-evaluator.js';
+export {
+  getBuiltInPolicyPackNames,
+  normalizePolicyPackName,
+  resolveBuiltInPolicyPackPath,
+} from './policy-packs.js';

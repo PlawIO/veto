@@ -1,0 +1,155 @@
+# Starter guardrails inspired by EU AI Act operational themes.
+# Operators must map these to their risk classification, documentation, and human-oversight process.
+version: "1.0"
+name: eu-ai-act-starter-pack
+description: Starter guardrails for human oversight, audit preservation, consequential-action review, and transparency workflows. This pack is not a compliance certification.
+
+rules:
+  - id: eu-ai-require-human-oversight-high-risk
+    name: Require human oversight for high-risk decisions
+    description: Require approval before tools finalize high-risk or consequential decisions.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - update_record
+      - write_file
+      - execute_command
+      - run_shell
+      - bash
+      - shell
+      - deploy
+      - publish
+      - release
+      - send_email
+      - http_request
+    condition_groups:
+      # Tune high-risk categories to your product's risk classification inventory.
+      - - field: arguments.risk_level
+          operator: matches
+          value: '(?i)\b(high|high-risk|consequential)\b'
+      - - field: arguments.decision_type
+          operator: matches
+          value: '(?i)\b(credit|employment|education|housing|healthcare|insurance|law enforcement|migration)\b'
+      - - field: arguments.high_risk
+          operator: equals
+          value: true
+      - - field: custom.high_risk_ai_system
+          operator: equals
+          value: true
+
+  - id: eu-ai-block-audit-log-deletion
+    name: Block audit log deletion
+    description: Preserve logs and audit trails needed for review, incident response, and post-market monitoring.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - delete_file
+      - write_file
+      - edit_file
+      - execute_command
+      - run_shell
+      - bash
+      - shell
+    condition_groups:
+      - - field: arguments.path
+          operator: matches
+          value: "(?i)(audit|decision|model|risk|incident)[-_ ]?(log|trail|record)s?"
+      - - field: arguments.command
+          operator: matches
+          value: '(?i)\b(rm|truncate|shred)\b.*\b(audit|decision|model|risk|incident)[-_ ]?(log|trail|record)s?\b'
+
+  - id: eu-ai-require-approval-autonomous-consequential-action
+    name: Require approval for autonomous consequential actions
+    description: Require human approval before autonomous actions that affect users, records, access, or production systems.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - update_record
+      - execute_sql
+      - run_query
+      - query_database
+      - deploy
+      - publish
+      - release
+      - push_to_production
+      - send_email
+      - http_request
+      - export_data
+      - export_records
+    condition_groups:
+      - - field: arguments.autonomous
+          operator: equals
+          value: true
+        - field: arguments.consequential
+          operator: equals
+          value: true
+      - - field: custom.autonomous_action
+          operator: equals
+          value: true
+        - field: custom.human_approved
+          operator: not_equals
+          value: true
+      - - field: arguments.impact
+          operator: matches
+          value: '(?i)\b(eligibility|access|benefit|price|rank|score|account|employment)\b'
+
+  - id: eu-ai-require-transparency-review-before-notification
+    name: Require transparency review before user notification
+    description: Require review before sending user-facing notices or finalizing decisions without transparency approval.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - send_email
+      - send_message
+      - send_notification
+      - http_request
+      - update_record
+      - publish
+    condition_groups:
+      # Override custom.transparency_reviewed from your app once required notice text is checked.
+      - - field: arguments.user_notification
+          operator: equals
+          value: true
+        - field: custom.transparency_reviewed
+          operator: not_equals
+          value: true
+      - - field: arguments.finalize_decision
+          operator: equals
+          value: true
+        - field: custom.transparency_reviewed
+          operator: not_equals
+          value: true
+      - - field: arguments.message
+          operator: matches
+          value: '(?i)\b(final decision|automated decision|AI-generated decision)\b'
+        - field: custom.transparency_reviewed
+          operator: not_equals
+          value: true
+
+output_rules:
+  - id: eu-ai-log-high-risk-output
+    name: Log high-risk decision outputs
+    description: Log outputs that appear to contain final high-risk decisions for audit review.
+    enabled: true
+    severity: high
+    action: log
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '(?i)\b(final decision|automated decision|eligibility denied|application rejected|risk score)\b'
+
+  - id: eu-ai-redact-unsupported-compliance-claims
+    name: Redact unsupported compliance claims
+    description: Redact generated claims that imply a system is legally compliant without review.
+    enabled: true
+    severity: medium
+    action: redact
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '(?i)\b(EU AI Act compliant|guaranteed compliant|certified compliant)\b'
+    redact_with: "[REVIEW_REQUIRED]"
