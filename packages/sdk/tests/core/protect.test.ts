@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { protect, __resetProtectCacheForTests } from '../../src/core/protect.js';
@@ -76,6 +76,21 @@ describe('protect', () => {
   });
 
   it('uses pack option to apply built-in pack rules', async () => {
+    const tool = createTool('transfer_funds');
+
+    const wrapped = await protect([tool], {
+      pack: 'financial',
+      mode: 'strict',
+      logLevel: 'silent',
+    });
+
+    await expect(
+      wrapped[0].handler({ amount: 15000, currency: 'USD' })
+    ).rejects.toBeInstanceOf(ToolCallDeniedError);
+  });
+
+  it('prefers explicit pack selection over an ambient local veto directory', async () => {
+    mkdirSync(join(testDir, 'veto'), { recursive: true });
     const tool = createTool('transfer_funds');
 
     const wrapped = await protect([tool], {
@@ -228,6 +243,19 @@ describe('protect', () => {
     await expect(wrapped[0].handler({ any: 'value' })).resolves.toBe('allowed');
   });
 
+  it('re-evaluates heuristics on repeated no-options calls instead of reusing allow-all state', async () => {
+    const passthroughTool = createTool('non_matching_tool', 'allowed');
+    const transferTool = createTool('transfer_funds');
+
+    const firstWrapped = await protect([passthroughTool]);
+    await expect(firstWrapped[0].handler({ any: 'value' })).resolves.toBe('allowed');
+
+    const secondWrapped = await protect([transferTool]);
+    await expect(
+      secondWrapped[0].handler({ amount: 15000, currency: 'USD' })
+    ).rejects.toBeInstanceOf(ToolCallDeniedError);
+  });
+
   it('reuses cached Veto instance for identical options', async () => {
     const tool = createTool('cached_tool');
     const fakeVeto = {
@@ -269,6 +297,29 @@ describe('protect', () => {
 
     await protect([tool], { rules: [], logLevel: 'silent' });
     await protect([tool], { rules: [], mode: 'log', logLevel: 'silent' });
+
+    expect(fromRulesSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('creates a new Veto instance when the approval callback changes', async () => {
+    const tool = createTool('cached_tool');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    await protect([tool], {
+      rules: [],
+      logLevel: 'silent',
+      onApprovalRequired: vi.fn(),
+    });
+    await protect([tool], {
+      rules: [],
+      logLevel: 'silent',
+      onApprovalRequired: vi.fn(),
+    });
 
     expect(fromRulesSpy).toHaveBeenCalledTimes(2);
   });

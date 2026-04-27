@@ -63,8 +63,37 @@ interface ProtectInitDecision {
   inlineRules?: InlineRulesData;
 }
 
-let _defaultInstance: Veto | null = null;
+interface DefaultInstanceState {
+  instance: Veto;
+  source: ProtectInitSource;
+  cwd: string;
+}
+
+let _defaultInstance: DefaultInstanceState | null = null;
 const _instanceCache = new Map<string, Veto>();
+const _referenceIds = new WeakMap<object, string>();
+let _nextReferenceId = 0;
+
+function getReferenceId(value: object | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const existing = _referenceIds.get(value);
+  if (existing) {
+    return existing;
+  }
+
+  const id = `ref_${_nextReferenceId++}`;
+  _referenceIds.set(value, id);
+  return id;
+}
+
+function canReuseDefaultInstance(state: DefaultInstanceState | null): state is DefaultInstanceState {
+  return state !== null
+    && state.source === 'local'
+    && state.cwd === process.cwd();
+}
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -163,15 +192,15 @@ function buildInitDecision<T extends { name: string }>(
     return { source: 'configDir' };
   }
 
-  if (existsSync(resolve(process.cwd(), 'veto'))) {
-    return { source: 'local' };
-  }
-
   if (options.pack) {
     return {
       source: 'pack',
       inlineRules: loadInlineRulesFromPacks([options.pack]),
     };
+  }
+
+  if (existsSync(resolve(process.cwd(), 'veto'))) {
+    return { source: 'local' };
   }
 
   const heuristicPacks = collectHeuristicPacks(tools);
@@ -211,6 +240,7 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     agentId: options.agentId,
     userId: options.userId,
     role: options.role,
+    onApprovalRequiredId: getReferenceId(options.onApprovalRequired),
     packs: decision.inlineRules?.packs ?? [],
     rulesFingerprint: decision.inlineRules
       ? stableSerialize(decision.inlineRules.rules)
@@ -362,10 +392,10 @@ export async function protect<T extends { name: string }>(
   input: T | T[],
   options?: ProtectOptions
 ): Promise<T | T[]> {
-  if (options === undefined && _defaultInstance) {
+  if (options === undefined && canReuseDefaultInstance(_defaultInstance)) {
     return Array.isArray(input)
-      ? _defaultInstance.wrap(input)
-      : _defaultInstance.wrapTool(input);
+      ? _defaultInstance.instance.wrap(input)
+      : _defaultInstance.instance.wrapTool(input);
   }
 
   const normalizedOptions = options ?? {};
@@ -377,7 +407,11 @@ export async function protect<T extends { name: string }>(
   }
 
   if (options === undefined) {
-    _defaultInstance = instance;
+    _defaultInstance = {
+      instance,
+      source: decision.source,
+      cwd: process.cwd(),
+    };
   }
 
   return Array.isArray(input)

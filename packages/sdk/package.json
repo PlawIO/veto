@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "audit:docker": "bash scripts/docker-audit.sh",
     "benchmark": "node dist/benchmark/cli.js",
     "benchmark:dev": "tsx src/benchmark/cli.ts",
     "prepublishOnly": "npm run build"
