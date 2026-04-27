@@ -153,3 +153,58 @@ def test_unsafe_regex_warn_helper_directly():
     ]
     assert any("unsafe" in m for m in error_messages)
     assert "broken" in rule_ids and "fine" not in rule_ids
+
+
+def test_unsafe_regex_in_condition_groups_is_caught():
+    """`rule.condition_groups` (OR-of-AND) must also be walked.
+
+    Earlier the helper only iterated `rule.conditions` (the flat AND
+    list), so an unsafe pattern inside `condition_groups` slipped past
+    the load-time check and silently failed open at runtime.
+    """
+    logger = MemoryLogger("error")
+
+    class Shim:
+        _logger = logger
+
+    Veto._warn_about_unsafe_rule_patterns(Shim(), [
+        {
+            "id": "groups-broken",
+            "condition_groups": [
+                [{
+                    "field": "arguments.cmd",
+                    "operator": "matches",
+                    "value": "(rm.*|wget.*)",  # rejected by heuristic
+                }],
+                [{
+                    "field": "arguments.cmd",
+                    "operator": "matches",
+                    "value": "rm -rf",  # safe
+                }],
+            ],
+        },
+        {
+            # Mixed shape: flat conditions + condition_groups, both visited.
+            "id": "mixed",
+            "conditions": [{
+                "field": "arguments.cmd",
+                "operator": "matches",
+                "value": "rm -rf",  # safe → no warning
+            }],
+            "condition_groups": [
+                [{
+                    "field": "arguments.url",
+                    "operator": "matches",
+                    "value": "(http.*|https.*)",  # rejected
+                }],
+            ],
+        },
+    ])
+
+    rule_ids_with_errors = [
+        e.context.get("rule_id") if e.context else None
+        for e in logger.entries if e.level == "error"
+    ]
+    assert "groups-broken" in rule_ids_with_errors
+    # The mixed rule has both safe + unsafe; we expect exactly one error.
+    assert rule_ids_with_errors.count("mixed") == 1

@@ -3253,14 +3253,18 @@ export class Veto {
    * fail-open misconfig in security-relevant policies. We log an
    * `error` here so the user sees the broken rule in startup output;
    * runtime evaluation still treats the condition as false.
+   *
+   * Walks both `rule.conditions` (a flat AND list) and
+   * `rule.condition_groups` (a list-of-lists, OR-of-AND). The latter
+   * was missed by the original implementation — an unsafe pattern
+   * inside `condition_groups` slipped past the load-time check and
+   * still failed open at runtime.
    */
   private warnAboutUnsafeRulePatterns(rules: ReadonlyArray<unknown>): void {
     for (const raw of rules) {
       if (!raw || typeof raw !== 'object') continue;
       const rule = raw as Record<string, unknown>;
-      const conditions = rule.conditions;
-      if (!Array.isArray(conditions)) continue;
-      for (const cond of conditions) {
+      for (const cond of this.iterRuleConditions(rule)) {
         if (!cond || typeof cond !== 'object') continue;
         const c = cond as Record<string, unknown>;
         if (c.operator !== 'matches') continue;
@@ -3275,6 +3279,25 @@ export class Veto {
             'pattern length, nested-quantified groups, or overlapping `.*` ' +
             'alternations are rejected by the ReDoS-safety heuristic',
         });
+      }
+    }
+  }
+
+  /**
+   * Yield every condition object on a rule, regardless of whether it
+   * lives in `rule.conditions` (flat AND) or `rule.condition_groups`
+   * (OR-of-AND). Tolerant of missing / malformed shapes.
+   */
+  private *iterRuleConditions(rule: Record<string, unknown>): Iterable<unknown> {
+    const flat = rule.conditions;
+    if (Array.isArray(flat)) {
+      for (const cond of flat) yield cond;
+    }
+    const groups = rule.condition_groups;
+    if (Array.isArray(groups)) {
+      for (const group of groups) {
+        if (!Array.isArray(group)) continue;
+        for (const cond of group) yield cond;
       }
     }
   }

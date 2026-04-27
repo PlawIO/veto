@@ -1,8 +1,9 @@
 /**
  * Regression tests for validation hardening (audit follow-up).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { BudgetTracker } from '../../src/core/budget.js';
+import { Veto } from '../../src/core/veto.js';
 import type { Logger } from '../../src/utils/logger.js';
 
 const silentLogger: Logger = {
@@ -39,6 +40,45 @@ describe('validation hardening — budget tokens', () => {
     const r = t.reserveCall('unknown_tool', {});
     expect(r).toBeNull();
     expect(() => t.releaseReservation(r)).not.toThrow();
+  });
+
+  it('catches unsafe `matches` regex in `condition_groups` (OR-of-AND)', () => {
+    // The warn helper logs through Veto's internal logger, which goes
+    // through console.error. Capture that.
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((msg: any) => {
+      errors.push(String(msg));
+    });
+
+    Veto.fromRules({
+      rules: [
+        {
+          id: 'groups-broken',
+          tools: ['x'],
+          action: 'block',
+          // Using condition_groups (OR-of-AND), not the flat `conditions`.
+          condition_groups: [
+            [
+              {
+                field: 'arguments.cmd',
+                operator: 'matches',
+                value: '(rm.*|wget.*)',  // rejected by ReDoS-safety heuristic
+              },
+            ],
+          ],
+        },
+      ] as any,
+      logLevel: 'error',
+    });
+
+    spy.mockRestore();
+
+    const matched = errors.find(
+      (line) =>
+        line.includes('unsafe `matches` regex') &&
+        line.includes('"ruleId":"groups-broken"'),
+    );
+    expect(matched).toBeDefined();
   });
 
   it('legacy reserve(number) + refund(number) still works', () => {
