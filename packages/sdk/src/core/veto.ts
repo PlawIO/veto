@@ -1838,15 +1838,14 @@ export class Veto {
         };
       }
 
-      // The stream logger already prints a one-line deny row that covers this
-      // information; emitting a parallel warn would clutter stream-mode output.
-      if (!isDecisionStreamLogger(this.logger)) {
-        this.logger.warn('Tool call blocked by local rule', {
-          tool: context.toolName,
-          ruleId: decisiveRule.id,
-          reason,
-        });
-      }
+      // The validator always emits this warn; the StreamLogger filters it
+      // locally so it doesn't duplicate the deny row. Other loggers
+      // (Console, Memory, custom) see it normally.
+      this.logger.warn('Tool call blocked by local rule', {
+        tool: context.toolName,
+        ruleId: decisiveRule.id,
+        reason,
+      });
       return {
         decision: 'deny',
         reason,
