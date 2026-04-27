@@ -161,5 +161,24 @@ describe('logger hardening', () => {
       spy.mockRestore();
       expect(writes.join('')).toContain('Veto config not found');
     });
+
+    // Regression for capy-ai bot review on PR #200: the TS warn at
+    // `core/veto.ts:2745` is `Local require_approval rule matched without
+    // callback URL` — the original noisy-warn set only had the Python
+    // wording, so this TS message leaked alongside the deny stream row.
+    it('suppresses the TS-side "Local require_approval rule matched" warn', () => {
+      const sl = new StreamLogger();
+      const writes: string[] = [];
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+        writes.push(String(chunk));
+        return true;
+      });
+      sl.warn('Local require_approval rule matched without callback URL', {
+        tool: 'deploy',
+        ruleId: 'prod-approval',
+      });
+      spy.mockRestore();
+      expect(writes.join('')).toBe('');
+    });
   });
 });

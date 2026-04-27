@@ -446,9 +446,16 @@ class ConsoleLogger:
 # Warn-level messages whose body the stream row already conveys. The
 # StreamLogger drops these locally so the validation engine no longer needs
 # to know about logger types — it just emits as before.
+#
+# Includes both the Python and the TypeScript wordings for the same events
+# so the same set works in either SDK if it gets imported / cross-pollinated.
 _STREAM_NOISY_WARNS = frozenset({
+    # Common to both SDKs:
     "Tool call blocked by local rule",
+    # Python `veto.py:1299` wording:
     "Tool call blocked by local approval rule (no approval flow configured)",
+    # TypeScript `veto.ts:2745` wording (kept for cross-SDK safety):
+    "Local require_approval rule matched without callback URL",
 })
 
 

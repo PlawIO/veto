@@ -166,3 +166,17 @@ class TestStreamWarnFiltering:
         sl.warn("Veto config not found", {"path": "/x"})
         captured = capsys.readouterr()
         assert "Veto config not found" in captured.err
+
+    # Regression for capy-ai bot review on PR #200: the TS warn at
+    # ``core/veto.ts:2745`` is ``Local require_approval rule matched
+    # without callback URL`` — keep the wording in this set so the same
+    # message coming through the Python StreamLogger (e.g. via shared
+    # tooling) is also suppressed.
+    def test_ts_require_approval_warn_also_suppressed(self, capsys):
+        sl = StreamLogger()
+        sl.warn(
+            "Local require_approval rule matched without callback URL",
+            {"tool": "deploy", "rule_id": "prod-approval"},
+        )
+        captured = capsys.readouterr()
+        assert captured.err == ""

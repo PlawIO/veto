@@ -463,9 +463,20 @@ class ConsoleLogger implements Logger {
 // Warn-level messages whose body the stream row already conveys. The
 // StreamLogger drops these locally so callers no longer need to know about
 // logger types — the validation engine just emits as before.
+//
+// Both Python and TS wordings are listed because the SDKs phrase the same
+// event slightly differently and the Python copy was kept here as a
+// belt-and-braces safeguard if the wording is ever cross-pollinated. The
+// TS-actual string is `Local require_approval rule matched without callback
+// URL` — without that entry, TS stream-mode users would see both the deny
+// row and the unsuppressed warning.
 const STREAM_NOISY_WARNS = new Set<string>([
+  // Common to both SDKs:
   'Tool call blocked by local rule',
+  // Python `veto.py:1299` wording (kept for cross-SDK safety):
   'Tool call blocked by local approval rule (no approval flow configured)',
+  // TypeScript `veto.ts:2745` wording (the one TS actually emits):
+  'Local require_approval rule matched without callback URL',
 ]);
 
 export class StreamLogger extends BaseStreamLogger {
