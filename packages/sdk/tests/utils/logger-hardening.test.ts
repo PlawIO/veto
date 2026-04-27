@@ -41,7 +41,12 @@ describe('logger hardening', () => {
     it('does not allow newline in args to break the one-line invariant', () => {
       const out = row({ arguments: { q: 'line1\nline2' } });
       expect(out.split('\n').filter((s) => s.length > 0)).toHaveLength(1);
-      expect(out).toContain('\\n');
+      // Earlier versions double-escaped `\n` to `\\n` because the
+      // backslash-escape pass ran after sanitize introduced the
+      // visualisation backslash. Pin the exact rendering and explicitly
+      // forbid the double-escape so the bug can't regress silently.
+      expect(out).toContain("'line1\\nline2'");
+      expect(out).not.toContain("'line1\\\\nline2'");
     });
 
     it('does not allow newline in tool name to break the row', () => {

@@ -130,7 +130,12 @@ function sanitizeStr(value: string): string {
 }
 
 function escapeString(value: string): string {
-  return sanitizeStr(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  // Escape backslashes and quotes on the *original* string first; otherwise
+  // the visualisation backslashes that `sanitizeStr` introduces (e.g.
+  // turning a real newline into the two-char sequence `\` + `n`) get doubled
+  // by the backslash-escape pass and the row prints `'line1\\nline2'`
+  // instead of `'line1\nline2'`.
+  return sanitizeStr(value.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
 }
 
 function formatScalar(value: unknown): string {

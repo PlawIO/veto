@@ -31,7 +31,14 @@ class TestSanitization:
         )
         out = format_compact_decision(e)
         assert "\n" not in out, f"row contains literal newline: {out!r}"
-        assert "\\n" in out, "newline should be visualised as \\n"
+        # Earlier versions double-escaped `\n` to `\\n` because the backslash-
+        # escape pass ran *after* sanitize introduced the visualisation
+        # backslash. Pin the exact rendering and explicitly forbid the
+        # double-escape so the bug can't regress silently.
+        assert "'line1\\nline2'" in out, f"unexpected arg rendering: {out!r}"
+        assert "'line1\\\\nline2'" not in out, (
+            f"newline got double-escaped — backslash-escape order regressed: {out!r}"
+        )
 
     def test_newline_in_tool_name_does_not_break_row(self):
         e = DecisionStreamEvent(

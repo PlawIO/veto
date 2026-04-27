@@ -144,7 +144,12 @@ def _sanitize_str(value: str) -> str:
 
 
 def _escape_string(value: str) -> str:
-    return _sanitize_str(value).replace("\\", "\\\\").replace("'", "\\'")
+    # Escape backslashes and quotes on the *original* string first; otherwise
+    # the visualisation backslashes that ``_sanitize_str`` introduces (e.g.
+    # turning a real newline into the two-char sequence ``\`` + ``n``) get
+    # doubled by the backslash-escape pass and the row prints
+    # ``'line1\\nline2'`` instead of ``'line1\nline2'``.
+    return _sanitize_str(value.replace("\\", "\\\\").replace("'", "\\'"))
 
 
 def _format_scalar(value: Any) -> str:
