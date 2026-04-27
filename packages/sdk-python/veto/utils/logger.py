@@ -7,10 +7,14 @@ and support for custom logger implementations.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Optional, Protocol
-from dataclasses import dataclass
-from datetime import datetime
+import json
+import math
+import os
+import re
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable, Literal, Optional, Protocol
 
 from veto.types.config import LogLevel, StreamLogMode
 
@@ -78,7 +82,27 @@ class Logger(Protocol):
 
 
 class DecisionStreamLogger(Logger, Protocol):
+    """Marker protocol for stream-mode decision loggers.
+
+    Detection should use ``isinstance(logger, BaseStreamLogger)`` rather than
+    duck-typing on the ``stream_decision`` attribute — a custom logger may
+    coincidentally expose the same name with unrelated semantics.
+    """
+
     def stream_decision(self, event: DecisionStreamEvent) -> None: ...
+
+
+class BaseStreamLogger:
+    """Base class for stream-mode loggers.
+
+    External code (the validation engine, integrations, etc.) uses
+    ``isinstance(logger, BaseStreamLogger)`` to detect stream mode. Inheriting
+    from this class is the explicit opt-in — duck-typing on
+    ``stream_decision`` is intentionally avoided.
+    """
+
+    def stream_decision(self, event: "DecisionStreamEvent") -> None:  # pragma: no cover
+        raise NotImplementedError
 
 
 # Numeric priority for log levels (lower = more verbose)
@@ -107,8 +131,20 @@ def should_log(
     return LOG_LEVEL_PRIORITY[message_level] >= LOG_LEVEL_PRIORITY[configured_level]
 
 
+# Strip C0/C1 control characters and ANSI escape sequences from user-supplied
+# strings before they hit the terminal. Keeps the one-line-per-decision
+# invariant intact and prevents user data from spoofing terminal state.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _sanitize_str(value: str) -> str:
+    # Visualise newlines/tabs explicitly so they don't break alignment.
+    sanitized = value.replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return _CONTROL_CHARS.sub("", sanitized)
+
+
 def _escape_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("'", "\\'")
+    return _sanitize_str(value).replace("\\", "\\\\").replace("'", "\\'")
 
 
 def _format_scalar(value: Any) -> str:
@@ -117,12 +153,14 @@ def _format_scalar(value: Any) -> str:
     if isinstance(value, bool):
         return "True" if value else "False"
     if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
         return str(value)
     if value is None:
         return "None"
     if isinstance(value, datetime):
         return f"'{value.isoformat()}'"
-    return str(value)
+    return _sanitize_str(str(value))
 
 
 def _format_value(value: Any, depth: int = 0) -> str:
@@ -154,54 +192,67 @@ def _truncate(value: str, max_length: int) -> str:
     return value[: max(0, max_length - 1)] + "…"
 
 
-def _format_call_arguments(
-    arguments: Optional[dict[str, Any]], max_length: int = 120
+def _format_args_inline(
+    arguments: Optional[dict[str, Any]],
+    *,
+    max_length: int,
+    empty: str = "",
 ) -> str:
-    if not arguments:
-        return ""
+    """JS-object-literal arg rendering: ``{key: 'value', n: 1}``.
 
-    inline = ", ".join(
-        f"{key}={_format_value(value)}" for key, value in arguments.items()
-    )
-    if len(inline) <= max_length:
-        return inline
+    Single canonical formatter shared by compact + verbose modes. ``empty``
+    chooses what's rendered when there are no args: compact uses ``"{}"``,
+    verbose uses ``""``.
+    """
+    if not arguments:
+        return empty
     return _truncate(_format_value(arguments), max_length)
 
 
-def _format_js_args(
-    arguments: Optional[dict[str, Any]], max_length: int = 80
-) -> str:
-    """JS-object-literal arg rendering: ``{key: 'value', n: 1}``. Empty → ``{}``."""
-    if not arguments:
-        return "{}"
-    return _truncate(_format_value(arguments), max_length)
+def _is_finite_number(value: Optional[float]) -> bool:
+    return value is not None and isinstance(value, (int, float)) and math.isfinite(float(value))
 
 
 def _format_duration(latency_ms: Optional[float]) -> Optional[str]:
-    if latency_ms is None or latency_ms < 0:
+    if not _is_finite_number(latency_ms) or latency_ms < 0:  # type: ignore[operator]
         return None
-    return f"{round(latency_ms)}ms"
+    return f"{round(latency_ms)}ms"  # type: ignore[arg-type]
 
 
 def _format_latency_cell(latency_ms: Optional[float]) -> str:
     """
     Compact latency cell. Auto-scales: ms → s → m → h. Returns ``-`` when there
-    is no measured latency (e.g. ``await`` decisions that haven't resolved).
+    is no measured latency, the value is non-finite (NaN / Inf), or it's
+    negative — these all mean "we don't have a usable timing".
     """
-    if latency_ms is None or latency_ms < 0:
+    if not _is_finite_number(latency_ms) or latency_ms < 0:  # type: ignore[operator]
         return "-"
-    if latency_ms < 1_000:
-        return f"{round(latency_ms)}ms"
-    if latency_ms < 60_000:
-        return f"{round(latency_ms / 1_000)}s"
-    if latency_ms < 3_600_000:
-        return f"{round(latency_ms / 60_000)}m"
-    return f"{round(latency_ms / 3_600_000)}h"
+    ms = float(latency_ms)  # type: ignore[arg-type]
+    if ms < 1_000:
+        return f"{round(ms)}ms"
+    if ms < 60_000:
+        return f"{round(ms / 1_000)}s"
+    if ms < 3_600_000:
+        return f"{round(ms / 60_000)}m"
+    return f"{round(ms / 3_600_000)}h"
 
 
 def _format_time_of_day(date: Optional[datetime] = None) -> str:
-    """HH:MM:SS, 24-hour, local time."""
-    return (date or datetime.now()).strftime("%H:%M:%S")
+    """HH:MM:SS in UTC by default; set ``VETO_LOG_LOCALTIME=1`` for host time.
+
+    UTC is the default so the same code prints the same row on a developer's
+    laptop, in CI, and inside a container — important for diffing logs.
+    """
+    if date is None:
+        date = datetime.now(tz=timezone.utc)
+    elif date.tzinfo is None:
+        # Assume naive timestamps are UTC. Better than silently treating them
+        # as local time depending on host configuration.
+        date = date.replace(tzinfo=timezone.utc)
+
+    if os.environ.get("VETO_LOG_LOCALTIME"):
+        date = date.astimezone()
+    return date.strftime("%H:%M:%S")
 
 
 def _format_trailing_tag(event: DecisionStreamEvent) -> Optional[str]:
@@ -225,6 +276,16 @@ def _format_trailing_tag(event: DecisionStreamEvent) -> Optional[str]:
 
 
 def _supports_color() -> bool:
+    """Honor https://no-color.org and https://force-color.org conventions.
+
+    * ``NO_COLOR`` set to any non-empty value → never emit ANSI.
+    * ``FORCE_COLOR`` set to any non-empty value → always emit ANSI.
+    * Otherwise → only emit ANSI when stderr is a TTY.
+    """
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
     return bool(hasattr(sys.stderr, "isatty") and sys.stderr.isatty())
 
 
@@ -263,17 +324,26 @@ def _format_reason(reason: Optional[str], max_length: int) -> Optional[str]:
 
 
 COMPACT_CALL_MIN_WIDTH = 40
+COMPACT_CALL_MAX_WIDTH = 80
 COMPACT_LATENCY_WIDTH = 5
+COMPACT_ARGS_BUDGET = 60  # how much of the call width the args portion can use
+VERBOSE_ARGS_MAX = 320
 
 
 def format_compact_decision(event: DecisionStreamEvent) -> str:
     """
     One-line decision row, formatted as:
       ``HH:MM:SS <decision>  <tool>(<args>)              <latency>  <tag?>``
+
+    Tool name and args are sanitized (no newlines / control chars) and the
+    full call portion is hard-truncated to ``COMPACT_CALL_MAX_WIDTH`` so the
+    latency column stays roughly aligned across rows.
     """
     time_str = _dim(_format_time_of_day(event.timestamp))
     label = _decision_label(event.decision)
-    call = f"{event.tool_name}({_format_js_args(event.arguments, 80)})"
+    safe_tool = _sanitize_str(event.tool_name)
+    call = f"{safe_tool}({_format_args_inline(event.arguments, max_length=COMPACT_ARGS_BUDGET, empty='{}')})"
+    call = _truncate(call, COMPACT_CALL_MAX_WIDTH)
     call_padded = call.ljust(COMPACT_CALL_MIN_WIDTH)
     latency = _format_latency_cell(event.latency_ms).rjust(COMPACT_LATENCY_WIDTH)
     tag = _format_trailing_tag(event)
@@ -282,13 +352,13 @@ def format_compact_decision(event: DecisionStreamEvent) -> str:
 
 
 def format_verbose_decision(event: DecisionStreamEvent) -> str:
-    args = _format_call_arguments(event.arguments, 320)
+    args = _format_args_inline(event.arguments, max_length=VERBOSE_ARGS_MAX)
     duration = _format_duration(event.latency_ms)
-    reason = _format_reason(event.reason, 320) or "n/a"
+    reason = _format_reason(event.reason, VERBOSE_ARGS_MAX) or "n/a"
     lines = [
         f"{_bold('VETO DECISION')} {_decision_label(event.decision).rstrip()}",
         f"time: {_format_time_of_day(event.timestamp)}",
-        f"tool: {event.tool_name}",
+        f"tool: {_sanitize_str(event.tool_name)}",
         f"args: {args or '(none)'}",
         f"reason: {reason}",
     ]
@@ -318,14 +388,15 @@ def format_message(
     context: Optional[dict[str, Any]] = None,
 ) -> str:
     """Format a log message with optional context."""
-    import json
-
     timestamp = datetime.now().isoformat()
     level_str = level.upper().ljust(5)
     prefix = f"[{timestamp}] [VETO] {level_str}"
 
     if context and len(context) > 0:
-        context_str = json.dumps(context)
+        try:
+            context_str = json.dumps(context, default=str)
+        except Exception:
+            context_str = repr(context)
         return f"{prefix} {message} {context_str}"
 
     return f"{prefix} {message}"
@@ -367,8 +438,21 @@ class ConsoleLogger:
                 print(error)
 
 
-class StreamLogger:
-    """Decision stream logger implementation."""
+# Warn-level messages whose body the stream row already conveys. The
+# StreamLogger drops these locally so the validation engine no longer needs
+# to know about logger types — it just emits as before.
+_STREAM_NOISY_WARNS = frozenset({
+    "Tool call blocked by local rule",
+    "Tool call blocked by local approval rule (no approval flow configured)",
+})
+
+
+class StreamLogger(BaseStreamLogger):
+    """Decision stream logger.
+
+    Inherits :class:`BaseStreamLogger` so external callers can detect stream
+    mode safely via ``isinstance(logger, BaseStreamLogger)``.
+    """
 
     def __init__(self, mode: StreamLogMode = "compact"):
         self.mode = mode
@@ -386,6 +470,11 @@ class StreamLogger:
     def warn(
         self, message: str, context: Optional[dict[str, Any]] = None
     ) -> None:
+        # Suppress warnings that just duplicate the deny / await stream row —
+        # filtering here keeps the noise off the user's terminal without the
+        # validation engine having to know it's running in stream mode.
+        if message in _STREAM_NOISY_WARNS:
+            return
         _write_to_stderr(format_message("warn", message, context))
 
     def error(
@@ -407,7 +496,13 @@ class StreamLogger:
 
 
 def is_decision_stream_logger(logger: Logger) -> bool:
-    return hasattr(logger, "stream_decision") and callable(getattr(logger, "stream_decision"))
+    """Detect stream-mode loggers safely.
+
+    Strict ``isinstance`` check against :class:`BaseStreamLogger`. Older code
+    duck-typed on the ``stream_decision`` attribute, which silently
+    misidentified user loggers that happened to expose the same name.
+    """
+    return isinstance(logger, BaseStreamLogger)
 
 
 @dataclass

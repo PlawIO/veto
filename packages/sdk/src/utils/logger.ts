@@ -67,6 +67,23 @@ export interface DecisionStreamLogger extends Logger {
 }
 
 /**
+ * Base class for stream-mode decision loggers.
+ *
+ * External code (the validation engine, integrations, etc.) detects stream
+ * mode via `instanceof BaseStreamLogger`. Inheriting from this class is the
+ * explicit opt-in — duck-typing on the `streamDecision` method name is
+ * intentionally avoided so user loggers that happen to expose the same name
+ * are not silently misidentified.
+ */
+export abstract class BaseStreamLogger implements DecisionStreamLogger {
+  abstract debug(message: string, context?: Record<string, unknown>): void;
+  abstract info(message: string, context?: Record<string, unknown>): void;
+  abstract warn(message: string, context?: Record<string, unknown>): void;
+  abstract error(message: string, context?: Record<string, unknown>, error?: Error): void;
+  abstract streamDecision(event: DecisionStreamEvent): void;
+}
+
+/**
  * Numeric priority for log levels (lower = more verbose).
  */
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
@@ -96,8 +113,24 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Strip C0/C1 control characters and explicitly visualise newlines/tabs in
+// user-supplied strings before they hit the terminal. Keeps the
+// one-line-per-decision invariant intact and prevents user data from
+// spoofing terminal state via embedded ANSI escapes.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\x00-\x08\x0B-\x1F\x7F-\x9F]/g;
+
+function sanitizeStr(value: string): string {
+  return value
+    .replace(/\r\n/g, '\\n')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t')
+    .replace(CONTROL_CHARS, '');
+}
+
 function escapeString(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return sanitizeStr(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 function formatScalar(value: unknown): string {
@@ -105,7 +138,14 @@ function formatScalar(value: unknown): string {
     return `'${escapeString(value)}'`;
   }
 
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return Number.isNaN(value) ? 'NaN' : value > 0 ? 'Infinity' : '-Infinity';
+    }
+    return String(value);
+  }
+
+  if (typeof value === 'boolean' || typeof value === 'bigint') {
     return String(value);
   }
 
@@ -121,7 +161,7 @@ function formatScalar(value: unknown): string {
     return 'undefined';
   }
 
-  return String(value);
+  return sanitizeStr(String(value));
 }
 
 function formatValue(value: unknown, depth = 0): string {
@@ -166,28 +206,19 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function formatCallArguments(args?: Record<string, unknown>, maxLength = 120): string {
+/**
+ * JS-object-literal arg rendering: `{key: 'value', n: 1}`. Single canonical
+ * formatter shared by compact + verbose modes. `empty` chooses what's
+ * rendered when there are no args: compact uses `'{}'`, verbose uses `''`.
+ */
+function formatArgsInline(
+  args: Record<string, unknown> | undefined,
+  options: { maxLength: number; empty?: string }
+): string {
   if (!args || Object.keys(args).length === 0) {
-    return '';
+    return options.empty ?? '';
   }
-
-  const inlineEntries = Object.entries(args)
-    .map(([key, value]) => `${key}=${formatValue(value)}`)
-    .join(', ');
-
-  if (inlineEntries.length <= maxLength) {
-    return inlineEntries;
-  }
-
-  return truncate(formatValue(args), maxLength);
-}
-
-/** JS-object-literal arg rendering: `{key: 'value', n: 1}`. Empty args render as `{}`. */
-function formatJsArgs(args?: Record<string, unknown>, maxLength = 80): string {
-  if (!args || Object.keys(args).length === 0) {
-    return '{}';
-  }
-  return truncate(formatValue(args), maxLength);
+  return truncate(formatValue(args), options.maxLength);
 }
 
 function formatDuration(latencyMs?: number): string | null {
@@ -213,11 +244,18 @@ function formatLatencyCell(latencyMs?: number): string {
   return `${Math.round(latencyMs / 3_600_000)}h`;
 }
 
-/** HH:MM:SS, 24-hour, local time. */
+/**
+ * HH:MM:SS in UTC by default; set `VETO_LOG_LOCALTIME=1` for host time.
+ *
+ * UTC is the default so the same code prints the same row on a developer's
+ * laptop, in CI, and inside a container — important for diffing logs.
+ */
 function formatTimeOfDay(date: Date = new Date()): string {
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
+  const localTime =
+    typeof process !== 'undefined' && Boolean(process.env?.VETO_LOG_LOCALTIME);
+  const hh = String(localTime ? date.getHours() : date.getUTCHours()).padStart(2, '0');
+  const mm = String(localTime ? date.getMinutes() : date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(localTime ? date.getSeconds() : date.getUTCSeconds()).padStart(2, '0');
   return `${hh}:${mm}:${ss}`;
 }
 
@@ -240,8 +278,18 @@ function formatTrailingTag(event: DecisionStreamEvent): string | null {
   return null;
 }
 
+/**
+ * Honor https://no-color.org and https://force-color.org conventions.
+ *
+ * - `NO_COLOR` set to any non-empty value → never emit ANSI.
+ * - `FORCE_COLOR` set to any non-empty value → always emit ANSI.
+ * - Otherwise → only emit ANSI when stderr is a TTY.
+ */
 function supportsColor(): boolean {
-  return typeof process !== 'undefined' && Boolean(process.stderr?.isTTY);
+  if (typeof process === 'undefined') return false;
+  if (process.env?.NO_COLOR) return false;
+  if (process.env?.FORCE_COLOR) return true;
+  return Boolean(process.stderr?.isTTY);
 }
 
 function colorize(value: string, color: string): string {
@@ -290,16 +338,25 @@ function formatDecisionReason(reason: string | undefined, maxLength: number): st
 }
 
 const COMPACT_CALL_MIN_WIDTH = 40;
+const COMPACT_CALL_MAX_WIDTH = 80;
 const COMPACT_LATENCY_WIDTH = 5;
+const COMPACT_ARGS_BUDGET = 60;
+const VERBOSE_ARGS_MAX = 320;
 
 /**
  * One-line decision row, formatted as:
  *   `HH:MM:SS <decision> <tool>(<args>)              <latency>  <tag?>`
+ *
+ * Tool name and args are sanitized (no newlines / control chars) and the
+ * full call portion is hard-truncated to `COMPACT_CALL_MAX_WIDTH` so the
+ * latency column stays roughly aligned across rows.
  */
 function formatCompactDecision(event: DecisionStreamEvent): string {
   const time = dim(formatTimeOfDay(event.timestamp));
   const label = getDecisionLabel(event.decision);
-  const call = `${event.toolName}(${formatJsArgs(event.arguments, 80)})`;
+  const safeTool = sanitizeStr(event.toolName);
+  const argString = formatArgsInline(event.arguments, { maxLength: COMPACT_ARGS_BUDGET, empty: '{}' });
+  const call = truncate(`${safeTool}(${argString})`, COMPACT_CALL_MAX_WIDTH);
   const callPadded = call.padEnd(COMPACT_CALL_MIN_WIDTH, ' ');
   const latency = formatLatencyCell(event.latencyMs).padStart(COMPACT_LATENCY_WIDTH, ' ');
   const tag = formatTrailingTag(event);
@@ -308,13 +365,13 @@ function formatCompactDecision(event: DecisionStreamEvent): string {
 }
 
 function formatVerboseDecision(event: DecisionStreamEvent): string {
-  const args = formatCallArguments(event.arguments, 320);
+  const args = formatArgsInline(event.arguments, { maxLength: VERBOSE_ARGS_MAX });
   const duration = formatDuration(event.latencyMs);
-  const reason = formatDecisionReason(event.reason, 320) ?? 'n/a';
+  const reason = formatDecisionReason(event.reason, VERBOSE_ARGS_MAX) ?? 'n/a';
   const lines = [
     `${bold('VETO DECISION')} ${getDecisionLabel(event.decision).trimEnd()}`,
     `time: ${formatTimeOfDay(event.timestamp)}`,
-    `tool: ${event.toolName}`,
+    `tool: ${sanitizeStr(event.toolName)}`,
     `args: ${args.length > 0 ? args : '(none)'}`,
     `reason: ${reason}`,
   ];
@@ -398,14 +455,28 @@ class ConsoleLogger implements Logger {
   }
 }
 
-export class StreamLogger implements DecisionStreamLogger {
-  constructor(private readonly mode: StreamLogMode = 'compact') {}
+// Warn-level messages whose body the stream row already conveys. The
+// StreamLogger drops these locally so callers no longer need to know about
+// logger types — the validation engine just emits as before.
+const STREAM_NOISY_WARNS = new Set<string>([
+  'Tool call blocked by local rule',
+  'Tool call blocked by local approval rule (no approval flow configured)',
+]);
+
+export class StreamLogger extends BaseStreamLogger {
+  constructor(private readonly mode: StreamLogMode = 'compact') {
+    super();
+  }
 
   debug(): void {}
 
   info(): void {}
 
   warn(message: string, context?: Record<string, unknown>): void {
+    // Suppress warnings that just duplicate the deny / await stream row —
+    // filtering here keeps the noise off the user's terminal without the
+    // validation engine having to know it's running in stream mode.
+    if (STREAM_NOISY_WARNS.has(message)) return;
     writeToStderr(formatMessage('warn', message, context));
   }
 
@@ -425,8 +496,15 @@ export class StreamLogger implements DecisionStreamLogger {
   }
 }
 
+/**
+ * Detect stream-mode loggers safely.
+ *
+ * Strict `instanceof` check against `BaseStreamLogger`. Older code duck-typed
+ * on the `streamDecision` attribute, which silently misidentified user
+ * loggers that happened to expose the same method name.
+ */
 export function isDecisionStreamLogger(logger: Logger): logger is DecisionStreamLogger {
-  return typeof (logger as DecisionStreamLogger).streamDecision === 'function';
+  return logger instanceof BaseStreamLogger;
 }
 
 /**

@@ -1334,18 +1334,17 @@ class Veto:
                         metadata={**metadata, "blocked_in_strict_mode": True},
                     )
 
-                # The stream logger already prints a one-line deny row that
-                # carries this information; emitting a parallel warn would
-                # clutter stream-mode output.
-                if not is_decision_stream_logger(self._logger):
-                    self._logger.warn(
-                        "Tool call blocked by local rule",
-                        {
-                            "tool": context.tool_name,
-                            "rule_id": rule.get("id"),
-                            "reason": reason,
-                        },
-                    )
+                # The validator always emits this warn; the StreamLogger
+                # filters it locally so it doesn't duplicate the deny row.
+                # Other loggers (Console, Memory, custom) see it normally.
+                self._logger.warn(
+                    "Tool call blocked by local rule",
+                    {
+                        "tool": context.tool_name,
+                        "rule_id": rule.get("id"),
+                        "reason": reason,
+                    },
+                )
                 return ValidationResult(
                     decision="deny",
                     reason=reason,
