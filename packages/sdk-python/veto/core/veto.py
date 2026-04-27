@@ -259,6 +259,12 @@ class Veto:
             },
         )
 
+        # Validate rule patterns once at load time. A rejected regex would
+        # otherwise silently make the rule never match — fail-open on
+        # security-relevant misconfig. We emit a loud error per offender
+        # so misconfigured rules surface in startup logs.
+        self._warn_about_unsafe_rule_patterns(rules.all_rules)
+
         # Initialize validation engine
         default_decision = "allow"
         self._validation_engine = ValidationEngine(
@@ -841,6 +847,45 @@ class Veto:
                     state.global_output_rules.append(normalized_rule)
 
         return state
+
+    def _warn_about_unsafe_rule_patterns(self, rules: list[dict[str, Any]]) -> None:
+        """Surface rules whose ``matches`` regex fails the safety check.
+
+        Such rules silently never match at evaluate time, which is a
+        fail-open misconfig in security-relevant policies. We log an
+        ``error`` here so the user sees the broken rule in startup output;
+        runtime evaluation still treats the condition as False (the safer
+        of the silent options).
+        """
+        from veto.deterministic.regex_safety import is_safe_pattern
+
+        for rule in rules:
+            conditions = rule.get("conditions") or []
+            if not isinstance(conditions, list):
+                continue
+            for cond in conditions:
+                if not isinstance(cond, dict):
+                    continue
+                if cond.get("operator") != "matches":
+                    continue
+                pattern = cond.get("value")
+                if not isinstance(pattern, str):
+                    continue
+                if is_safe_pattern(pattern):
+                    continue
+                self._logger.error(
+                    "Rule has an unsafe `matches` regex — it will never fire",
+                    {
+                        "rule_id": rule.get("id"),
+                        "field": cond.get("field"),
+                        "pattern": pattern[:128] + ("…" if len(pattern) > 128 else ""),
+                        "hint": (
+                            "pattern length, nested-quantified groups, or "
+                            "overlapping `.*` alternations are rejected by "
+                            "the ReDoS-safety heuristic"
+                        ),
+                    },
+                )
 
     @classmethod
     def _index_inline_rules(

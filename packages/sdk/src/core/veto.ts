@@ -48,6 +48,7 @@ import type {
 import { compile, evaluate } from '../compiler/index.js';
 import type { ASTNode } from '../compiler/index.js';
 import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
+import { isSafePattern } from '../deterministic/regex-safety.js';
 import { evaluateRateLimits } from '../rate-limiting/evaluator.js';
 import type { KernelConfig, KernelToolCall } from '../kernel/types.js';
 import type { KernelClient as KernelClientType } from '../kernel/client.js';
@@ -708,6 +709,12 @@ export class Veto {
     });
 
     this.logger.info(`Veto running in ${this.startupMode} mode`);
+
+    // Validate rule patterns once at load time. A rejected regex would
+    // otherwise silently make the rule never match — fail-open on
+    // security-relevant misconfig. Emit a loud error per offender so
+    // misconfigured rules surface in startup logs.
+    this.warnAboutUnsafeRulePatterns(rules.allRules);
 
     // Initialize validation engine
     const defaultDecision = 'allow';
@@ -3237,6 +3244,39 @@ export class Veto {
         ? decision
         : undefined,
     };
+  }
+
+  /**
+   * Surface rules whose `matches` regex fails the safety check.
+   *
+   * Such rules silently never match at evaluate time, which is a
+   * fail-open misconfig in security-relevant policies. We log an
+   * `error` here so the user sees the broken rule in startup output;
+   * runtime evaluation still treats the condition as false.
+   */
+  private warnAboutUnsafeRulePatterns(rules: ReadonlyArray<unknown>): void {
+    for (const raw of rules) {
+      if (!raw || typeof raw !== 'object') continue;
+      const rule = raw as Record<string, unknown>;
+      const conditions = rule.conditions;
+      if (!Array.isArray(conditions)) continue;
+      for (const cond of conditions) {
+        if (!cond || typeof cond !== 'object') continue;
+        const c = cond as Record<string, unknown>;
+        if (c.operator !== 'matches') continue;
+        const pattern = c.value;
+        if (typeof pattern !== 'string') continue;
+        if (isSafePattern(pattern)) continue;
+        this.logger.error('Rule has an unsafe `matches` regex — it will never fire', {
+          ruleId: rule.id,
+          field: c.field,
+          pattern: pattern.length > 128 ? `${pattern.slice(0, 128)}…` : pattern,
+          hint:
+            'pattern length, nested-quantified groups, or overlapping `.*` ' +
+            'alternations are rejected by the ReDoS-safety heuristic',
+        });
+      }
+    }
   }
 
   private extractMetadataString(

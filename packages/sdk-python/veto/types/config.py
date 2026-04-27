@@ -151,13 +151,18 @@ def is_named_validator(validator: Union[Validator, NamedValidator]) -> bool:
 def normalize_validator(
     validator: Union[Validator, NamedValidator], index: int
 ) -> NamedValidator:
-    """Normalize a validator to NamedValidator format."""
+    """Normalize a validator to NamedValidator format.
+
+    ``priority=0`` is a legitimate value meaning "run me first". Treating
+    it as falsy and silently rewriting to 100 was a sort-order bug that
+    surprised callers who set 0 explicitly.
+    """
     if isinstance(validator, NamedValidator):
         return NamedValidator(
             name=validator.name,
             validate=validator.validate,
             description=validator.description,
-            priority=validator.priority if validator.priority else 100,
+            priority=validator.priority if validator.priority is not None else 100,
             tool_filter=validator.tool_filter,
         )
     return NamedValidator(

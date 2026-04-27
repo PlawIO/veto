@@ -49,6 +49,24 @@ export class BudgetExceededError extends Error {
   }
 }
 
+/**
+ * Token issued by {@link BudgetTracker.reserveCall}. Pass it to
+ * {@link BudgetTracker.releaseReservation} to release the exact reservation
+ * idempotently — refunding the same token twice is a safe no-op, which
+ * prevents the historical "double-refund silently zeroes ``spent``" footgun
+ * around {@link BudgetTracker.refund}.
+ */
+export interface BudgetReservation {
+  readonly toolName: string;
+  readonly cost: number;
+}
+
+interface MutableReservation {
+  toolName: string;
+  cost: number;
+  released: boolean;
+}
+
 export class BudgetTracker {
   private spent = 0;
   private readonly config: BudgetConfig;
@@ -165,6 +183,58 @@ export class BudgetTracker {
     return cost;
   }
 
+  /**
+   * Token-based reserve. Same effect as {@link reserve} but returns a
+   * {@link BudgetReservation} — pass it to {@link releaseReservation} for
+   * an idempotent refund. Returns ``null`` when the resolved cost is 0.
+   *
+   * Prefer this over the legacy ``reserve``/``refund`` pair in new code:
+   * tokenised refunds can't accidentally double-spend, which is the main
+   * accounting bug ``refund(amount)`` made possible.
+   */
+  reserveCall(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): BudgetReservation | null {
+    const cost = this.reserve(toolName, args);
+    if (cost === 0) return null;
+    const reservation: MutableReservation = { toolName, cost, released: false };
+    return reservation;
+  }
+
+  /**
+   * Idempotent counterpart to {@link reserveCall}. Refunding the same token
+   * twice is a no-op; refunding ``null`` is a no-op (so callers never need
+   * to null-check the reservation they got back).
+   */
+  releaseReservation(reservation: BudgetReservation | null): void {
+    if (reservation === null) return;
+    const live = reservation as MutableReservation;
+    if (live.released) {
+      this.logger.debug('Budget refund ignored — reservation already released', {
+        toolName: live.toolName,
+        cost: live.cost,
+      });
+      return;
+    }
+    live.released = true;
+    this.spent = Math.max(0, this.spent - live.cost);
+    this.logger.debug('Budget refunded', {
+      toolName: live.toolName,
+      amount: live.cost,
+      totalSpent: this.spent,
+      remaining: this.config.max - this.spent,
+    });
+  }
+
+  /**
+   * Legacy refund path. Subtracts ``amount`` from ``spent`` and clamps to 0.
+   *
+   * NOT idempotent — a buggy caller that fires this twice for the same
+   * reservation will silently zero ``spent`` and let subsequent calls
+   * bypass the limit. New code should use {@link reserveCall} +
+   * {@link releaseReservation} which can't be double-refunded.
+   */
   refund(amount: number): void {
     if (amount <= 0) return;
     this.spent = Math.max(0, this.spent - amount);

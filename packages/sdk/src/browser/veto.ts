@@ -870,7 +870,7 @@ export class Veto {
         source: 'interceptor',
       };
 
-      const reserved = this.budgetTracker?.reserve(toolName, callArgs) ?? 0;
+      const reservation = this.budgetTracker?.reserveCall(toolName, callArgs) ?? null;
       const guardResult = await this.guard(toolName, callArgs, {
         sessionId: this.sessionId,
         agentId: this.agentId,
@@ -879,7 +879,7 @@ export class Veto {
       });
 
       if (guardResult.decision === 'deny' && guardResult.shadow !== true) {
-        if (reserved > 0) this.budgetTracker?.refund(reserved);
+        this.budgetTracker?.releaseReservation(reservation);
         throw new ToolCallDeniedError(toolName, callId, {
           decision: 'deny',
           reason: guardResult.reason,
@@ -891,7 +891,7 @@ export class Veto {
       }
 
       if (guardResult.decision === 'require_approval' && guardResult.shadow !== true) {
-        if (reserved > 0) this.budgetTracker?.refund(reserved);
+        this.budgetTracker?.releaseReservation(reservation);
         await this.denyWithApprovalHook(
           toolName,
           guardResult.reason,

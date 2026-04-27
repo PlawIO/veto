@@ -301,8 +301,16 @@ class ValidationEngine:
         )
 
     def _sort_validators(self) -> None:
-        """Sort validators by priority (lower runs first)."""
-        self._validators.sort(key=lambda v: v.priority or 100)
+        """Sort validators by priority (lower runs first).
+
+        ``v.priority or 100`` would treat ``priority=0`` as falsy and silently
+        sort that validator as if it had priority 100 — surprising behaviour
+        for callers who set 0 to mean "run me first". Use an explicit
+        ``is None`` check instead.
+        """
+        self._validators.sort(
+            key=lambda v: v.priority if v.priority is not None else 100,
+        )
 
     def _get_applicable_validators(
         self, tool_name: str
