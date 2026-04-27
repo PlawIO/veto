@@ -55,9 +55,11 @@ def resolve_field_path(
 
 
 def create_safe_regex(pattern: str, flags: int = 0) -> Optional[re.Pattern[str]]:
-    """Compile a regex only if it passes safety checks."""
-    if len(pattern) > 256:
-        return None
+    """Compile a regex only if it passes safety checks.
+
+    ``is_safe_pattern`` already enforces the length cap; no need to check
+    it again here.
+    """
     if not is_safe_pattern(pattern):
         return None
     try:

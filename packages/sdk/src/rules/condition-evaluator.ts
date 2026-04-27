@@ -98,7 +98,8 @@ export function createSafeRegex(
     return null;
   }
 
-  if (parsed.source.length > 256 || !isSafePattern(parsed.source)) {
+  // `isSafePattern` already enforces the length cap; no need to duplicate it.
+  if (!isSafePattern(parsed.source)) {
     return null;
   }
 
