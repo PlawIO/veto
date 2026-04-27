@@ -7,6 +7,7 @@ that is handled by the Veto Cloud API.
 
 from typing import (
     Any,
+    Iterator,
     Mapping,
     Callable,
     Literal,
@@ -891,7 +892,7 @@ class Veto:
                 )
 
     @staticmethod
-    def _iter_rule_conditions(rule: dict[str, Any]):
+    def _iter_rule_conditions(rule: dict[str, Any]) -> Iterator[Any]:
         """Yield every condition dict on a rule, regardless of whether it
         lives in ``rule.conditions`` (flat AND) or ``rule.condition_groups``
         (OR-of-AND). Tolerant of missing / malformed shapes — bad data
