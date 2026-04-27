@@ -1,12 +1,41 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any, Optional
-from datetime import datetime, timezone
+import logging
 import re
+import sys
+from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
+from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from veto.deterministic.regex_safety import is_safe_pattern
+
+# One-time log per pattern so a misconfigured rule emits a single
+# error line instead of spamming stderr on every evaluation.
+_LOGGED_BAD_PATTERNS: set[str] = set()
+_BAD_PATTERN_LOGGER = logging.getLogger("veto.rules.condition_evaluator")
+
+
+def _report_unsafe_pattern(pattern: str) -> None:
+    """Surface a rejected `matches` regex once per process.
+
+    The condition itself returns ``False`` to the caller (the safer of the
+    two silent options) but a fail-open block rule should not be invisible.
+    PR #201 catches most cases via a load-time scan; this catches rules
+    that are added or mutated at runtime.
+    """
+    if pattern in _LOGGED_BAD_PATTERNS:
+        return
+    _LOGGED_BAD_PATTERNS.add(pattern)
+    truncated = pattern if len(pattern) <= 128 else pattern[:128] + "…"
+    message = (
+        f"[veto] ERROR: rule `matches` regex rejected by safety heuristic — "
+        f"the rule will never fire. Pattern: {truncated!r}"
+    )
+    # Belt and braces: write to stderr (always visible) and to the
+    # standard `logging` module (so structured-logging consumers see it).
+    print(message, file=sys.stderr)
+    _BAD_PATTERN_LOGGER.error(message)
 
 DAY_ORDER: tuple[str, ...] = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
 DAY_SET = set(DAY_ORDER)
@@ -262,6 +291,12 @@ def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) ->
             return False
         regex = create_safe_regex(expected, flags=re.IGNORECASE)
         if regex is None:
+            # The pattern was rejected by the safety heuristic. Returning
+            # ``False`` here means a `block` rule with a broken regex never
+            # fires — the silent fail-open class. PR #201's load-time scan
+            # catches static rules; this catches rules that are added or
+            # mutated at runtime.
+            _report_unsafe_pattern(expected)
             return False
         return regex.search(field_value) is not None
     if operator == "greater_than":

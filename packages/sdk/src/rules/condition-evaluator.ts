@@ -87,6 +87,27 @@ export function resolveFieldPath(
 }
 
 /**
+ * One-time stderr report per rejected `matches` pattern so a misconfigured
+ * rule emits a single error instead of spamming on every evaluation. The
+ * condition itself returns `false` to the caller (the safer of the silent
+ * options) but a fail-open block rule should not be invisible.
+ */
+const _LOGGED_BAD_PATTERNS = new Set<string>();
+function reportUnsafePattern(pattern: string): void {
+  if (_LOGGED_BAD_PATTERNS.has(pattern)) return;
+  _LOGGED_BAD_PATTERNS.add(pattern);
+  const truncated = pattern.length > 128 ? `${pattern.slice(0, 128)}…` : pattern;
+  const message =
+    `[veto] ERROR: rule \`matches\` regex rejected by safety heuristic — ` +
+    `the rule will never fire. Pattern: ${JSON.stringify(truncated)}`;
+  if (typeof process !== 'undefined' && typeof process.stderr?.write === 'function') {
+    process.stderr.write(`${message}\n`);
+  } else if (typeof console !== 'undefined') {
+    console.error(message);
+  }
+}
+
+/**
  * Compile a regex pattern only if it passes safety checks.
  */
 export function createSafeRegex(
@@ -513,7 +534,15 @@ export function evaluateLegacyCondition(
         return false;
       }
       if (typeof fieldValue === 'string') {
-        return createSafeRegex(expected, 'i')?.test(fieldValue) ?? false;
+        const compiled = createSafeRegex(expected, 'i');
+        if (!compiled) {
+          // Fail-open class: a rejected pattern silently makes the rule
+          // never fire. Surface it once per process so a `block` rule with
+          // a broken regex isn't invisible at runtime.
+          reportUnsafePattern(expected);
+          return false;
+        }
+        return compiled.test(fieldValue);
       }
 
       if (!allowNestedObjectStringSearch) {
@@ -522,6 +551,7 @@ export function evaluateLegacyCondition(
 
       const regex = createSafeRegex(expected, 'i');
       if (!regex) {
+        reportUnsafePattern(expected);
         return false;
       }
 
