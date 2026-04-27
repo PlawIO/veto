@@ -248,12 +248,13 @@ export class Interceptor {
       custom: this.customContext,
     };
 
-    // Atomically reserve budget (check + deduct in one step to prevent
-    // concurrent calls from passing the check before any charge is recorded)
-    let reservedCost = 0;
-    if (this.budgetTracker) {
-      reservedCost = this.budgetTracker.reserve(call.name, call.arguments);
-    }
+    // Reserve budget. Returns a token (or null when cost is 0) that we
+    // pass back to releaseReservation() if the call ends up denied /
+    // aborted / pending approval. Token-based release is idempotent;
+    // the legacy `refund(amount)` path could double-spend on retry.
+    const budgetReservation = this.budgetTracker
+      ? this.budgetTracker.reserveCall(call.name, call.arguments)
+      : null;
 
     // Run before hook
     if (this.onBeforeValidation) {
@@ -272,10 +273,8 @@ export class Interceptor {
     try {
       aggregatedResult = await this.validationEngine.validate(context);
     } catch (error) {
-      // Refund reserved budget if validation throws
-      if (this.budgetTracker && reservedCost > 0) {
-        this.budgetTracker.refund(reservedCost);
-      }
+      // Release reserved budget if validation throws.
+      this.budgetTracker?.releaseReservation(budgetReservation);
       throw error;
     }
     const validationResult = aggregatedResult.finalResult;
@@ -287,11 +286,14 @@ export class Interceptor {
         ? validationResult.modifiedArguments
         : call.arguments;
 
-    // Record in history
+    // Record in history. Use the *final* arguments — these are what the tool
+    // actually executed against, so the audit trail matches reality. Earlier
+    // versions recorded `call.arguments`, which silently diverged from
+    // what the tool saw whenever a validator returned `decision: 'modify'`.
     if (this.historyTracker) {
       this.historyTracker.record(
         call.name,
-        call.arguments,
+        finalArguments,
         validationResult,
         aggregatedResult.totalDurationMs
       );
@@ -313,14 +315,24 @@ export class Interceptor {
       }
     }
 
-    // Refund reserved budget for denied calls
+    // Refund the reservation when the call won't actually run:
+    //   - deny       → tool will not execute, release budget
+    //   - require_approval → tool is paused; without explicit approval
+    //                        plumbing in this code path, treat as a non-run
+    //                        and release. Caller-driven approval flows that
+    //                        re-issue the call will reserve again on retry.
+    //
+    // Refunding is now idempotent (token-based), so this is safe even if a
+    // downstream layer refunds the same reservation again.
     if (
       this.budgetTracker
-      && validationResult.decision === 'deny'
       && !isShadowOverride
-      && reservedCost > 0
+      && (
+        validationResult.decision === 'deny'
+        || validationResult.decision === 'require_approval'
+      )
     ) {
-      this.budgetTracker.refund(reservedCost);
+      this.budgetTracker.releaseReservation(budgetReservation);
     }
 
     // Handle denial

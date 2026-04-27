@@ -246,11 +246,15 @@ class Interceptor:
             else call.arguments
         )
 
-        # Record in history
+        # Record in history. Use the *final* arguments — these are what the
+        # tool actually executed against, so the audit trail matches
+        # reality. Earlier versions recorded ``call.arguments``, which
+        # silently diverged from what the tool saw whenever a validator
+        # returned ``decision="modify"``.
         if self._history_tracker:
             self._history_tracker.record(
                 call.name,
-                call.arguments,
+                final_arguments,
                 validation_result,
                 aggregated_result.total_duration_ms,
             )

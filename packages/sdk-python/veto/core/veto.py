@@ -7,6 +7,7 @@ that is handled by the Veto Cloud API.
 
 from typing import (
     Any,
+    Iterator,
     Mapping,
     Callable,
     Literal,
@@ -258,6 +259,12 @@ class Veto:
                 "output_rules_loaded": len(output_rules.all_output_rules),
             },
         )
+
+        # Validate rule patterns once at load time. A rejected regex would
+        # otherwise silently make the rule never match — fail-open on
+        # security-relevant misconfig. We emit a loud error per offender
+        # so misconfigured rules surface in startup logs.
+        self._warn_about_unsafe_rule_patterns(rules.all_rules)
 
         # Initialize validation engine
         default_decision = "allow"
@@ -841,6 +848,68 @@ class Veto:
                     state.global_output_rules.append(normalized_rule)
 
         return state
+
+    def _warn_about_unsafe_rule_patterns(self, rules: list[dict[str, Any]]) -> None:
+        """Surface rules whose ``matches`` regex fails the safety check.
+
+        Such rules silently never match at evaluate time, which is a
+        fail-open misconfig in security-relevant policies. We log an
+        ``error`` here so the user sees the broken rule in startup output;
+        runtime evaluation still treats the condition as False (the safer
+        of the silent options).
+
+        Walks both ``rule.conditions`` (a flat AND list) and
+        ``rule.condition_groups`` (a list-of-lists, OR-of-AND). The latter
+        was missed by the original implementation — an unsafe pattern
+        inside ``condition_groups`` slipped past the load-time check and
+        still failed open at runtime.
+        """
+        from veto.deterministic.regex_safety import is_safe_pattern
+
+        for rule in rules:
+            for cond in Veto._iter_rule_conditions(rule):
+                if not isinstance(cond, dict):
+                    continue
+                if cond.get("operator") != "matches":
+                    continue
+                pattern = cond.get("value")
+                if not isinstance(pattern, str):
+                    continue
+                if is_safe_pattern(pattern):
+                    continue
+                self._logger.error(
+                    "Rule has an unsafe `matches` regex — it will never fire",
+                    {
+                        "rule_id": rule.get("id"),
+                        "field": cond.get("field"),
+                        "pattern": pattern[:128] + ("…" if len(pattern) > 128 else ""),
+                        "hint": (
+                            "pattern length, nested-quantified groups, or "
+                            "overlapping `.*` alternations are rejected by "
+                            "the ReDoS-safety heuristic"
+                        ),
+                    },
+                )
+
+    @staticmethod
+    def _iter_rule_conditions(rule: dict[str, Any]) -> Iterator[Any]:
+        """Yield every condition dict on a rule, regardless of whether it
+        lives in ``rule.conditions`` (flat AND) or ``rule.condition_groups``
+        (OR-of-AND). Tolerant of missing / malformed shapes — bad data
+        just produces fewer yields, never an exception.
+        """
+        flat = rule.get("conditions")
+        if isinstance(flat, list):
+            for cond in flat:
+                yield cond
+
+        groups = rule.get("condition_groups")
+        if isinstance(groups, list):
+            for group in groups:
+                if not isinstance(group, list):
+                    continue
+                for cond in group:
+                    yield cond
 
     @classmethod
     def _index_inline_rules(
