@@ -161,10 +161,16 @@ function evalBinary(
       if (typeof left !== 'string' || typeof right !== 'string') {
         throw new EvaluationError(`'matches' requires strings on both sides`);
       }
-      if (!isSafePattern(right)) {
+      // Case-insensitive by default to match the Python SDK. Cross-SDK
+      // parity matters: a policy expression evaluated by both SDKs must
+      // produce the same decision. Use an inline `(?-i)` prefix at the
+      // start of a pattern to opt back into case-sensitive matching.
+      const caseSensitive = right.startsWith('(?-i)');
+      const source = caseSensitive ? right.slice(5) : right;
+      if (!isSafePattern(source)) {
         throw new EvaluationError(`'matches' pattern failed safety check`);
       }
-      const re = new RegExp(right);
+      const re = new RegExp(source, caseSensitive ? '' : 'i');
       return re.test(left);
     }
     default:
