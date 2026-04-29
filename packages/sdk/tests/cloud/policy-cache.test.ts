@@ -1,8 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { PolicyCache } from '../../src/cloud/policy-cache.js';
 import type { CloudPolicyResponse } from '../../src/cloud/types.js';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function makeMockClient(response: CloudPolicyResponse | null = null) {
   return {
@@ -31,6 +41,10 @@ const policyWithRateLimits: CloudPolicyResponse = {
 };
 
 describe('PolicyCache', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('should return null on cache miss', () => {
     const client = makeMockClient(deterministicPolicy);
     const cache = new PolicyCache(client);
@@ -165,5 +179,58 @@ describe('PolicyCache', () => {
 
     await wait(50);
     expect(client.fetchPolicy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not repopulate a tool after invalidate is called during an in-flight refresh', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<CloudPolicyResponse | null>();
+    const client = {
+      fetchPolicy: vi.fn().mockReturnValue(pending.promise),
+      logDecision: vi.fn(),
+    } as any;
+    const cache = new PolicyCache(client);
+
+    expect(cache.get('send_email')).toBeNull();
+    await vi.runOnlyPendingTimersAsync();
+    expect(client.fetchPolicy).toHaveBeenCalledTimes(1);
+
+    cache.invalidate('send_email');
+    pending.resolve(deterministicPolicy);
+    await Promise.resolve();
+
+    expect(cache.get('send_email')).toBeNull();
+    await vi.runOnlyPendingTimersAsync();
+    expect(client.fetchPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('should not repopulate stale entries after invalidateAll during in-flight refreshes', async () => {
+    vi.useFakeTimers();
+    const pendingEmail = deferred<CloudPolicyResponse | null>();
+    const pendingTrade = deferred<CloudPolicyResponse | null>();
+    const client = {
+      fetchPolicy: vi.fn((toolName: string) => {
+        if (toolName === 'send_email') {
+          return pendingEmail.promise;
+        }
+        return pendingTrade.promise;
+      }),
+      logDecision: vi.fn(),
+    } as any;
+    const cache = new PolicyCache(client);
+
+    expect(cache.get('send_email')).toBeNull();
+    expect(cache.get('execute_trade')).toBeNull();
+    await vi.runOnlyPendingTimersAsync();
+    expect(client.fetchPolicy).toHaveBeenCalledTimes(2);
+
+    cache.invalidateAll();
+    pendingEmail.resolve(deterministicPolicy);
+    pendingTrade.resolve(llmPolicy);
+    await Promise.resolve();
+
+    expect(cache.get('send_email')).toBeNull();
+    expect(cache.get('execute_trade')).toBeNull();
+    await vi.runOnlyPendingTimersAsync();
+    expect(client.fetchPolicy).toHaveBeenCalledTimes(4);
   });
 });

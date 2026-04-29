@@ -62,6 +62,29 @@ describe('HistoryTracker', () => {
       });
     });
 
+    it('should store an immutable snapshot of the validation result', () => {
+      const result = {
+        decision: 'deny' as const,
+        reason: 'before',
+        metadata: {
+          ruleId: 'rule-before',
+        },
+      };
+
+      tracker.record('write_file', {}, result);
+      result.reason = 'after';
+      result.metadata.ruleId = 'rule-after';
+
+      const entries = tracker.getAll();
+      expect(entries[0].validationResult).toEqual({
+        decision: 'deny',
+        reason: 'before',
+        metadata: {
+          ruleId: 'rule-before',
+        },
+      });
+    });
+
     it('should evict oldest entries when maxSize exceeded', () => {
       for (let i = 0; i < 7; i++) {
         tracker.record(`tool_${i}`, {}, { decision: 'allow' });
@@ -85,6 +108,35 @@ describe('HistoryTracker', () => {
 
     it('should return empty array when no entries', () => {
       expect(tracker.getAll()).toHaveLength(0);
+    });
+
+    it('should not allow callers to mutate internal history entries', () => {
+      tracker.record(
+        'test',
+        { nested: { state: 'before' } },
+        {
+          decision: 'deny',
+          reason: 'original',
+          metadata: { ruleId: 'rule-before' },
+        }
+      );
+
+      const entries = tracker.getAll() as ToolCallHistoryEntry[];
+      entries[0].toolName = 'mutated';
+      ((entries[0].arguments as Record<string, unknown>).nested as { state: string }).state = 'after';
+      entries[0].validationResult.reason = 'changed';
+      (entries[0].validationResult.metadata as Record<string, unknown>).ruleId = 'rule-after';
+
+      const freshEntries = tracker.getAll();
+      expect(freshEntries[0].toolName).toBe('test');
+      expect(freshEntries[0].arguments).toEqual({
+        nested: { state: 'before' },
+      });
+      expect(freshEntries[0].validationResult).toEqual({
+        decision: 'deny',
+        reason: 'original',
+        metadata: { ruleId: 'rule-before' },
+      });
     });
   });
 

@@ -90,4 +90,31 @@ describe('browser protect', () => {
 
     expect(fromRulesSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('reuses allow-all browser instances across different tool names when options are otherwise identical', async () => {
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules');
+
+    await protect([createTool('navigate')], { logLevel: 'silent' });
+    await protect([createTool('transfer_funds')], { logLevel: 'silent' });
+
+    expect(fromRulesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a new instance when the approval callback changes', async () => {
+    const tool = createTool('cached_tool');
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules');
+
+    await protect([tool], {
+      rules: [],
+      logLevel: 'silent',
+      onApprovalRequired: vi.fn(),
+    });
+    await protect([tool], {
+      rules: [],
+      logLevel: 'silent',
+      onApprovalRequired: vi.fn(),
+    });
+
+    expect(fromRulesSpy).toHaveBeenCalledTimes(2);
+  });
 });
