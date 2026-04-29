@@ -1616,6 +1616,7 @@ export async function interpretNaturalLanguageIntent(options: {
 
 export async function generatePolicyFromPrompt(options: {
   prompt: string;
+  toolName?: string;
   projectDir?: string;
   rulesDirectory?: string;
   tools: DiscoveredTool[];
@@ -1629,6 +1630,23 @@ export async function generatePolicyFromPrompt(options: {
     config,
     options.allowTemplateFallback
   );
+  const requestedTool = options.toolName?.trim();
+  const matchedRequestedTool = requestedTool
+    ? options.tools.find((tool) => tool.name === requestedTool)
+    : undefined;
+  const generationTools = requestedTool
+    ? [
+        matchedRequestedTool ?? {
+          name: requestedTool,
+          parameters: [],
+          locations: [],
+          sources: [],
+          covered: false,
+          coverageReason: 'none',
+          matchedRuleIds: [],
+        },
+      ]
+    : options.tools;
 
   if (!endpoint) {
     if (!allowTemplateFallback) {
@@ -1636,7 +1654,7 @@ export async function generatePolicyFromPrompt(options: {
         'No generation endpoint configured. Configure VETO_API_KEY, kernel mode, or self-hosted llm.baseUrl, or enable demo template fallback.'
       );
     }
-    return generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
+    return generateTemplatePolicy(options.prompt, generationTools, options.existingRules);
   }
 
   if (endpoint.mode === 'kernel') {
@@ -1644,7 +1662,7 @@ export async function generatePolicyFromPrompt(options: {
       return await generateViaKernel({
         endpoint,
         prompt: options.prompt,
-        tools: options.tools,
+        tools: generationTools,
         existingRules: options.existingRules,
       });
     } catch (error) {
@@ -1654,7 +1672,7 @@ export async function generatePolicyFromPrompt(options: {
         );
       }
 
-      const fallback = generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
+      const fallback = generateTemplatePolicy(options.prompt, generationTools, options.existingRules);
       return {
         ...fallback,
         warnings: [
@@ -1668,7 +1686,7 @@ export async function generatePolicyFromPrompt(options: {
   const request: GeneratePolicyRequest = {
     prompt: options.prompt,
     schema: POLICY_IR_V1_SCHEMA as Record<string, unknown>,
-    tools: options.tools,
+    tools: generationTools,
     existingRules: options.existingRules,
     projectContext: {
       cwd: projectDir,
@@ -1678,15 +1696,15 @@ export async function generatePolicyFromPrompt(options: {
   };
 
   if (endpoint.mode === 'cloud') {
-    const matchedTools = findMatchingToolNames(options.prompt, options.tools);
-    const selectedToolName = matchedTools[0] ?? options.tools[0]?.name;
+    const matchedTools = findMatchingToolNames(options.prompt, generationTools);
+    const selectedToolName = requestedTool ?? matchedTools[0] ?? generationTools[0]?.name;
 
     if (!selectedToolName) {
       if (!allowTemplateFallback) {
         throw new Error('Cloud generation requires at least one discovered tool in the workspace.');
       }
 
-      return generateTemplatePolicy(options.prompt, options.tools, options.existingRules);
+      return generateTemplatePolicy(options.prompt, generationTools, options.existingRules);
     }
 
     try {

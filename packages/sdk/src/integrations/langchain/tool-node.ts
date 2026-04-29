@@ -8,6 +8,10 @@ export interface VetoToolNodeOptions {
   onDeny?: (toolName: string, args: Record<string, unknown>, reason: string) => void | Promise<void>;
 }
 
+async function loadOptionalModule<T>(moduleName: string): Promise<T> {
+  return await import(moduleName) as T;
+}
+
 /**
  * Create a LangGraph-compatible node function that validates tool calls
  * through Veto before delegating to a real ToolNode.
@@ -85,7 +89,9 @@ export function createVetoToolNode(
     // Build denial messages
     let ToolMessage: any;
     try {
-      const mod = await import('@langchain/core/messages');
+      const mod = await loadOptionalModule<{ ToolMessage: new (body: Record<string, unknown>) => any }>(
+        '@langchain/core/messages',
+      );
       ToolMessage = mod.ToolMessage;
     } catch {
       ToolMessage = null;

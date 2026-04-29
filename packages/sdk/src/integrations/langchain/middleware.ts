@@ -24,6 +24,10 @@ export interface VetoLangChainMiddlewareOptions {
   throwOnDeny?: boolean;
 }
 
+async function loadOptionalModule<T>(moduleName: string): Promise<T> {
+  return await import(moduleName) as T;
+}
+
 /**
  * Create a LangChain v1 middleware `wrapToolCall` function that validates
  * every tool call through Veto before execution.
@@ -88,7 +92,9 @@ export function createVetoLangChainMiddleware(
         // LangChain middleware expects this shape from wrapToolCall.
         let ToolMessage: any;
         try {
-          const mod = await import('@langchain/core/messages');
+          const mod = await loadOptionalModule<{ ToolMessage: new (body: Record<string, unknown>) => any }>(
+            '@langchain/core/messages',
+          );
           ToolMessage = mod.ToolMessage;
         } catch {
           // If @langchain/core isn't available, return a plain object
