@@ -106,7 +106,10 @@ export function createX402Connector(): ProtocolConnector {
     },
 
     wrapFetch(fetchFn: typeof fetch): typeof fetch {
-      return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      return async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ): Promise<Response> => {
         const response = await fetchFn(input, init);
 
         // Only intercept 402 responses — pass everything else through

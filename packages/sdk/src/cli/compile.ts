@@ -47,7 +47,7 @@ Each rule object MUST have these fields:
 - "description": what the rule does
 - "enabled": true
 - "severity": one of "critical", "high", "medium", "low", "info"
-- "action": one of "block", "warn", "log", "allow"
+- "action": one of "block", "warn", "log", "allow", "require_approval"
 - "tools": array of tool name strings this applies to (use general names like "send_email", "transfer_funds", "read_file", "write_file", "execute_command", etc.)
 - "conditions": array of condition objects, each with:
   - "field": dot-notation path (e.g. "arguments.to", "arguments.amount")
@@ -62,6 +62,7 @@ Common patterns:
 - Path restrictions: use "starts_with" or "matches" with path patterns
 - Time windows: use "outside_hours" or "within_hours" on "context.time" with value:
   {"start":"HH:MM","end":"HH:MM","timezone":"IANA/Zone","days":["mon","tue","wed","thu","fri"]}
+- Use "require_approval" when the policy should pause for human review rather than hard-block.
 
 If the policy is about HIDING, REDACTING, FILTERING, or NOT SHOWING data in tool outputs, generate output_rules.
 
@@ -96,6 +97,10 @@ const VALID_OPERATORS = new Set([
 const VALID_ACTIONS = new Set(['block', 'warn', 'log', 'allow', 'require_approval']);
 const VALID_OUTPUT_ACTIONS = new Set(['block', 'redact', 'log']);
 const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low', 'info']);
+
+async function loadOptionalModule<T>(moduleName: string): Promise<T> {
+  return await import(moduleName) as T;
+}
 
 function buildUserPrompt(policyText: string): string {
   return `Convert this natural language policy into deterministic YAML rules:\n\n${policyText}`;
@@ -181,7 +186,13 @@ async function callLLM(
     }
 
     case 'anthropic': {
-      const Anthropic = (await import('@anthropic-ai/sdk')).default;
+      const Anthropic = (await loadOptionalModule<{ default: new (options: { apiKey: string }) => {
+        messages: {
+          create(args: Record<string, unknown>): Promise<{
+            content: Array<{ type: string; text?: string }>;
+          }>;
+        };
+      } }>('@anthropic-ai/sdk')).default;
       const client = new Anthropic({ apiKey: config.apiKey });
       const response = await client.messages.create({
         model: config.model,
@@ -191,14 +202,20 @@ async function callLLM(
         max_tokens: 4096,
       });
       const block = response.content[0];
-      if (!block || block.type !== 'text') {
+      if (!block || block.type !== 'text' || typeof block.text !== 'string') {
         throw new CompileError('Unexpected response from Anthropic');
       }
       return block.text;
     }
 
     case 'gemini': {
-      const { GoogleGenAI } = await import('@google/genai');
+      const { GoogleGenAI } = await loadOptionalModule<{
+        GoogleGenAI: new (options: { apiKey: string }) => {
+          models: {
+            generateContent(args: Record<string, unknown>): Promise<{ text?: string }>;
+          };
+        };
+      }>('@google/genai');
       const ai = new GoogleGenAI({ apiKey: config.apiKey });
       const response = await ai.models.generateContent({
         model: config.model,

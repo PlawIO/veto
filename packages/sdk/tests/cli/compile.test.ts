@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { Veto } from '../../src/core/veto.js';
 import {
   compile,
   parseAndValidateLLMOutput,
@@ -373,6 +374,59 @@ describe('compile', () => {
         const parsed = parseYaml(content);
         expect(parsed.version).toBe('1.0');
         expect(parsed.rules[0].id).toBe('block-external-emails');
+      } finally {
+        vi.doUnmock('openai');
+        delete process.env.OPENAI_API_KEY;
+      }
+    });
+
+    it('should produce compiled YAML that Veto can load and enforce', async () => {
+      const mockCreate = vi.fn().mockResolvedValue({
+        choices: [{ message: { content: VALID_LLM_RESPONSE } }],
+      });
+
+      vi.doMock('openai', () => ({
+        default: class {
+          chat = { completions: { create: mockCreate } };
+        },
+      }));
+
+      process.env.OPENAI_API_KEY = 'test-key';
+
+      try {
+        const vetoDir = join(TEST_DIR, 'veto');
+        const rulesDir = join(vetoDir, 'rules');
+        mkdirSync(rulesDir, { recursive: true });
+        writeFileSync(
+          join(vetoDir, 'veto.config.yaml'),
+          `version: "1.0"
+mode: "strict"
+validation:
+  mode: "local"
+logging:
+  level: "silent"
+rules:
+  directory: "./rules"
+`,
+          'utf-8',
+        );
+
+        const outputPath = join(rulesDir, 'compiled.yaml');
+        const result = await compile({
+          input: 'Block emails outside company domain',
+          output: outputPath,
+          provider: 'openai',
+          quiet: true,
+        });
+
+        expect(result.success).toBe(true);
+
+        const veto = await Veto.init({ configDir: vetoDir });
+        const blocked = await veto.guard('send_email', { to: 'alice@gmail.com' });
+        const allowed = await veto.guard('send_email', { to: 'alice@company.com' });
+
+        expect(blocked.decision).toBe('deny');
+        expect(allowed.decision).toBe('allow');
       } finally {
         vi.doUnmock('openai');
         delete process.env.OPENAI_API_KEY;

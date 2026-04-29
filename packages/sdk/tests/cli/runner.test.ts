@@ -45,4 +45,20 @@ describe('cli agent compatibility', () => {
     expect(errorSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('deprecated'));
   });
+
+  it('passes --directory through to init', async () => {
+    const initMock = vi.fn().mockResolvedValue({ success: true });
+
+    vi.doMock('../../src/cli/init.js', () => ({
+      init: initMock,
+    }));
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli(['init', '--directory', '/tmp/veto-cli-target', '--quiet'])).resolves.toBe(0);
+    expect(initMock).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/tmp/veto-cli-target',
+      quiet: true,
+    }));
+  });
 });

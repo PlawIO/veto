@@ -9,11 +9,19 @@ import {
   validateGeneratedYaml,
 } from './repl-generate.js';
 import { createReplSessionContext } from './repl-context.js';
-import { evaluateToolCallHybrid } from './repl.js';
 
 const DEFAULT_CLOUD_BASE_URL = 'https://api.veto.so';
 const DEVICE_POLL_INTERVAL_SECONDS = 5;
 const DEVICE_POLL_TIMEOUT_SECONDS = 300;
+
+async function hasOptionalModule(moduleName: string): Promise<boolean> {
+  try {
+    await import(moduleName);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type StudioTheme = 'veto' | 'claude' | 'high-contrast';
 
@@ -353,6 +361,7 @@ export async function runPolicyGenerateCommand(
       const context = await createReplSessionContext(projectDir);
       const generated = await generatePolicyFromPrompt({
         prompt: options.prompt,
+        toolName: options.tool,
         projectDir,
         rulesDirectory: context.rulesDir,
         tools: context.discoveredTools,
@@ -365,7 +374,7 @@ export async function runPolicyGenerateCommand(
 
       if (!context.discoveredTools.find((tool) => tool.name === options.tool)) {
         warnings.push(
-          `Tool '${options.tool}' is not currently discovered in workspace scan. Generation may be generic.`
+          `Tool '${options.tool}' is not currently discovered in workspace scan. Using the explicit tool name with empty parameter context.`
         );
       }
 
@@ -623,15 +632,23 @@ export async function runGuardCheckCommand(
   if (options.mode === 'local') {
     try {
       const context = await createReplSessionContext(projectDir);
-      const result = await evaluateToolCallHybrid(context, options.tool, argsObject);
+      const veto = Veto.fromRules({
+        rules: context.allRules,
+        logLevel: 'silent',
+      });
+      const result = await veto.guard(
+        options.tool,
+        argsObject,
+        coerceGuardContext(contextObject)
+      );
 
       return ok({
         mode: 'local',
         toolName: options.tool,
         decision: result.decision,
         reason: result.reason,
-        ruleId: result.matchedRule?.id,
-        severity: result.matchedRule?.severity,
+        ruleId: result.ruleId,
+        severity: result.severity,
       });
     } catch (error) {
       return fail('guard_local_failed', error instanceof Error ? error.message : String(error));
@@ -715,19 +732,8 @@ export async function runDoctorCommand(
   let inkAvailable = false;
   let opentuiAvailable = false;
 
-  try {
-    await import('ink');
-    inkAvailable = true;
-  } catch {
-    inkAvailable = false;
-  }
-
-  try {
-    await import('@opentui/core');
-    opentuiAvailable = true;
-  } catch {
-    opentuiAvailable = false;
-  }
+  inkAvailable = await hasOptionalModule('ink');
+  opentuiAvailable = await hasOptionalModule('@opentui/core');
 
   const generation = await checkGenerationConnectivity({ projectDir });
   const session = loadCloudSession();

@@ -28,9 +28,13 @@ type AnthropicConstructor = new (options: {
   maxRetries?: number;
 }) => AnthropicClient;
 
+async function loadOptionalModule<T>(moduleName: string): Promise<T> {
+  return await import(moduleName) as T;
+}
+
 async function loadAnthropic(): Promise<AnthropicConstructor> {
   try {
-    const module = await import('@anthropic-ai/sdk') as unknown as { default: AnthropicConstructor };
+    const module = await loadOptionalModule<{ default: AnthropicConstructor }>('@anthropic-ai/sdk');
     return module.default;
   } catch (error) {
     throw new CustomProviderPackageError(

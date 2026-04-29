@@ -9,6 +9,10 @@ import type { ResolvedCustomConfig } from '../types.js';
 import type { ProviderMessages } from '../prompt.js';
 import { CustomError } from '../types.js';
 
+async function loadOptionalModule<T>(moduleName: string): Promise<T> {
+  return await import(moduleName) as T;
+}
+
 /**
  * Schema for Veto validation response.
  */
@@ -37,7 +41,13 @@ export async function callGemini(
   logger: Logger
 ): Promise<string> {
   try {
-    const { GoogleGenAI } = await import('@google/genai');
+    const { GoogleGenAI } = await loadOptionalModule<{
+      GoogleGenAI: new (options: { apiKey: string }) => {
+        models: {
+          generateContent(args: Record<string, unknown>): Promise<{ text?: string }>;
+        };
+      };
+    }>('@google/genai');
     const ai = new GoogleGenAI({ apiKey: config.apiKey });
 
     // Extract text from Gemini content format
@@ -77,4 +87,3 @@ export async function callGemini(
     );
   }
 }
-

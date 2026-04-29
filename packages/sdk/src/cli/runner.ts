@@ -903,6 +903,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return await runMcpCommand(positionals, flags, values);
     case 'init': {
       const result = await init({
+        directory: values.directory,
         force: flags.force,
         pack: values.pack,
         quiet: flags.quiet,
