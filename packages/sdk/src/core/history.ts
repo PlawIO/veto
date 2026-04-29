@@ -71,10 +71,7 @@ export class HistoryTracker {
    * @param entry - The history entry to add
    */
   add(entry: ToolCallHistoryEntry): void {
-    const snapshotEntry: ToolCallHistoryEntry = {
-      ...entry,
-      arguments: this.cloneArguments(entry.arguments),
-    };
+    const snapshotEntry = this.snapshotEntry(entry);
 
     this.entries.push(snapshotEntry);
 
@@ -177,23 +174,38 @@ export class HistoryTracker {
     });
   }
 
-  private cloneArguments(args: Record<string, unknown>): Record<string, unknown> {
+  private snapshotEntry(entry: ToolCallHistoryEntry): ToolCallHistoryEntry {
+    return {
+      ...entry,
+      arguments: this.cloneValue(entry.arguments),
+      validationResult: this.cloneValue(entry.validationResult),
+      timestamp: new Date(entry.timestamp),
+    };
+  }
+
+  private cloneValue<T>(value: T): T {
     const structuredCloneImpl = globalThis.structuredClone as
-      | ((value: Record<string, unknown>) => Record<string, unknown>)
+      | ((value: T) => T)
       | undefined;
 
     if (structuredCloneImpl) {
       try {
-        return structuredCloneImpl(args);
+        return structuredCloneImpl(value);
       } catch {
         // Fall through to a safer but less expressive clone strategy.
       }
     }
 
     try {
-      return JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
+      return JSON.parse(JSON.stringify(value)) as T;
     } catch {
-      return { ...args };
+      if (Array.isArray(value)) {
+        return [...value] as T;
+      }
+      if (value && typeof value === 'object') {
+        return { ...(value as Record<string, unknown>) } as T;
+      }
+      return value;
     }
   }
 
@@ -203,7 +215,7 @@ export class HistoryTracker {
    * Returns a frozen copy to prevent external modification.
    */
   getAll(): readonly ToolCallHistoryEntry[] {
-    return Object.freeze([...this.entries]);
+    return Object.freeze(this.entries.map((entry) => this.snapshotEntry(entry)));
   }
 
   /**
@@ -212,7 +224,9 @@ export class HistoryTracker {
    * @param count - Number of entries to retrieve
    */
   getLast(count: number): readonly ToolCallHistoryEntry[] {
-    return Object.freeze(this.entries.slice(-count));
+    return Object.freeze(
+      this.entries.slice(-count).map((entry) => this.snapshotEntry(entry))
+    );
   }
 
   /**
@@ -222,7 +236,9 @@ export class HistoryTracker {
    */
   getByTool(toolName: string): readonly ToolCallHistoryEntry[] {
     return Object.freeze(
-      this.entries.filter((entry) => entry.toolName === toolName)
+      this.entries
+        .filter((entry) => entry.toolName === toolName)
+        .map((entry) => this.snapshotEntry(entry))
     );
   }
 
@@ -237,9 +253,9 @@ export class HistoryTracker {
     until: Date = new Date()
   ): readonly ToolCallHistoryEntry[] {
     return Object.freeze(
-      this.entries.filter(
-        (entry) => entry.timestamp >= since && entry.timestamp <= until
-      )
+      this.entries
+        .filter((entry) => entry.timestamp >= since && entry.timestamp <= until)
+        .map((entry) => this.snapshotEntry(entry))
     );
   }
 
@@ -248,7 +264,9 @@ export class HistoryTracker {
    */
   getDenied(): readonly ToolCallHistoryEntry[] {
     return Object.freeze(
-      this.entries.filter((entry) => entry.validationResult.decision === 'deny')
+      this.entries
+        .filter((entry) => entry.validationResult.decision === 'deny')
+        .map((entry) => this.snapshotEntry(entry))
     );
   }
 

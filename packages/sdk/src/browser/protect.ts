@@ -3,41 +3,33 @@ import type { OutputRule, Rule } from '../rules/types.js';
 import type { ProtectOptions } from '../core/protect.js';
 export type { ProtectMode, ProtectOptions } from '../core/protect.js';
 
-interface ToolPackHeuristic {
-  patterns: readonly string[];
-  pack: string;
-}
-
-const TOOL_PACK_HEURISTICS: readonly ToolPackHeuristic[] = [
-  {
-    patterns: ['transfer', 'payment', 'balance', 'withdraw', 'deposit', 'invoice'],
-    pack: '@veto/financial',
-  },
-  {
-    patterns: ['navigate', 'click', 'goto', 'browse', 'scroll', 'type_text'],
-    pack: '@veto/browser-automation',
-  },
-  {
-    patterns: ['query', 'sql', 'database', 'select', 'insert', 'table'],
-    pack: '@veto/data-access',
-  },
-  {
-    patterns: ['exec', 'shell', 'command', 'terminal', 'bash', 'run_code'],
-    pack: '@veto/coding-agent',
-  },
-];
-
 type ProtectInitSource = 'rules' | 'apiKey' | 'allow-all';
 
 interface ProtectInitDecision {
   source: ProtectInitSource;
-  packs: string[];
   rules: Rule[];
   outputRules: OutputRule[];
 }
 
 let _defaultInstance: Veto | null = null;
 const _instanceCache = new Map<string, Veto>();
+const _referenceIds = new WeakMap<object, string>();
+let _nextReferenceId = 0;
+
+function getReferenceId(value: object | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const existing = _referenceIds.get(value);
+  if (existing) {
+    return existing;
+  }
+
+  const id = `ref_${_nextReferenceId++}`;
+  _referenceIds.set(value, id);
+  return id;
+}
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -59,30 +51,13 @@ function toToolsArray<T extends { name: string }>(input: T | T[]): T[] {
   return Array.isArray(input) ? input : [input];
 }
 
-function collectHeuristicPacks<T extends { name: string }>(tools: readonly T[]): string[] {
-  const packs = new Set<string>();
-
-  for (const tool of tools) {
-    const name = tool.name.toLowerCase();
-
-    for (const heuristic of TOOL_PACK_HEURISTICS) {
-      if (heuristic.patterns.some((pattern) => name.includes(pattern))) {
-        packs.add(heuristic.pack);
-      }
-    }
-  }
-
-  return [...packs].sort((a, b) => a.localeCompare(b));
-}
-
 function buildInitDecision<T extends { name: string }>(
-  tools: readonly T[],
+  _tools: readonly T[],
   options: ProtectOptions
 ): ProtectInitDecision {
   if (options.rules) {
     return {
       source: 'rules',
-      packs: [],
       rules: options.rules,
       outputRules: [],
     };
@@ -91,7 +66,6 @@ function buildInitDecision<T extends { name: string }>(
   if (options.apiKey) {
     return {
       source: 'apiKey',
-      packs: [],
       rules: [],
       outputRules: [],
     };
@@ -99,7 +73,6 @@ function buildInitDecision<T extends { name: string }>(
 
   return {
     source: 'allow-all',
-    packs: collectHeuristicPacks(tools),
     rules: [],
     outputRules: [],
   };
@@ -118,7 +91,7 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     agentId: options.agentId,
     userId: options.userId,
     role: options.role,
-    packs: decision.packs,
+    onApprovalRequiredId: getReferenceId(options.onApprovalRequired),
     rulesFingerprint: stableSerialize(decision.rules),
     outputRulesFingerprint: stableSerialize(decision.outputRules),
     budget: options.budget,

@@ -9,7 +9,10 @@ interface CacheEntry {
 
 export class PolicyCache {
   private readonly cache = new Map<string, CacheEntry>();
-  private readonly refreshing = new Set<string>();
+  private readonly refreshing = new Map<string, number>();
+  private readonly invalidationVersion = new Map<string, number>();
+  private nextRefreshToken = 0;
+  private globalInvalidationVersion = 0;
 
   constructor(
     private readonly client: VetoCloudClient,
@@ -41,21 +44,38 @@ export class PolicyCache {
 
   invalidate(toolName: string): void {
     this.cache.delete(toolName);
+    this.refreshing.delete(toolName);
+    this.invalidationVersion.set(toolName, this.getToolInvalidationVersion(toolName) + 1);
   }
 
   invalidateAll(): void {
     this.cache.clear();
+    this.refreshing.clear();
+    this.invalidationVersion.clear();
+    this.globalInvalidationVersion += 1;
   }
 
   private backgroundRefresh(toolName: string): void {
     if (this.refreshing.has(toolName)) return;
 
-    this.refreshing.add(toolName);
+    const refreshToken = this.nextRefreshToken++;
+    const toolInvalidationVersion = this.getToolInvalidationVersion(toolName);
+    const globalInvalidationVersion = this.globalInvalidationVersion;
+
+    this.refreshing.set(toolName, refreshToken);
     // Defer to macrotask to avoid interfering with the current validation's fetch
     setTimeout(() => {
       this.client.fetchPolicy(toolName)
         .then((response) => {
           if (!response) return;
+          if (!this.canApplyRefreshResult(
+            toolName,
+            refreshToken,
+            toolInvalidationVersion,
+            globalInvalidationVersion,
+          )) {
+            return;
+          }
 
           const now = Date.now();
           const policy: DeterministicPolicy = {
@@ -77,7 +97,26 @@ export class PolicyCache {
         .catch(() => {
           // Background refresh failed — will retry on next cache access
         })
-        .finally(() => this.refreshing.delete(toolName));
+        .finally(() => {
+          if (this.refreshing.get(toolName) === refreshToken) {
+            this.refreshing.delete(toolName);
+          }
+        });
     }, 0);
+  }
+
+  private getToolInvalidationVersion(toolName: string): number {
+    return this.invalidationVersion.get(toolName) ?? 0;
+  }
+
+  private canApplyRefreshResult(
+    toolName: string,
+    refreshToken: number,
+    toolInvalidationVersion: number,
+    globalInvalidationVersion: number
+  ): boolean {
+    return this.refreshing.get(toolName) === refreshToken
+      && this.getToolInvalidationVersion(toolName) === toolInvalidationVersion
+      && this.globalInvalidationVersion === globalInvalidationVersion;
   }
 }
