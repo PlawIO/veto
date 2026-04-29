@@ -299,7 +299,10 @@ function parseRuleBlock(block: string): Rule | null {
         case 'tools':
           // Parse inline array: [tool1, tool2]
           if (value.startsWith('[')) {
-            rule.tools = value.slice(1, -1).split(',').map(t => t.trim());
+            const inner = value.slice(1, -1).trim();
+            rule.tools = inner === ''
+              ? []
+              : inner.split(',').map(t => t.trim()).filter((tool) => tool.length > 0);
           }
           currentSection = 'tools';
           break;

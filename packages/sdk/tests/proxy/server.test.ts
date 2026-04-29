@@ -173,6 +173,7 @@ describe('veto intercept proxy — end-to-end', () => {
       expect(response).toContain('[BLOCKED by veto]');
       expect(response).toContain('data: ');
       expect(response).toContain('[DONE]');
+      expect((response.match(/data: \[DONE\]/g) ?? [])).toHaveLength(1);
     } finally {
       await stopProxy();
       await upstream.stop();

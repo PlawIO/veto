@@ -259,7 +259,7 @@ async function interceptSSEStream(
   const pendingToolCalls = new Map<number, PendingToolCall>();
   let bufferedLines: string[] = [];
   let bufferedBytes = 0;
-  let mode: 'passthrough' | 'buffer' | 'overflow' = 'passthrough';
+  let mode: 'passthrough' | 'buffer' | 'overflow' | 'blocked' = 'passthrough';
   let bufferOverflowed = false;
 
   const flushBuffer = () => {
@@ -281,6 +281,10 @@ async function interceptSSEStream(
     for (const rawLine of lines) {
       const line = rawLine.replace(/\r$/, '');
       const parsed = parseSSELine(line);
+
+      if (mode === 'blocked') {
+        continue;
+      }
 
       if (parsed.done) {
         if (mode === 'buffer') {
@@ -352,18 +356,19 @@ async function interceptSSEStream(
           // Clear buffered chunks — send synthetic block event
           bufferedLines = [];
           clientRes.write(synthBlockedEvent(blockReason));
+          mode = 'blocked';
         } else {
           flushBuffer();
+          mode = 'passthrough';
         }
 
-        mode = 'passthrough';
         pendingToolCalls.clear();
       }
     }
   }
 
   // Flush any remaining partial line (shouldn't happen with well-formed SSE)
-  if (partial.trim()) {
+  if (partial.trim() && mode !== 'blocked') {
     clientRes.write(partial + '\n');
   }
 
