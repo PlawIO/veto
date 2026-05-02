@@ -45,9 +45,9 @@ const server = createServer((req, res) => {
       const decision = result.decision === 'deny' ? 'deny' : result.decision === 'require_approval' ? 'require_approval' : 'allow';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ decision, reason: result.reason, ruleId: result.ruleId }));
-    } catch (error) {
+    } catch {
       res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      res.end('{"error":"bad_request"}');
     }
   });
 });
