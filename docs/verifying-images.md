@@ -1,9 +1,9 @@
 # Verifying Veto images
 
-BYOC runtime images (`veto-server`, `veto-operator`, `veto-dashboard`, `veto-frontend`, `veto-docs`) are released from the private platform repository. Use the `PlawIO/veto-platform` release-images workflow identity for those images:
+BYOC runtime images (`veto-server`, `veto-operator`, `veto-dashboard`, `veto-frontend`, `veto-docs`) are released from the private platform repository. Use the `PlawIO/veto-platform` release-images workflow identity on release tags for those images:
 
 ```bash
-VETO_PLATFORM_IDENTITY_RE='https://github.com/PlawIO/veto-platform/.github/workflows/release-images\\.ya?ml@refs/heads/main'
+VETO_PLATFORM_IDENTITY_RE='https://github.com/PlawIO/veto-platform/.github/workflows/release-images\\.ya?ml@refs/(heads/main|tags/.*)'
 ```
 
 Public-repo-only artifacts, such as `veto-bash` when published as an image, use the public repository identity and are listed separately below. Do not use the public `PlawIO/veto` identity for `veto-server`.
@@ -58,14 +58,14 @@ If your cosign version uses predicate-type URIs instead of aliases, verify the e
 
 ## Image matrix
 
-| Image                                      | Release identity                                                              | Required verification                                    |
-| ------------------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `ghcr.io/plawio/veto-server@sha256:...`    | `PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/heads/main` | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX |
-| `ghcr.io/plawio/veto-operator@sha256:...`  | `PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/heads/main` | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX |
-| `ghcr.io/plawio/veto-dashboard@sha256:...` | `PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/heads/main` | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX |
-| `ghcr.io/plawio/veto-frontend@sha256:...`  | `PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/heads/main` | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX |
-| `ghcr.io/plawio/veto-docs@sha256:...`      | `PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/heads/main` | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX |
-| `ghcr.io/plawio/veto-bash@sha256:...`      | `PlawIO/veto/.github/workflows/.\*@refs/(heads/master                         | tags/.\*)`                                               | signature + available SBOM/provenance/VEX attestations from the public repo image release |
+| Image                                      | Release identity                                                                                         | Required verification                                                                     |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `ghcr.io/plawio/veto-server@sha256:...`    | <code>PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/(heads/main&#124;tags/.\*)</code> | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX                                  |
+| `ghcr.io/plawio/veto-operator@sha256:...`  | <code>PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/(heads/main&#124;tags/.\*)</code> | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX                                  |
+| `ghcr.io/plawio/veto-dashboard@sha256:...` | <code>PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/(heads/main&#124;tags/.\*)</code> | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX                                  |
+| `ghcr.io/plawio/veto-frontend@sha256:...`  | <code>PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/(heads/main&#124;tags/.\*)</code> | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX                                  |
+| `ghcr.io/plawio/veto-docs@sha256:...`      | <code>PlawIO/veto-platform/.github/workflows/release-images.ya?ml@refs/(heads/main&#124;tags/.\*)</code> | signature + CycloneDX + SPDX + SLSA provenance + OpenVEX                                  |
+| `ghcr.io/plawio/veto-bash@sha256:...`      | <code>PlawIO/veto/.github/workflows/.\*@refs/(heads/master&#124;tags/.\*)</code>                         | signature + available SBOM/provenance/VEX attestations from the public repo image release |
 
 BYOC deployments should pin digests in Helm/Terraform/CDK. Do not deploy mutable tags in production.
 

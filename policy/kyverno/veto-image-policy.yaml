@@ -31,32 +31,32 @@ spec:
             - entries:
                 - keyless:
                     issuer: https://token.actions.githubusercontent.com
-                    subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+                    subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
           attestations:
             - type: https://cyclonedx.org/bom
               attestors:
                 - entries:
                     - keyless:
                         issuer: https://token.actions.githubusercontent.com
-                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
             - type: https://spdx.dev/Document
               attestors:
                 - entries:
                     - keyless:
                         issuer: https://token.actions.githubusercontent.com
-                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
             - type: https://slsa.dev/provenance/v1
               attestors:
                 - entries:
                     - keyless:
                         issuer: https://token.actions.githubusercontent.com
-                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
             - type: https://openvex.dev/ns/v0.2.0
               attestors:
                 - entries:
                     - keyless:
                         issuer: https://token.actions.githubusercontent.com
-                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
 
     - name: require-public-repo-image-signatures-and-attestations
       match:

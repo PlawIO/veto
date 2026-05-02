@@ -125,24 +125,37 @@ function hasYamlRuleFile(dir: string): boolean {
     return false;
   }
 
-  for (const entry of readdirSync(dir)) {
-    const path = resolve(dir, entry);
-    const stat = statSync(path);
-    if (stat.isDirectory() && hasYamlRuleFile(path)) {
-      return true;
+  try {
+    for (const entry of readdirSync(dir)) {
+      const path = resolve(dir, entry);
+      let stat;
+      try {
+        stat = statSync(path);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory() && hasYamlRuleFile(path)) {
+        return true;
+      }
+      if (stat.isFile() && (entry.endsWith('.yaml') || entry.endsWith('.yml'))) {
+        return true;
+      }
     }
-    if (stat.isFile() && (entry.endsWith('.yaml') || entry.endsWith('.yml'))) {
-      return true;
-    }
+  } catch {
+    return false;
   }
 
   return false;
 }
 
 function hasLocalPolicyProject(): boolean {
-  const vetoDir = resolve(process.cwd(), 'veto');
-  return existsSync(resolve(vetoDir, 'veto.config.yaml'))
-    || hasYamlRuleFile(resolve(vetoDir, 'rules'));
+  try {
+    const vetoDir = resolve(process.cwd(), 'veto');
+    return existsSync(resolve(vetoDir, 'veto.config.yaml'))
+      || hasYamlRuleFile(resolve(vetoDir, 'rules'));
+  } catch {
+    return false;
+  }
 }
 
 function readPolicyPack(packName: string): { rules: Rule[]; outputRules: OutputRule[]; normalizedPack: string } {

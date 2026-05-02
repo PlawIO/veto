@@ -35,13 +35,16 @@ node benchmark/run.mjs --mode=full --include-server --server-url=http://localhos
 
 ## Hardware fields
 
-Each run writes runner, OS, architecture, Node.js version, and timestamp. Current checked-in measured baseline was produced by the harness with:
+Each run writes runner, OS, architecture, Node.js version, and timestamp. Current checked-in PR-mode local-eval baselines are measured from GitHub Actions output, not faster local hardware:
 
-- runner: local
+- runner: GitHub Actions
 - os: linux
 - arch: x64
-- node: v24.13.0
-- command: `node benchmark/run.mjs --mode=pr --include-server --gate --baseline-dir=benchmark/baselines --output=benchmark/results/baseline.json`
+- node: 20.x via `actions/setup-node@v4`
+- source run: PR #208 `Policy eval latency` failure log
+- command: `node benchmark/run.mjs --mode=pr --gate --baseline-dir=benchmark/baselines --output=benchmark/results/pr.json`
+
+The `server-loopback` baseline is separate: it is measured against `benchmark/pdp-fixture.mjs` on local loopback because PR mode skips server latency unless a PDP is explicitly started.
 
 ## Workloads
 
@@ -59,11 +62,11 @@ The 100-rule corpus is deterministic: the benchmark loads the three named packs,
 
 Baselines live in `benchmark/baselines/*.json`. They are actual measured Veto harness output; thresholds are separate fields. CI fails when a measured non-skipped workload has p99 latency greater than the checked-in measured baseline by more than 10%, or above the absolute threshold.
 
-| Runtime | Workload                              | Iterations |        p50 |        p95 |        p99 | p99 threshold | Source                                                                                   |
-| ------- | ------------------------------------- | ---------: | ---------: | ---------: | ---------: | ------------: | ---------------------------------------------------------------------------------------- |
-| Veto    | single-rule local eval                |     50,000 | 0.000160ms | 0.000570ms | 0.002130ms |        0.05ms | measured, `benchmark/baselines/single-rule-local.json`                                   |
-| Veto    | 100-rule local eval from merged packs |     50,000 | 0.014130ms | 0.018400ms | 0.024260ms |         0.5ms | measured, `benchmark/baselines/hundred-rule-local.json`                                  |
-| Veto    | localhost PDP server eval             |        250 | 0.402051ms | 0.841651ms | 2.092263ms |          30ms | measured against `benchmark/pdp-fixture.mjs`, `benchmark/baselines/server-loopback.json` |
+| Runtime | Workload                              | Iterations |        p50 |        p95 |        p99 | p99 threshold | Source                                                                        |
+| ------- | ------------------------------------- | ---------: | ---------: | ---------: | ---------: | ------------: | ----------------------------------------------------------------------------- |
+| Veto    | single-rule local eval                |     50,000 | 0.000241ms | 0.001062ms | 0.001963ms |        0.05ms | GitHub Actions PR-mode, `benchmark/baselines/single-rule-local.json`          |
+| Veto    | 100-rule local eval from merged packs |     50,000 | 0.022154ms | 0.023194ms | 0.044848ms |         0.5ms | GitHub Actions PR-mode, `benchmark/baselines/hundred-rule-local.json`         |
+| Veto    | localhost PDP server eval             |        250 | 0.402051ms | 0.841651ms | 2.092263ms |          30ms | local `benchmark/pdp-fixture.mjs`, `benchmark/baselines/server-loopback.json` |
 
 ## AGT comparison
 

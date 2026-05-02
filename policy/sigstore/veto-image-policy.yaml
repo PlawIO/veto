@@ -17,7 +17,7 @@ spec:
     - keyless:
         identities:
           - issuer: https://token.actions.githubusercontent.com
-            subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+            subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
       attestations:
         - name: cyclonedx
           predicateType: https://cyclonedx.org/bom

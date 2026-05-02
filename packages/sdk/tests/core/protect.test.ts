@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { protect, __resetProtectCacheForTests } from '../../src/core/protect.js';
@@ -254,6 +254,16 @@ describe('protect', () => {
   });
 
   it('allows unknown tools under safe-defaults observe mode', async () => {
+    const tool = createTool('non_matching_tool', 'allowed');
+
+    const wrapped = await protect([tool], { logLevel: 'silent' });
+
+    await expect(wrapped[0].handler({ any: 'value' })).resolves.toBe('allowed');
+  });
+
+  it('falls through when local policy discovery hits broken filesystem entries', async () => {
+    mkdirSync(join(testDir, 'veto', 'rules'), { recursive: true });
+    symlinkSync(join(testDir, 'missing-rules-dir'), join(testDir, 'veto', 'rules', 'broken-link'));
     const tool = createTool('non_matching_tool', 'allowed');
 
     const wrapped = await protect([tool], { logLevel: 'silent' });

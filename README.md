@@ -11,15 +11,15 @@ Veto sits between an agent and the tools it can execute. It evaluates tool name 
 
 ## Benchmarks
 
-Checked-in baselines are measured harness output, not thresholds. CI gates Veto p99 regressions above 10% against `benchmark/baselines/*.json`; absolute thresholds remain separate.
+Checked-in PR-mode baselines are measured on GitHub Actions runner output, not local hardware or thresholds. CI gates Veto p99 regressions above 10% against `benchmark/baselines/*.json`; absolute thresholds remain separate.
 
-| Runtime | Workload                           | Iterations |          p50 |           p95 |           p99 | p99 threshold | Source                                                          |
-| ------- | ---------------------------------- | ---------: | -----------: | ------------: | ------------: | ------------: | --------------------------------------------------------------- |
-| Veto    | single-rule local eval             |     50,000 |   0.000160ms |    0.000570ms |    0.002130ms |        0.05ms | measured by `node benchmark/run.mjs --mode=pr --include-server` |
-| Veto    | 100-rule merged packs              |     50,000 |   0.014130ms |    0.018400ms |    0.024260ms |         0.5ms | measured by `node benchmark/run.mjs --mode=pr --include-server` |
-| Veto    | localhost PDP server eval          |        250 |   0.402051ms |    0.841651ms |    2.092263ms |          30ms | measured against `benchmark/pdp-fixture.mjs` loopback PDP       |
-| AGT     | policy eval latency per rule       |  published | 0.012ms/rule | not published | not published |           n/a | source: published, not reproduced                               |
-| AGT     | throughput at 50 concurrent agents |  published |  35K ops/sec | not published | not published |           n/a | source: published, not reproduced                               |
+| Runtime | Workload                           | Iterations |          p50 |           p95 |           p99 | p99 threshold | Source                                              |
+| ------- | ---------------------------------- | ---------: | -----------: | ------------: | ------------: | ------------: | --------------------------------------------------- |
+| Veto    | single-rule local eval             |     50,000 |   0.000241ms |    0.001062ms |    0.001963ms |        0.05ms | measured on GitHub Actions PR-mode, PR #208 CI log  |
+| Veto    | 100-rule merged packs              |     50,000 |   0.022154ms |    0.023194ms |    0.044848ms |         0.5ms | measured on GitHub Actions PR-mode, PR #208 CI log  |
+| Veto    | localhost PDP server eval          |        250 |   0.402051ms |    0.841651ms |    2.092263ms |          30ms | local loopback fixture baseline; not run in PR mode |
+| AGT     | policy eval latency per rule       |  published | 0.012ms/rule | not published | not published |           n/a | source: published, not reproduced                   |
+| AGT     | throughput at 50 concurrent agents |  published |  35K ops/sec | not published | not published |           n/a | source: published, not reproduced                   |
 
 ## Get started
 
