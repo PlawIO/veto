@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veto.so/schemas/heartbeat.schema.json",
+  "title": "Veto BYOC Heartbeat",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "instance_uuid",
+    "license_id",
+    "decision_count_30d",
+    "sdk_version",
+    "operator_version",
+    "timestamp"
+  ],
+  "properties": {
+    "instance_uuid": { "type": "string", "format": "uuid" },
+    "license_id": { "type": "string", "minLength": 1 },
+    "decision_count_30d": { "type": "integer", "minimum": 0 },
+    "sdk_version": { "type": "string", "minLength": 1 },
+    "operator_version": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

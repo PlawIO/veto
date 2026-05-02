@@ -111,7 +111,7 @@ function createPackageJson(projectName: string): string {
 
 function createReadme(projectName: string, pack: string | undefined): string {
   const packLine = pack
-    ? `- Veto rules extend \`${pack}\`. Review and tune \`veto/rules/defaults.yaml\` for your system. Starter packs are guardrails, not compliance claims.`
+    ? `- Veto rules extend \`${pack}\`. Review and tune \`veto/rules/defaults.yaml\` for your system. Starter packs are policy templates, not compliance claims.`
     : '- Veto starts in local mode with default rules in `veto/rules/defaults.yaml`.';
 
   return `# ${projectName}
@@ -185,7 +185,7 @@ function createTsconfig(): string {
 }
 
 function createSource(): string {
-  return `import { ToolCallDeniedError, Veto } from 'veto-sdk';
+  return `import { ToolCallDeniedError, protect } from 'veto-sdk';
 
 interface ReadFileArgs {
   path: string;
@@ -212,15 +212,11 @@ const tools = [
 ];
 
 async function main(): Promise<void> {
-  const veto = await Veto.init();
-  const [readFile] = veto.wrap(tools);
+  const [readFile] = await protect(tools);
 
   try {
     const result = await readFile.handler({ path: './README.md' });
     console.log('Tool result:', result);
-
-    const guard = await veto.guard('execute_command', { command: 'echo hello' });
-    console.log('Guard decision:', guard.decision, guard.reason ?? 'allowed');
   } catch (error) {
     if (error instanceof ToolCallDeniedError) {
       console.error(\`Veto denied \${error.toolName}: \${error.message}\`);

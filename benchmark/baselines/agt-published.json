@@ -1,0 +1,19 @@
+{
+  "runtime": "AGT",
+  "source": "published",
+  "reproduced": false,
+  "published_metrics": [
+    {
+      "name": "policy eval latency per rule",
+      "value": 0.012,
+      "unit": "ms/rule"
+    },
+    {
+      "name": "throughput at 50 concurrent agents",
+      "value": 35000,
+      "unit": "ops/sec",
+      "concurrency": 50
+    }
+  ],
+  "methodology_note": "Published comparison numbers from the charter; not reproduced by this CI harness."
+}

@@ -235,7 +235,25 @@ describe('protect', () => {
     ).rejects.toBeInstanceOf(ToolCallDeniedError);
   });
 
-  it('falls back to allow-all when no heuristics match', async () => {
+  it('uses safe defaults in log mode when no heuristics match', async () => {
+    const tool = createTool('non_matching_tool', 'allowed');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    await protect([tool], { logLevel: 'silent' });
+
+    expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'log',
+      rules: expect.arrayContaining([
+        expect.objectContaining({ id: 'safe-defaults-warn-destructive-shell', action: 'warn' }),
+      ]),
+    }));
+  });
+
+  it('allows unknown tools under safe-defaults observe mode', async () => {
     const tool = createTool('non_matching_tool', 'allowed');
 
     const wrapped = await protect([tool], { logLevel: 'silent' });

@@ -1,0 +1,20 @@
+{
+  "id": "single-rule-local",
+  "workload": "single-rule local eval",
+  "source": "measured",
+  "source_command": "node benchmark/run.mjs --mode=pr --include-server --gate --baseline-dir=benchmark/baselines --output=benchmark/results/baseline.json",
+  "generated_at": "2026-05-02T12:59:55.075Z",
+  "hardware": {
+    "runner": "local",
+    "os": "linux",
+    "arch": "x64",
+    "node": "v24.13.0"
+  },
+  "iterations": 50000,
+  "p50_ms": 0.00015999999999394277,
+  "p95_ms": 0.0005699999999961847,
+  "p99_ms": 0.002130000000008181,
+  "min_ms": 0.0001399999999875945,
+  "max_ms": 0.6751610000000028,
+  "threshold_p99_ms": 0.05
+}

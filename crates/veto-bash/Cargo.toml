@@ -2,8 +2,8 @@
 name = "veto-bash-native"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
-description = "Rust-first guarded bash runtime with MCP support"
+license = "Apache-2.0"
+description = "Rust-first policy runtime for bash tool calls with MCP support"
 
 [[bin]]
 name = "veto-bash-native"

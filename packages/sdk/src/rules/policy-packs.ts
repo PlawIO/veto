@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 const BUILT_IN_POLICY_PACK_FILE_NAMES = {
+  '@veto/safe-defaults': 'safe-defaults.yaml',
   '@veto/coding-agent': 'coding-agent.yaml',
   '@veto/crypto-trading': 'crypto-trading.yaml',
   '@veto/financial': 'financial.yaml',

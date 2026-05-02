@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { Rule, OutputRule } from '../rules/types.js';
@@ -50,6 +50,7 @@ type ProtectInitSource =
   | 'local'
   | 'pack'
   | 'heuristic'
+  | 'safe-defaults'
   | 'allow-all';
 
 interface InlineRulesData {
@@ -117,6 +118,31 @@ function toToolsArray<T extends { name: string }>(input: T | T[]): T[] {
 
 function collectHeuristicPacks<T extends { name: string }>(tools: readonly T[]): string[] {
   return collectHeuristicPacksForToolNames(tools.map((tool) => tool.name));
+}
+
+function hasYamlRuleFile(dir: string): boolean {
+  if (!existsSync(dir)) {
+    return false;
+  }
+
+  for (const entry of readdirSync(dir)) {
+    const path = resolve(dir, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory() && hasYamlRuleFile(path)) {
+      return true;
+    }
+    if (stat.isFile() && (entry.endsWith('.yaml') || entry.endsWith('.yml'))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasLocalPolicyProject(): boolean {
+  const vetoDir = resolve(process.cwd(), 'veto');
+  return existsSync(resolve(vetoDir, 'veto.config.yaml'))
+    || hasYamlRuleFile(resolve(vetoDir, 'rules'));
 }
 
 function readPolicyPack(packName: string): { rules: Rule[]; outputRules: OutputRule[]; normalizedPack: string } {
@@ -199,7 +225,7 @@ function buildInitDecision<T extends { name: string }>(
     };
   }
 
-  if (existsSync(resolve(process.cwd(), 'veto'))) {
+  if (hasLocalPolicyProject()) {
     return { source: 'local' };
   }
 
@@ -212,17 +238,25 @@ function buildInitDecision<T extends { name: string }>(
   }
 
   return {
-    source: 'allow-all',
-    inlineRules: {
-      packs: [],
-      rules: [],
-      outputRules: [],
-    },
+    source: 'safe-defaults',
+    inlineRules: loadInlineRulesFromPacks(['@veto/safe-defaults']),
   };
 }
 
 function resolveProtectLogLevel(options: ProtectOptions): LogLevel | undefined {
   return options.stream ? 'stream' : options.logLevel;
+}
+
+function resolveProtectMode(options: ProtectOptions, decision: ProtectInitDecision): ProtectMode | undefined {
+  if (options.mode) {
+    return options.mode;
+  }
+
+  if (decision.source === 'safe-defaults') {
+    return 'log';
+  }
+
+  return undefined;
 }
 
 function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision): string {
@@ -232,7 +266,7 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     pack: options.pack,
     apiKey: options.apiKey,
     endpoint: options.endpoint,
-    mode: options.mode,
+    mode: resolveProtectMode(options, decision),
     logLevel: resolveProtectLogLevel(options),
     stream: options.stream,
     streamMode: options.streamMode,
@@ -319,12 +353,13 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
       case 'rules':
       case 'pack':
       case 'heuristic':
+      case 'safe-defaults':
       case 'allow-all': {
         const inlineRules = decision.inlineRules ?? { rules: [], outputRules: [] as OutputRule[], packs: [] };
         instance = Veto.fromRules({
           rules: inlineRules.rules,
           outputRules: inlineRules.outputRules,
-          mode: options.mode,
+          mode: resolveProtectMode(options, decision),
           logLevel: resolveProtectLogLevel(options),
           stream: options.stream,
           streamMode: options.streamMode,

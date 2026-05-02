@@ -1,0 +1,24 @@
+apiVersion: veto.plaw.io/v1alpha1
+kind: VetoCluster
+metadata:
+  name: {{ include "veto.fullname" . }}
+  labels:
+    {{- include "veto.labels" . | nindent 4 }}
+spec:
+  licenseRef:
+    secretName: {{ include "veto.fullname" . }}-license
+    key: license
+  server:
+    replicas: {{ .Values.replicaCount.server }}
+    image: {{ include "veto.image" .Values.images.server | quote }}
+    storageDriver: {{ .Values.storage.driver | quote }}
+  dashboard:
+    replicas: {{ .Values.replicaCount.dashboard }}
+    image: {{ include "veto.image" .Values.images.dashboard | quote }}
+  telemetry:
+    enabled: {{ .Values.telemetry.enabled }}
+  outbound:
+    allowedHosts:
+      {{- range .Values.networkPolicy.fqdn.allowedNames }}
+      - {{ . | quote }}
+      {{- end }}

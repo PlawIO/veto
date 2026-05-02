@@ -1,312 +1,156 @@
-<div align="center">
-
 # Veto
 
-**sudo for AI agents.**
-
-Stop agents from deleting files, leaking secrets, or pushing to prod — without slowing anyone down.
+Veto is the policy runtime for AI agent tool calls — write deny rules in plain English, enforce them deterministically, in 5 lines of code.
 
 [![npm](https://img.shields.io/npm/v/veto-sdk?label=veto-sdk&color=000000)](https://www.npmjs.com/package/veto-sdk)
 [![npm](https://img.shields.io/npm/v/veto-cli?label=veto-cli&color=000000)](https://www.npmjs.com/package/veto-cli)
 [![PyPI](https://img.shields.io/pypi/v/veto?label=veto&color=000000)](https://pypi.org/project/veto)
-[![npm downloads](https://img.shields.io/npm/dt/veto-sdk?label=installs&color=000000)](https://www.npmjs.com/package/veto-sdk)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/PlawIO/veto/actions/workflows/ci.yml/badge.svg)](https://github.com/PlawIO/veto/actions/workflows/ci.yml)
-[![GitHub Stars](https://img.shields.io/github/stars/PlawIO/veto?style=flat&color=000000)](https://github.com/PlawIO/veto)
 
-[**docs.veto.so**](https://docs.veto.so) · [veto.so](https://veto.so) · [npm](https://www.npmjs.com/package/veto-sdk) · [PyPI](https://pypi.org/project/veto)
+Veto sits between an agent and the tools it can execute. It evaluates tool name + arguments against deterministic policy, then allows, denies, warns, logs, or routes to approval before your handler runs. It governs tool calls, not prompts.
 
-<img src="docs/assets/readme-demo.gif" alt="Veto blocking a recursive delete from an AI agent" width="820">
+## Benchmarks
 
-</div>
+Checked-in baselines are measured harness output, not thresholds. CI gates Veto p99 regressions above 10% against `benchmark/baselines/*.json`; absolute thresholds remain separate.
 
----
+| Runtime | Workload                           | Iterations |          p50 |           p95 |           p99 | p99 threshold | Source                                                          |
+| ------- | ---------------------------------- | ---------: | -----------: | ------------: | ------------: | ------------: | --------------------------------------------------------------- |
+| Veto    | single-rule local eval             |     50,000 |   0.000160ms |    0.000570ms |    0.002130ms |        0.05ms | measured by `node benchmark/run.mjs --mode=pr --include-server` |
+| Veto    | 100-rule merged packs              |     50,000 |   0.014130ms |    0.018400ms |    0.024260ms |         0.5ms | measured by `node benchmark/run.mjs --mode=pr --include-server` |
+| Veto    | localhost PDP server eval          |        250 |   0.402051ms |    0.841651ms |    2.092263ms |          30ms | measured against `benchmark/pdp-fixture.mjs` loopback PDP       |
+| AGT     | policy eval latency per rule       |  published | 0.012ms/rule | not published | not published |           n/a | source: published, not reproduced                               |
+| AGT     | throughput at 50 concurrent agents |  published |  35K ops/sec | not published | not published |           n/a | source: published, not reproduced                               |
 
-AI agents can execute code, call APIs, and modify production systems. Veto is the permission layer that sits between every agent action and execution — validating, blocking, or routing to human approval before anything runs.
+## Get started
 
-```typescript
-const veto = await Veto.init(); // loads ./veto/veto.config.yaml + rules
-const guarded = veto.wrap(tools); // inject guardrails — types preserved
-// pass guarded to your agent. done.
+```ts
+import { protect } from "veto-sdk";
+const safeTools = await protect(tools);
 ```
-
-The agent is unaware it's being governed. Your tools are unchanged. No behavior change for the AI.
-
-## How it works
-
-```
-┌───────────┐         ┌────────────┐         ┌──────────────┐
-│ AI Agent  │────────▶│    Veto    │────────▶│  Your Tools  │
-│  (LLM)    │         │  (Guard)   │         │  (Handlers)  │
-└───────────┘         └────────────┘         └──────────────┘
-                            │
-                      ┌─────┴──────┐
-                      │ YAML Rules │  block · allow · ask
-                      └────────────┘
-```
-
-1. Agent calls a tool
-2. Veto intercepts and validates (deterministic conditions first, optional LLM for semantic rules)
-3. **allow** → executes normally · **block** → denied with reason · **ask** → human approval queue
-
-## Packages
-
-| Package                         | Language    | Install                    | Description                              |
-| ------------------------------- | ----------- | -------------------------- | ---------------------------------------- |
-| [`veto-sdk`](./packages/sdk)    | TypeScript  | `npm install veto-sdk`     | SDK for guarded agentic apps             |
-| [`veto`](./packages/sdk-python) | Python      | `pip install veto`         | Same API, all major LLM providers        |
-| [`veto-cli`](./packages/cli)    | TypeScript  | `npm install -g veto-cli`  | Interactive studio + headless automation |
-| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app` | Scaffold a minimal guarded TypeScript app |
-| [`veto-bash`](./packages/bash)  | Rust + Node | `npm install -g veto-bash` | Rust-first guarded `bash` runtime + MCP  |
-
-## Quick start
-
-### TypeScript
 
 ```bash
 npm install veto-sdk
-npx veto init       # creates ./veto/veto.config.yaml + default rules
 ```
 
-```typescript
-import { Veto } from "veto-sdk";
+Pass `safeTools` to LangChain, Vercel AI SDK, OpenAI Agents, MCP adapters, or your own tool runner. If `./veto/veto.config.yaml` and `./veto/rules/*.yaml` exist, `protect()` loads them. Without local policy, Veto applies `@veto/safe-defaults` in observe mode so suspicious shell/file/db/money-movement patterns are logged without surprise blocking.
 
-const veto = await Veto.init();
-const guarded = veto.wrap(myTools); // LangChain, Vercel AI SDK, or any custom tools
+For a blocking local policy in under a minute:
+
+```bash
+npm i veto-sdk openai
+npx veto init
+node examples/60-second-denied-call/denied-call.mjs
 ```
 
-### Python
+## TypeScript
+
+```bash
+npm install veto-sdk
+```
+
+```ts
+import { protect } from "veto-sdk";
+
+const safeTools = await protect(tools);
+const agent = createAgent({ tools: safeTools });
+```
+
+## Python
 
 ```bash
 pip install veto
-veto init
 ```
 
 ```python
-from veto import Veto
+from veto import protect
 
-veto = await Veto.init()
-guarded = veto.wrap(my_tools)
+safe = await protect(tools)
+agent = create_agent(tools=safe)
 ```
 
-### Rules
+## Add local deny rules
 
-Rules are YAML files in `./veto/rules/`. Static conditions run locally with no API call. LLM validation is opt-in for semantic rules.
+```bash
+npx veto init
+```
+
+`npx veto init` creates `./veto/veto.config.yaml` and `./veto/rules/defaults.yaml`. The default local rules are strict and include deterministic denials for sensitive paths and destructive shell commands.
 
 ```yaml
 rules:
   - id: block-large-transfers
     name: Block transfers over $1,000
+    enabled: true
+    severity: high
     action: block
     tools: [transfer_funds]
     conditions:
       - field: arguments.amount
         operator: greater_than
         value: 1000
-
-  - id: require-approval-for-push
-    name: Require human approval before pushing to main
-    action: ask
-    tools: [git_push]
-    description: "Intercept any push targeting the main branch."
 ```
 
-Actions: `block` · `allow` · `warn` · `log` · `ask` (human-in-the-loop)
+Actions: `block`, `allow`, `warn`, `log`, `require_approval`.
 
-→ [Full TypeScript SDK docs](./packages/sdk/README.md) · [Python SDK docs](./packages/sdk-python/README.md)
+## Advanced API
 
-## Economic authorization
+`Veto.init()` and `.wrap()` remain supported for advanced/internal-facing integrations that need an explicit instance, `guard()` checks, cloud/self-host options, audit exports, or event hooks.
 
-For agents that spend money — trading bots, paid API calls, SaaS billing — Veto adds cost-aware policy enforcement.
+```ts
+import { Veto } from "veto-sdk";
 
-```yaml
-# veto.config.yaml
-extends: "@veto/economic-agent"
+const veto = await Veto.init({ configDir: "./veto", mode: "strict" });
+const safeTools = veto.wrap(tools);
+const decision = await veto.guard("transfer_funds", { amount: 1500 });
 ```
 
-```typescript
-const result = await veto.guard(
-  "purchase",
-  { item: "GPU" },
-  {
-    economic: {
-      cost: 42.5,
-      currency: "USD",
-      payer: "team-wallet",
-      protocol: "custom",
-    },
-  },
-);
-// result.decision: 'allow' | 'deny' | 'require_approval'
-// (YAML uses action: block/ask — guard() returns the resolved decision)
-```
+## Packages
 
-Built-in protocol connectors for x402 (HTTP 402), Stripe MPP, and Google AP2. Session budgets enforced locally; agent/user/global budgets via Veto Cloud.
+| Package                                         | Language    | Install                    | Purpose                                         |
+| ----------------------------------------------- | ----------- | -------------------------- | ----------------------------------------------- |
+| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | Policy runtime for agent tool calls             |
+| [`veto`](./packages/sdk-python)                 | Python      | `pip install veto`         | Python parity SDK with `protect()`              |
+| [`veto-cli`](./packages/cli)                    | TypeScript  | `npm install -g veto-cli`  | Init, test, scan, Studio, and policy operations |
+| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install -g veto-bash` | Native bash tool-call enforcement path          |
+| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Starter TypeScript app                          |
 
-[Economic Authorization Guide →](https://docs.veto.so/docs/guides/economic-authorization)
-
-## CLI + Studio
+## Self-host locally
 
 ```bash
-npx veto-cli@latest                        # launch interactive Veto Studio (TUI)
-npx veto-cli@latest policy generate \
-  --tool transfer_funds \
-  --prompt "block over $500 to unverified recipients"
-npx veto-cli@latest guard check \
-  --tool transfer_funds --args '{"amount": 600}' --json
-npx veto-cli@latest scan --fail-uncovered  # CI gate: exit 1 on unguarded tools
+docker compose up
+curl -s http://localhost:3001/v1/validate \
+  -H 'content-type: application/json' \
+  -d '{"toolName":"bash","arguments":{"command":"echo hello"}}'
 ```
 
-→ [Full CLI reference](./packages/cli/README.md)
+See [docs/self-hosting.md](./docs/self-hosting.md) for the public reviewer path and the local unauthenticated validation contract.
 
-## Bash runtime + MCP
+## BYOC / customer-plane boundary
 
-```bash
-npm install -g veto-bash
-mkdir -p "$HOME/.veto/bin"
-VETO_BASH_NATIVE="$(veto-bash native-path)"
-ln -sf "$VETO_BASH_NATIVE" "$HOME/.veto/bin/bash"
-export PATH="$HOME/.veto/bin:$PATH"
-export VETO_BASH_REAL_BASH=/bin/bash
-VETO_API_KEY=veto_... bash -c 'echo hello'
-veto-bash mcp init
-veto-bash mcp serve --veto-api-key "$VETO_API_KEY"
-```
+Veto BYOC runs in the customer plane. Public install artifacts are in [`helm/`](./helm), [`terraform-modules/`](./terraform-modules), [`cf-templates/`](./cf-templates), and [`cdk/`](./cdk). They are outbound-only and must not grant Plaw cross-account IAM or impersonation. Customer policy, decision rows, tool arguments, agent IDs, user IDs, Slack content, prompts, environment variables, and secrets do not cross to Plaw.
 
-`veto-bash` is now Rust-first: the native runtime handles bash interception, deterministic local evaluation, SWR cloud policy refresh, approval polling, audit spooling, and MCP stdio serving. Use `veto-bash native-path` once during setup, then shadow `bash` with that packaged native binary so warm executions stay fully native. Cached cloud policies that use unsupported features fall back to cloud `POST /v1/validate` instead of guessing. Nearby local projects still run through a narrower native YAML subset today, so `extends`-based or otherwise unsupported local configs should not be treated as universal automatic cloud fallback. Interactive shells still pass through to the real system `bash`.
+Allowed outbound control-plane checks are limited to license heartbeat and optional telemetry. The heartbeat schema is exactly six fields: `instance_uuid`, `license_id`, `decision_count_30d`, `sdk_version`, `operator_version`, `timestamp`.
 
-This PR does not add a full cross-platform prebuilt binary pipeline yet. The current package/build flow is honest about that: build on the target platform or install an artifact produced for the same platform/arch.
+Install docs:
 
-→ [Full `veto-bash` reference](./packages/bash/README.md)
+- [Kubernetes](./docs/install/k8s.md)
+- [AWS](./docs/install/aws.md)
+- [GCP](./docs/install/gcp.md)
+- [Azure](./docs/install/azure.md)
+- [Air-gapped](./docs/install/air-gapped.md)
+- [Verifying images](./docs/verifying-images.md)
 
 ## Why Veto
 
-- **Deterministic-first** — Static conditions run locally, zero latency, no API call. LLM validation only when you need semantic reasoning.
-- **Provider agnostic** — Works with OpenAI, Anthropic, Google, LangChain, Vercel AI SDK, and any custom tool-calling setup.
-- **Human-in-the-loop** — `ask` action routes sensitive decisions to an approval queue instead of auto-blocking.
-- **Audit trail** — Every decision logged with tool name, arguments, rule matched, and outcome. Exportable as JSON or CSV.
-- **Local-first** — No cloud required. Fully offline. Optional [Veto Cloud](https://veto.so) for team sync and dashboard.
-- **Rate limiting** — Per-rule sliding window rate limits. In-memory or Redis-backed for distributed deployments.
-- **Zero-config defaults** — `veto init` generates sensible baseline rules. Production-hardened in under 10 minutes.
-
-## Advanced features
-
-### Rate limiting
-
-Attach sliding window rate limits to any rule. Scopes: `global`, `agent`, `user`, `session`.
-
-```yaml
-rules:
-  - id: rate-limit-api
-    name: Limit API calls
-    action: block
-    tools: [call_api]
-    rate_limits:
-      - scope: user
-        max_calls: 10
-        window_seconds: 60
-```
-
-The default store is in-memory. For distributed deployments, plug in `RedisRateLimitStore`:
-
-```typescript
-import { RedisRateLimitStore } from "veto-sdk";
-const store = new RedisRateLimitStore(redisClient, "veto:rl:");
-```
-
-### Audit chain
-
-Every decision is appended to a tamper-evident hash chain. Each record's SHA-256 hash covers the previous hash plus the record's deterministic JSON serialization. Mutating any historical record invalidates all subsequent hashes.
-
-```typescript
-import { computeChainHash, GENESIS_HASH } from "veto-sdk";
-
-let prevHash = GENESIS_HASH;
-const hash = computeChainHash(prevHash, {
-  tool: "transfer_funds",
-  decision: "allow",
-});
-```
-
-Verify integrity from the CLI:
-
-```bash
-npx veto-cli audit verify
-```
-
-### Policy testing
-
-YAML fixture files validated against your policy with deterministic replay -- no LLM, no network.
-
-```yaml
-# ./veto/tests/transfers.yaml
-suite: Transfer rules
-tests:
-  - id: block-large-transfer
-    tool: transfer_funds
-    arguments: { amount: 5000 }
-    expect:
-      decision: block
-      rule_id: block-large-transfers
-```
-
-```bash
-npx veto-cli test              # run all fixtures
-npx veto-cli test --coverage   # show untested rule IDs
-```
-
-### SSE proxy
-
-Intercept OpenAI and Anthropic streaming responses, validate tool calls against policies before forwarding to the client.
-
-```bash
-npx veto-cli intercept --port 8080 --target https://api.openai.com
-```
-
-Point your application at `http://localhost:8080` instead of the provider URL. Supports auto-detection of OpenAI and Anthropic SSE formats.
-
-### OpenTelemetry
-
-Optional `@opentelemetry/api` peer dependency. When installed, Veto instruments guard checks with spans. When not installed, all tracing functions are no-ops -- zero overhead.
-
-### Webhooks
-
-Send decision events to external systems. Built-in formatters for Slack, PagerDuty, generic JSON, and CEF (ArcSight). Configure webhook endpoints per event type: `tool_call_blocked`, `approval_requested`, `rate_limit_exceeded`, and others.
-
-## skills.sh skill (coding agents)
-
-```bash
-npx skills add PlawIO/veto
-```
-
-Installs `veto-policy-runtime` — gives Claude Code, Cursor, and Windsurf safe, non-destructive policy operations without any SDK integration. Ideal for teams that want guardrails at the coding-agent level.
-
-## Real-world example: guarded MCP trading agent
-
-Veto also fits agent runtimes outside coding workflows. One practical pattern is a Polymarket MCP server where market reads stay open, mutating tools are policy-gated, and larger actions route to approval before execution.
-
-See the [Guarded Polymarket MCP guide](./docs/polymarket-mcp-guide.md) for the architecture and YAML rules, or the full reference implementation in [PlawIO/polymarket-cli-veto](https://github.com/PlawIO/polymarket-cli-veto).
-
-## Veto Cloud
-
-The OSS SDK runs entirely local. [Veto Cloud](https://veto.so) adds:
-
-- Natural language → policy YAML (no manual YAML writing)
-- Central policy sync across all team repos
-- Dashboard: decisions, blocked calls, pending approvals
-- Approval workflows for human-in-the-loop at scale
-- Rate limiting (in-memory + Redis)
-- Tamper-evident audit chain
-- OpenTelemetry tracing integration
-- SSO, audit export, compliance reporting
+- Deterministic local evaluation for policy rules that can be checked from tool arguments.
+- Provider-agnostic wrapping for any agent framework or custom tool runner.
+- Human approval and cost-aware governance for sensitive tool calls.
+- Local-first operation with optional self-hosted or cloud policy distribution.
+- Apache-2.0 licensed packages and public supply-chain verification artifacts.
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). On your first PR, a bot will ask you to sign the [CLA](./CLA.md) — takes 30 seconds, one comment.
-
-## Security
-
-Report vulnerabilities to [security@plaw.io](mailto:security@plaw.io). See [SECURITY.md](./SECURITY.md) for the full disclosure policy.
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Report vulnerabilities to [security@plaw.io](mailto:security@plaw.io).
 
 ## License
 

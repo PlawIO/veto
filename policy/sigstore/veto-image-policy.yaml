@@ -1,0 +1,87 @@
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: verify-veto-platform-images
+  annotations:
+    policy.sigstore.dev/description: >
+      Platform BYOC images are signed by PlawIO/veto-platform release-images and
+      require CycloneDX, SPDX, SLSA provenance, and OpenVEX attestations.
+spec:
+  images:
+    - glob: ghcr.io/plawio/veto-server*
+    - glob: ghcr.io/plawio/veto-operator*
+    - glob: ghcr.io/plawio/veto-dashboard*
+    - glob: ghcr.io/plawio/veto-frontend*
+    - glob: ghcr.io/plawio/veto-docs*
+  authorities:
+    - keyless:
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/heads/main
+      attestations:
+        - name: cyclonedx
+          predicateType: https://cyclonedx.org/bom
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://cyclonedx.org/bom"
+        - name: spdx
+          predicateType: https://spdx.dev/Document
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://spdx.dev/Document"
+        - name: slsaprovenance
+          predicateType: https://slsa.dev/provenance/v1
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://slsa.dev/provenance/v1"
+        - name: openvex
+          predicateType: https://openvex.dev/ns/v0.2.0
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://openvex.dev/ns/v0.2.0"
+---
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: verify-veto-public-images
+  annotations:
+    policy.sigstore.dev/description: >
+      Public-repo-only images are split from platform BYOC images so veto-server
+      is never verified against the wrong repository identity.
+spec:
+  images:
+    - glob: ghcr.io/plawio/veto-bash*
+  authorities:
+    - keyless:
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            subjectRegExp: https://github.com/PlawIO/veto/.github/workflows/.*@refs/(heads/master|tags/.*)
+      attestations:
+        - name: cyclonedx
+          predicateType: https://cyclonedx.org/bom
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://cyclonedx.org/bom"
+        - name: spdx
+          predicateType: https://spdx.dev/Document
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://spdx.dev/Document"
+        - name: slsaprovenance
+          predicateType: https://slsa.dev/provenance/v1
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://slsa.dev/provenance/v1"
+        - name: openvex
+          predicateType: https://openvex.dev/ns/v0.2.0
+          policy:
+            type: cue
+            data: |
+              predicateType: "https://openvex.dev/ns/v0.2.0"

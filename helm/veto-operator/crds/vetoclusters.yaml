@@ -1,0 +1,60 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vetoclusters.veto.plaw.io
+spec:
+  group: veto.plaw.io
+  scope: Namespaced
+  names:
+    plural: vetoclusters
+    singular: vetocluster
+    kind: VetoCluster
+    shortNames: [veto]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [licenseRef, server, dashboard]
+              properties:
+                licenseRef:
+                  type: object
+                  required: [secretName, key]
+                  properties:
+                    secretName: { type: string }
+                    key: { type: string }
+                server:
+                  type: object
+                  properties:
+                    replicas: { type: integer, minimum: 1 }
+                    image: { type: string }
+                    storageDriver: { type: string, enum: [sqlite, postgres] }
+                dashboard:
+                  type: object
+                  properties:
+                    replicas: { type: integer, minimum: 0 }
+                    image: { type: string }
+                telemetry:
+                  type: object
+                  properties:
+                    enabled: { type: boolean }
+                outbound:
+                  type: object
+                  description: Outbound-only allowlist. Customer policy, decisions, tool args, identities, prompts, env vars, and secrets must stay in the customer plane.
+                  properties:
+                    allowedHosts:
+                      type: array
+                      items: { type: string }
+            status:
+              type: object
+              properties:
+                phase: { type: string }
+                serverUrl: { type: string }
+      subresources:
+        status: {}

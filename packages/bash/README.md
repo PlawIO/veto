@@ -3,7 +3,19 @@
 [![npm](https://img.shields.io/npm/v/veto-bash?color=000000)](https://www.npmjs.com/package/veto-bash)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
-`veto-bash` is a Rust-first guarded bash runtime with MCP support. The npm package in @packages/bash ships the native runtime plus a small Node helper command; the hot path lives in the native crate at @crates/veto-bash.
+`veto-bash` is a Rust-first policy runtime for bash tool calls with MCP support. The npm package in @packages/bash ships the native runtime plus a small Node helper command; the hot path lives in the native crate at @crates/veto-bash.
+
+## First integration path
+
+For application tools, start with the SDK public entrypoint:
+
+```ts
+import { protect } from "veto-sdk";
+
+const safeTools = await protect(tools);
+```
+
+Use `veto-bash` when the tool being governed is a shell command or a bash MCP server. `Veto.init()` and `.wrap()` are advanced SDK APIs.
 
 ## Architecture
 

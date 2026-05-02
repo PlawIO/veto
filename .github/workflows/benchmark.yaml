@@ -1,0 +1,45 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy-eval:
+    name: Policy eval latency
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SDK
+        run: pnpm --filter veto-sdk build
+
+      - name: Run PR benchmarks and gate p99 regressions
+        run: node benchmark/run.mjs --mode=pr --gate --baseline-dir=benchmark/baselines --output=benchmark/results/pr.json
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: veto-policy-eval-benchmark
+          path: benchmark/results/pr.json

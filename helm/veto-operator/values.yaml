@@ -1,0 +1,55 @@
+license: ""
+
+images:
+  operator:
+    repository: ghcr.io/plawio/veto-operator
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    pullPolicy: IfNotPresent
+  server:
+    repository: ghcr.io/plawio/veto-server
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    pullPolicy: IfNotPresent
+  dashboard:
+    repository: ghcr.io/plawio/veto-dashboard
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    pullPolicy: IfNotPresent
+
+replicaCount:
+  operator: 1
+  server: 2
+  dashboard: 1
+
+storage:
+  driver: sqlite
+  sqlitePath: /var/lib/veto/veto.sqlite
+  size: 10Gi
+
+telemetry:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  kubeApiCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  fqdn:
+    enabled: true
+    provider: cilium
+    allowedNames:
+      - ghcr.io
+      - license.veto.so
+      - telemetry.veto.so
+
+service:
+  server:
+    type: ClusterIP
+    port: 3001
+  dashboard:
+    type: ClusterIP
+    port: 3000
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

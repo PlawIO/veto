@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/veto-cli?color=000000)](https://www.npmjs.com/package/veto-cli)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
-The canonical Veto CLI. Launch the interactive Veto Studio TUI or run headless policy operations in CI.
+The canonical Veto CLI. Initialize local policy, run deterministic checks, launch Studio, and manage headless policy operations in CI.
 
 ## Install
 
@@ -16,6 +16,23 @@ Or run without installing:
 ```bash
 npx veto-cli@latest
 ```
+
+## First integration path
+
+```ts
+import { protect } from "veto-sdk";
+
+const safeTools = await protect(tools);
+```
+
+Use the CLI to add local blocking rules when you are ready:
+
+```bash
+npx veto init
+npx veto guard check --tool bash --args '{"command":"rm -rf /tmp/demo"}' --json
+```
+
+`Veto.init()` and `.wrap()` are advanced SDK APIs; new app integrations should start with `protect(tools)`.
 
 ## Studio (interactive TUI)
 

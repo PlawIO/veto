@@ -197,6 +197,7 @@ class Veto:
     """
 
     _BUILT_IN_POLICY_PACK_FILE_NAMES: dict[str, str] = {
+        "@veto/safe-defaults": "safe-defaults.yaml",
         "@veto/coding-agent": "coding-agent.yaml",
         "@veto/financial": "financial.yaml",
         "@veto/browser-automation": "browser-automation.yaml",

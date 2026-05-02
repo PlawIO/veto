@@ -1,0 +1,4 @@
+# Helm templates contain Go template directives that Prettier cannot parse.
+helm/**/templates/*.yaml
+helm/**/templates/*.yml
+helm/**/templates/*.tpl

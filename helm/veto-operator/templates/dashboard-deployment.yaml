@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "veto.fullname" . }}-dashboard
+  labels:
+    app.kubernetes.io/component: dashboard
+    {{- include "veto.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.dashboard }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: dashboard
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: dashboard
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: dashboard
+          image: {{ include "veto.image" .Values.images.dashboard | quote }}
+          imagePullPolicy: {{ .Values.images.dashboard.pullPolicy }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: SELF_HOSTED
+              value: "true"
+            - name: VETO_API_URL
+              value: http://{{ include "veto.fullname" . }}-server:{{ .Values.service.server.port }}
+            - name: TELEMETRY_ENABLED
+              value: {{ .Values.telemetry.enabled | quote }}

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: veto-operator
+description: Veto BYOC operator, server, dashboard, and CRDs for customer-plane deployments
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://veto.so
+sources:
+  - https://github.com/PlawIO/veto
+annotations:
+  artifacthub.io/license: Apache-2.0

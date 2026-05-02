@@ -1,0 +1,20 @@
+{
+  "id": "hundred-rule-local",
+  "workload": "100-rule local eval from merged packs",
+  "source": "measured",
+  "source_command": "node benchmark/run.mjs --mode=pr --include-server --gate --baseline-dir=benchmark/baselines --output=benchmark/results/baseline.json",
+  "generated_at": "2026-05-02T12:59:55.075Z",
+  "hardware": {
+    "runner": "local",
+    "os": "linux",
+    "arch": "x64",
+    "node": "v24.13.0"
+  },
+  "iterations": 50000,
+  "p50_ms": 0.014130000000022847,
+  "p95_ms": 0.01839999999998554,
+  "p99_ms": 0.024259999999912907,
+  "min_ms": 0.01251999999999498,
+  "max_ms": 0.2064399999999864,
+  "threshold_p99_ms": 0.5
+}

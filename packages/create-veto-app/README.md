@@ -1,6 +1,6 @@
 # create-veto-app
 
-Scaffold a minimal TypeScript app guarded by Veto.
+Scaffold a minimal TypeScript app that starts with `protect(tools)`.
 
 ```bash
 npm create veto-app -- my-agent --template node-ts --pack soc2-lite --yes
@@ -23,4 +23,12 @@ create-veto-app <project-dir> [--template node-ts] [--pack <name>] [--cloud] [--
 - `--yes`: non-interactive mode. A project directory is required.
 - `--no-install`: accepted for compatibility; installs are not run by default.
 
-Starter compliance packs are guardrails operators must review and tune. They do not make an app compliant.
+Starter compliance packs are policy templates operators must review and tune. They do not make an app compliant.
+
+Generated apps use the public SDK entrypoint first:
+
+```ts
+import { protect } from "veto-sdk";
+
+const safeTools = await protect(tools);
+```

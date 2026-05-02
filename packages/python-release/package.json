@@ -3,5 +3,5 @@
   "version": "0.6.0",
   "private": true,
   "description": "Internal changesets marker package for Python SDK releases",
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

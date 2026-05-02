@@ -77,14 +77,12 @@ app.post("/approvals", async (req, res) => {
 app.listen(8787);
 ```
 
-### 3) Wrap Tool and Run
+### 3) Protect Tool and Run
 
 ```ts
-import { Veto } from "veto-sdk";
+import { protect } from "veto-sdk";
 
-const veto = await Veto.init();
-
-const tools = veto.wrap([
+const tools = await protect([
   {
     name: "bank_transfer",
     inputSchema: {
@@ -104,9 +102,14 @@ const tools = veto.wrap([
 await tools[0].handler({ amount: 15000, recipient: "ACME Treasury" });
 ```
 
-### 4) Export Decision History
+### 4) Advanced: Explicit Instance for Decision Export
+
+Use `Veto.init()` when you need an explicit runtime instance for exports or direct `guard()` calls.
 
 ```ts
+import { Veto } from "veto-sdk";
+
+const veto = await Veto.init();
 const jsonAudit = veto.exportDecisions("json");
 const csvAudit = veto.exportDecisions("csv");
 
@@ -129,7 +132,11 @@ Each record includes:
 Python SDK supports approval flow in cloud mode and uses the same decision export surface.
 
 ```python
-from veto import Veto, VetoOptions
+from veto import protect, Veto, VetoOptions
+
+safe = await protect(tools)
+
+# Advanced: explicit instance for cloud approval callbacks and exports.
 
 def on_approval_required(context, approval_id):
     print(f"Approval needed: {approval_id} for tool={context.tool_name}")
