@@ -64,7 +64,7 @@ Baselines live in `benchmark/baselines/*.json`. They are actual measured Veto ha
 
 | Runtime | Workload                              | Iterations |        p50 |        p95 |        p99 | p99 threshold | Source                                                                        |
 | ------- | ------------------------------------- | ---------: | ---------: | ---------: | ---------: | ------------: | ----------------------------------------------------------------------------- |
-| Veto    | single-rule local eval                |     50,000 | 0.000241ms | 0.001062ms | 0.001963ms |        0.05ms | GitHub Actions PR-mode, `benchmark/baselines/single-rule-local.json`          |
+| Veto    | single-rule local eval                |     50,000 | 0.000260ms | 0.001092ms | 0.002594ms |        0.05ms | GitHub Actions PR-mode, `benchmark/baselines/single-rule-local.json`          |
 | Veto    | 100-rule local eval from merged packs |     50,000 | 0.022154ms | 0.023194ms | 0.044848ms |         0.5ms | GitHub Actions PR-mode, `benchmark/baselines/hundred-rule-local.json`         |
 | Veto    | localhost PDP server eval             |        250 | 0.402051ms | 0.841651ms | 2.092263ms |          30ms | local `benchmark/pdp-fixture.mjs`, `benchmark/baselines/server-loopback.json` |
 

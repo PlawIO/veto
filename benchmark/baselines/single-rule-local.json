@@ -2,7 +2,7 @@
   "id": "single-rule-local",
   "workload": "single-rule local eval",
   "source": "measured",
-  "source_run": "GitHub Actions Policy eval latency failure log from PR #208",
+  "source_run": "GitHub Actions Policy eval latency second failure log from PR #208",
   "source_command": "node benchmark/run.mjs --mode=pr --gate --baseline-dir=benchmark/baselines --output=benchmark/results/pr.json",
   "hardware": {
     "runner": "github-actions",
@@ -11,8 +11,8 @@
     "node": "20.x via actions/setup-node@v4"
   },
   "iterations": 50000,
-  "p50_ms": 0.000241,
-  "p95_ms": 0.001062,
-  "p99_ms": 0.001963,
+  "p50_ms": 0.00026,
+  "p95_ms": 0.001092,
+  "p99_ms": 0.002594,
   "threshold_p99_ms": 0.05
 }
