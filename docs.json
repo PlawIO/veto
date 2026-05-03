@@ -1,0 +1,74 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Veto",
+  "colors": {
+    "primary": "#000000"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Overview",
+        "pages": ["README", "CONTRIBUTING", "BENCHMARKS"]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "docs/hitl-guide",
+          "docs/self-hosting",
+          "docs/polymarket-mcp-guide"
+        ]
+      },
+      {
+        "group": "Install",
+        "pages": [
+          "docs/install/k8s",
+          "docs/install/aws",
+          "docs/install/gcp",
+          "docs/install/azure",
+          "docs/install/air-gapped"
+        ]
+      },
+      {
+        "group": "Supply chain",
+        "pages": ["docs/verifying-images"]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/PlawIO/veto"
+      },
+      {
+        "label": "veto-sdk",
+        "href": "https://www.npmjs.com/package/veto-sdk"
+      },
+      {
+        "label": "veto-cli",
+        "href": "https://www.npmjs.com/package/veto-cli"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/PlawIO/veto"
+    },
+    "links": [
+      {
+        "header": "Packages",
+        "items": [
+          {
+            "label": "veto-sdk",
+            "href": "https://www.npmjs.com/package/veto-sdk"
+          },
+          {
+            "label": "veto-cli",
+            "href": "https://www.npmjs.com/package/veto-cli"
+          }
+        ]
+      }
+    ]
+  }
+}

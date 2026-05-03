@@ -1,5 +1,13 @@
 # veto-sdk
 
+## 2.8.2
+
+### Patch Changes
+
+- [#208](https://github.com/PlawIO/veto/pull/208) [`1723ee1`](https://github.com/PlawIO/veto/commit/1723ee1b9c1d53af62952ae2d1b705f9ead1ddfe) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Normalize first-party package metadata to Apache-2.0 and update package descriptions toward policy-runtime/tool-call governance wording.
+
+- [#208](https://github.com/PlawIO/veto/pull/208) [`1723ee1`](https://github.com/PlawIO/veto/commit/1723ee1b9c1d53af62952ae2d1b705f9ead1ddfe) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Make `protect(tools)` the protect-first onboarding path and use the built-in `@veto/safe-defaults` observe-mode pack when no local policy or explicit policy source is configured.
+
 ## 2.8.1
 
 ### Patch Changes
