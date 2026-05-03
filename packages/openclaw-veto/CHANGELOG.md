@@ -1,5 +1,14 @@
 # openclaw-veto
 
+## 0.2.7
+
+### Patch Changes
+
+- [#208](https://github.com/PlawIO/veto/pull/208) [`1723ee1`](https://github.com/PlawIO/veto/commit/1723ee1b9c1d53af62952ae2d1b705f9ead1ddfe) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Normalize first-party package metadata to Apache-2.0 and update package descriptions toward policy-runtime/tool-call governance wording.
+
+- Updated dependencies [[`1723ee1`](https://github.com/PlawIO/veto/commit/1723ee1b9c1d53af62952ae2d1b705f9ead1ddfe), [`1723ee1`](https://github.com/PlawIO/veto/commit/1723ee1b9c1d53af62952ae2d1b705f9ead1ddfe)]:
+  - veto-sdk@2.8.2
+
 ## 0.2.6
 
 ### Patch Changes

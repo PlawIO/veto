@@ -1,6 +1,6 @@
 {
   "name": "@veto/python-release",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "Internal changesets marker package for Python SDK releases",
   "license": "Apache-2.0"

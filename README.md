@@ -16,7 +16,7 @@ Checked-in PR-mode baselines are measured on GitHub Actions runner output, not l
 | Runtime | Workload                           | Iterations |          p50 |           p95 |           p99 | p99 threshold | Source                                              |
 | ------- | ---------------------------------- | ---------: | -----------: | ------------: | ------------: | ------------: | --------------------------------------------------- |
 | Veto    | single-rule local eval             |     50,000 |   0.000260ms |    0.001092ms |    0.002594ms |        0.05ms | measured on GitHub Actions PR-mode, PR #208 CI log  |
-| Veto    | 100-rule merged packs              |     50,000 |   0.027471ms |    0.028653ms |    0.052098ms |         0.5ms | measured on GitHub Actions PR-mode, PR #213 CI log  |
+| Veto    | 100-rule merged packs              |     50,000 |   0.027291ms |    0.037470ms |    0.057136ms |         0.5ms | measured on GitHub Actions PR-mode, PR #212 CI log  |
 | Veto    | localhost PDP server eval          |        250 |   0.402051ms |    0.841651ms |    2.092263ms |          30ms | local loopback fixture baseline; not run in PR mode |
 | AGT     | policy eval latency per rule       |  published | 0.012ms/rule | not published | not published |           n/a | source: published, not reproduced                   |
 | AGT     | throughput at 50 concurrent agents |  published |  35K ops/sec | not published | not published |           n/a | source: published, not reproduced                   |

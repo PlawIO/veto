@@ -2,7 +2,7 @@
   "id": "hundred-rule-local",
   "workload": "100-rule local eval from merged packs",
   "source": "measured",
-  "source_run": "GitHub Actions Policy eval latency failure log from PR #213 (run 25276590100, job 74107347118)",
+  "source_run": "GitHub Actions Policy eval latency failure log from PR #212",
   "source_command": "node benchmark/run.mjs --mode=pr --gate --baseline-dir=benchmark/baselines --output=benchmark/results/pr.json",
   "hardware": {
     "runner": "github-actions",
@@ -11,8 +11,8 @@
     "node": "20.x via actions/setup-node@v4"
   },
   "iterations": 50000,
-  "p50_ms": 0.027471,
-  "p95_ms": 0.028653,
-  "p99_ms": 0.052098,
+  "p50_ms": 0.027291,
+  "p95_ms": 0.03747,
+  "p99_ms": 0.057136,
   "threshold_p99_ms": 0.5
 }
