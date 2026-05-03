@@ -93,6 +93,44 @@ describe('install cli commands', () => {
     expect(readFileSync(hookPath, 'utf-8')).toContain('hookSpecificOutput');
   });
 
+  it.each([
+    ['wrong type', { type: 'shell', command: '$CLAUDE_PROJECT_DIR/.claude/hooks/veto-hook.mjs' }],
+    ['missing type', { command: '$CLAUDE_PROJECT_DIR/.claude/hooks/veto-hook.mjs' }],
+  ])('normalizes existing Claude Veto hook with %s idempotently', (_caseName, hookConfig) => {
+    const projectDir = tmpDir(`claude-normalize-${_caseName.replace(/\s+/g, '-')}`);
+    const settingsPath = join(projectDir, '.claude', 'settings.json');
+    mkdirSync(join(projectDir, '.claude'), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: '',
+            hooks: [hookConfig],
+          },
+        ],
+      },
+    }, null, 2), 'utf-8');
+
+    const first = runInstallCommand({ target: 'claude-code', directory: projectDir });
+    expect(first.ok).toBe(true);
+    expect(first.data?.settingsUpdated).toBe(true);
+
+    const settings = readJson(settingsPath) as {
+      hooks?: { PreToolUse?: Array<{ hooks?: Array<{ type?: string; command?: string }> }> };
+    };
+    const vetoHooks = (settings.hooks?.PreToolUse ?? [])
+      .flatMap((block) => block.hooks ?? [])
+      .filter((hook) => hook.command === '$CLAUDE_PROJECT_DIR/.claude/hooks/veto-hook.mjs');
+    expect(vetoHooks).toHaveLength(1);
+    expect(vetoHooks[0]?.type).toBe('command');
+
+    const afterFirst = readFileSync(settingsPath, 'utf-8');
+    const second = runInstallCommand({ target: 'claude-code', directory: projectDir });
+    expect(second.ok).toBe(true);
+    expect(second.data?.settingsUpdated).toBe(false);
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(afterFirst);
+  });
+
   it('writes Cursor MCP config with proxy binary and preserves unrelated servers', () => {
     const projectDir = tmpDir('cursor');
     const outputPath = join(projectDir, '.cursor', 'mcp.json');

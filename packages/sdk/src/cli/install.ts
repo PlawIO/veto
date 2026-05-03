@@ -516,8 +516,12 @@ function upsertTomlServerSection(content: string, serverName: string, section: s
     lines.push(...sectionLines);
   }
 
+  while (lines.length > 0 && lines.at(-1)?.trim() === '') {
+    lines.pop();
+  }
+
   return {
-    content: lines.join('\n').replace(/\n*$/, '') + '\n',
+    content: lines.join('\n') + '\n',
     serverCreated: existing === null,
   };
 }
@@ -628,9 +632,10 @@ function mergeClaudeSettings(settingsPath: string): ClaudeSettingsMergeResult {
       found = true;
       if (hook.command !== CLAUDE_HOOK_COMMAND) {
         hook.command = CLAUDE_HOOK_COMMAND;
-        if (hook.type !== 'command') {
-          hook.type = 'command';
-        }
+        changed = true;
+      }
+      if (hook.type !== 'command') {
+        hook.type = 'command';
         changed = true;
       }
     }
