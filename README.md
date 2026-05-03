@@ -2,9 +2,9 @@
 
 Veto is the policy runtime for AI agent tool calls — write deny rules in plain English, enforce them deterministically, in 5 lines of code.
 
+[![npm](https://img.shields.io/npm/v/veto?label=veto&color=000000)](https://www.npmjs.com/package/veto)
 [![npm](https://img.shields.io/npm/v/veto-sdk?label=veto-sdk&color=000000)](https://www.npmjs.com/package/veto-sdk)
-[![npm](https://img.shields.io/npm/v/veto-cli?label=veto-cli&color=000000)](https://www.npmjs.com/package/veto-cli)
-[![PyPI](https://img.shields.io/pypi/v/veto?label=veto&color=000000)](https://pypi.org/project/veto)
+[![PyPI](https://img.shields.io/pypi/v/veto?label=python%20veto&color=000000)](https://pypi.org/project/veto)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Veto sits between an agent and the tools it can execute. It evaluates tool name + arguments against deterministic policy, then allows, denies, warns, logs, or routes to approval before your handler runs. It governs tool calls, not prompts.
@@ -37,10 +37,12 @@ Pass `safeTools` to LangChain, Vercel AI SDK, OpenAI Agents, MCP adapters, or yo
 For a blocking local policy in under a minute:
 
 ```bash
-npm i veto-sdk openai
+npm install veto-sdk
 npx veto init
 node examples/60-second-denied-call/denied-call.mjs
 ```
+
+This path is local-only: no provider SDK or API key is required.
 
 ## TypeScript
 
@@ -106,13 +108,14 @@ const decision = await veto.guard("transfer_funds", { amount: 1500 });
 
 ## Packages
 
-| Package                                         | Language    | Install                    | Purpose                                         |
-| ----------------------------------------------- | ----------- | -------------------------- | ----------------------------------------------- |
-| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | Policy runtime for agent tool calls             |
-| [`veto`](./packages/sdk-python)                 | Python      | `pip install veto`         | Python parity SDK with `protect()`              |
-| [`veto-cli`](./packages/cli)                    | TypeScript  | `npm install -g veto-cli`  | Init, test, scan, Studio, and policy operations |
-| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install -g veto-bash` | Native bash tool-call enforcement path          |
-| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Starter TypeScript app                          |
+| Package                                         | Language    | Install                    | Purpose                                      |
+| ----------------------------------------------- | ----------- | -------------------------- | -------------------------------------------- |
+| [`veto`](./packages/veto)                       | TypeScript  | `npx veto init`            | Canonical CLI package behind `npx veto init` |
+| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | Policy runtime for agent tool calls          |
+| [`veto` (Python)](./packages/sdk-python)        | Python      | `pip install veto`         | Python parity SDK with `protect()`           |
+| [`veto-cli`](./packages/cli)                    | TypeScript  | `npx veto-cli@latest`      | Compatibility CLI package exposing `veto`    |
+| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install -g veto-bash` | Native bash tool-call enforcement path       |
+| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Starter TypeScript app                       |
 
 ## Self-host locally
 
@@ -123,7 +126,7 @@ curl -s http://localhost:3001/v1/validate \
   -d '{"toolName":"bash","arguments":{"command":"echo hello"}}'
 ```
 
-See [docs/self-hosting.md](./docs/self-hosting.md) for the public reviewer path and the local unauthenticated validation contract.
+See [docs/self-hosting.md](./docs/self-hosting.md) for the public reviewer path, fixed `localhost:3001` compose mapping, disabled-by-default outbound checks, and the local unauthenticated validation contract.
 
 ## BYOC / customer-plane boundary
 

@@ -22,7 +22,7 @@ function setExplicitCliVersion(): void {
       process.env.VETO_CLI_VERSION = parsed.version.trim();
     }
   } catch {
-    // Ignore invalid package metadata and let runner resolve version normally.
+    return;
   }
 }
 

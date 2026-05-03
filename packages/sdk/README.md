@@ -25,12 +25,12 @@ const agent = createAgent({ tools: safeTools });
 ## 60-second denied call
 
 ```bash
-npm i veto-sdk openai
+npm install veto-sdk
 npx veto init
 node examples/60-second-denied-call/denied-call.mjs
 ```
 
-`npx veto init` creates blocking local defaults in `veto/rules/defaults.yaml`, so the example deterministically denies `bash` with `rm -rf` before the handler runs.
+`npx veto init` creates blocking local defaults in `veto/rules/defaults.yaml`, so the example deterministically denies `bash` with `rm -rf` before the handler runs. No provider SDK or API key is required.
 
 ## Python parity
 
@@ -46,6 +46,8 @@ agent = create_agent(tools=safe)
 ```bash
 npx veto init
 ```
+
+The canonical npm package for `npx veto` is `veto`. The `veto-cli` and `veto-sdk` bins remain compatibility paths for existing users.
 
 ```yaml
 rules:

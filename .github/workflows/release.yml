@@ -161,6 +161,7 @@ jobs:
       - name: Publish npm packages
         run: |
           pnpm --filter veto-sdk publish --no-git-checks --access public || true
+          pnpm --filter veto publish --no-git-checks --access public || true
           pnpm --filter veto-cli publish --no-git-checks --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

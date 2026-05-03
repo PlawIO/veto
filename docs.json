@@ -46,8 +46,8 @@
         "href": "https://www.npmjs.com/package/veto-sdk"
       },
       {
-        "label": "veto-cli",
-        "href": "https://www.npmjs.com/package/veto-cli"
+        "label": "veto",
+        "href": "https://www.npmjs.com/package/veto"
       }
     ]
   },
@@ -64,8 +64,8 @@
             "href": "https://www.npmjs.com/package/veto-sdk"
           },
           {
-            "label": "veto-cli",
-            "href": "https://www.npmjs.com/package/veto-cli"
+            "label": "veto",
+            "href": "https://www.npmjs.com/package/veto"
           }
         ]
       }
