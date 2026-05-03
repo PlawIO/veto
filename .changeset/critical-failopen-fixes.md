@@ -1,6 +1,6 @@
 ---
 "veto-sdk": patch
-"veto": patch
+"@veto/python-release": patch
 ---
 
 Close two critical fail-open patterns surfaced by the audit.

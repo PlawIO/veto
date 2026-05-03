@@ -1,6 +1,6 @@
 ---
 "veto-sdk": patch
-"veto": patch
+"@veto/python-release": patch
 ---
 
 Cross-SDK regex parity + small cleanups.
