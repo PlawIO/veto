@@ -44,6 +44,15 @@ node examples/60-second-denied-call/denied-call.mjs
 
 This path is local-only: no provider SDK or API key is required.
 
+Install Veto into developer tools and MCP clients:
+
+```bash
+npx veto install claude-code
+npx veto install cursor
+npx veto install codex
+veto-mcp-proxy --config ./veto/mcp.config.yaml
+```
+
 ## TypeScript
 
 ```bash

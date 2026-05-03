@@ -29,6 +29,7 @@ import {
   runPolicyGenerateCommand,
 } from './headless.js';
 import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } from './agent.js';
+import { formatInstallResult, runInstallCommand } from './install.js';
 import { runMcpConnectCommand, runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
 import { startProxyServer } from '../proxy/server.js';
 
@@ -38,7 +39,7 @@ const VALID_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'openrouter'])
 const VALID_RENDERERS = new Set(['auto', 'ink', 'opentui', 'ansi']);
 const VALID_THEMES = new Set(['veto', 'claude', 'high-contrast']);
 
-interface ParsedArgs {
+export interface ParsedArgs {
   command: string;
   positionals: string[];
   flags: Record<string, boolean>;
@@ -62,10 +63,11 @@ Canonical Commands:
   cloud org use <id>
   cloud project use <id>
   cloud logout
-  mcp connect [--output <path>] [--config <path>] [--cloud] [--json]
+  mcp connect [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]
   mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
   mcp doctor [--config <path>] [--json]
   mcp init [--output <path>] [--json]
+  install <claude-code|cursor|codex> [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json] [--force]
   doctor
 
 Core Commands:
@@ -115,6 +117,9 @@ Examples:
   veto mcp connect --cloud
   veto mcp doctor --json
   veto mcp serve --config ./veto/mcp.config.yaml
+  veto install claude-code
+  veto install cursor
+  veto install codex
   veto replay --policy ./veto/ --log calls.jsonl
   veto replay --policy financial.yaml --log calls.jsonl --diff
   veto replay --policy ./veto/ --log calls.jsonl --format json
@@ -131,7 +136,7 @@ function printVersion(): void {
   console.log(`veto v${VERSION}`);
 }
 
-function parseArgs(args: string[]): ParsedArgs {
+export function parseArgs(args: string[]): ParsedArgs {
   const flags: Record<string, boolean> = {};
   const values: Record<string, string> = {};
   const positionals: string[] = [];
@@ -172,6 +177,7 @@ function parseArgs(args: string[]): ParsedArgs {
     'api-key',
     'policy-server',
     'timeout-ms',
+    'server-name',
     'port',
     'max-buffer',
   ]);
@@ -628,6 +634,7 @@ async function runMcpCommand(
       outputPath: values.output,
       configPath: values.config,
       cloud: flags.cloud ?? false,
+      serverName: values['server-name'],
     });
     printHeadlessResult(result, asJson);
     return result.ok ? 0 : 1;
@@ -651,7 +658,7 @@ async function runMcpCommand(
 
   if (subCommand === 'help') {
     console.log('Usage:');
-    console.log('  veto mcp connect [--output <path>] [--config <path>] [--cloud] [--json]');
+    console.log('  veto mcp connect [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]');
     console.log('  veto mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
     console.log('  veto mcp doctor [--config <path>] [--json]');
     console.log('  veto mcp init [--output <path>] [--json]');
@@ -659,6 +666,50 @@ async function runMcpCommand(
   }
 
   throw new Error(`Unknown mcp command: ${subCommand}`);
+}
+
+async function runInstall(
+  positionals: string[],
+  flags: Record<string, boolean>,
+  values: Record<string, string>,
+): Promise<number> {
+  const target = positionals[0] ?? 'help';
+  const asJson = flags.json ?? false;
+
+  if (target === 'help') {
+    console.log('Usage:');
+    console.log('  veto install claude-code [--directory <path>] [--force] [--json]');
+    console.log('  veto install cursor [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]');
+    console.log('  veto install codex [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--json]');
+    return 0;
+  }
+
+  if (positionals.length > 1) {
+    throw new Error('install accepts exactly one target: claude-code, cursor, or codex.');
+  }
+
+  const result = runInstallCommand({
+    target,
+    directory: values.directory,
+    outputPath: values.output,
+    configPath: values.config,
+    serverName: values['server-name'],
+    cloud: flags.cloud ?? false,
+    force: flags.force ?? false,
+  });
+
+  if (asJson) {
+    printHeadlessResult(result, true);
+  } else {
+    const output = formatInstallResult(result);
+    if (result.ok) {
+      console.log(output);
+    } else {
+      console.error(output);
+    }
+  }
+
+  return result.ok ? 0 : 1;
 }
 
 async function runRunTests(
@@ -901,6 +952,8 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return await runDoctor(flags, values);
     case 'mcp':
       return await runMcpCommand(positionals, flags, values);
+    case 'install':
+      return await runInstall(positionals, flags, values);
     case 'init': {
       const result = await init({
         directory: values.directory,

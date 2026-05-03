@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "veto": "./dist/cli/bin.js"
+    "veto": "./dist/cli/bin.js",
+    "veto-mcp-proxy": "./dist/cli/mcp-proxy-bin.js"
   },
   "scripts": {
     "build": "tsc",
