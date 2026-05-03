@@ -3,7 +3,7 @@
 Paste this after installing the SDK and creating local defaults:
 
 ```bash
-npm i veto-sdk openai
+npm install veto-sdk
 npx veto init
 node examples/60-second-denied-call/denied-call.mjs
 ```
@@ -15,4 +15,4 @@ import { protect } from "veto-sdk";
 const safeTools = await protect(tools);
 ```
 
-`npx veto init` creates strict local rules. The `bash` tool call with `rm -rf` is denied before the handler runs.
+`npx veto init` creates strict local rules. The `bash` tool call with `rm -rf` is denied before the handler runs. No provider SDK or API key is required.

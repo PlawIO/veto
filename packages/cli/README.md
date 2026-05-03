@@ -3,18 +3,24 @@
 [![npm](https://img.shields.io/npm/v/veto-cli?color=000000)](https://www.npmjs.com/package/veto-cli)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
-The canonical Veto CLI. Initialize local policy, run deterministic checks, launch Studio, and manage headless policy operations in CI.
+Compatibility Veto CLI package. The canonical npm CLI package is `veto`; it ships the same `veto` bin and is the package behind `npx veto init`.
 
 ## Install
 
 ```bash
-npm install -g veto-cli
+npm install -g veto
 ```
 
 Or run without installing:
 
 ```bash
-npx veto-cli@latest
+npx veto@latest init
+```
+
+Existing `veto-cli` installs continue to work as a compatibility path:
+
+```bash
+npx veto-cli@latest init
 ```
 
 ## First integration path
@@ -32,7 +38,7 @@ npx veto init
 npx veto guard check --tool bash --args '{"command":"rm -rf /tmp/demo"}' --json
 ```
 
-`Veto.init()` and `.wrap()` are advanced SDK APIs; new app integrations should start with `protect(tools)`.
+`Veto.init()` and `.wrap()` are advanced/internal-facing SDK APIs; new app integrations should start with `protect(tools)`.
 
 ## Studio (interactive TUI)
 
@@ -377,11 +383,12 @@ veto version               # show version
 
 ## Compatibility
 
-`veto-sdk` still exposes the `veto` bin for legacy compatibility. `veto-cli` is the canonical package.
+`veto` is the canonical npm package. `veto-cli` and `veto-sdk` still expose the `veto` bin for existing users.
 
 ```bash
-npx veto-cli@latest   # canonical
-npx veto-sdk@latest   # legacy (still works)
+npx veto@latest init      # canonical
+npx veto-cli@latest init  # compatibility
+npx veto-sdk@latest init  # compatibility
 ```
 
 ## License
