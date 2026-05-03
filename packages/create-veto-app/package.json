@@ -1,6 +1,6 @@
 {
   "name": "create-veto-app",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Scaffold a minimal Veto TypeScript agent project",
   "type": "module",
   "bin": {
