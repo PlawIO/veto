@@ -465,8 +465,24 @@ async def _initialize_veto(
                     on_approval_required=options.get("on_approval_required"),
                 )
             )
-    except Exception:
-        instance = _create_allow_all_instance(options)
+    except Exception as init_error:
+        # By default, fail LOUD — silently degrading a security tool to
+        # allow-all on a config typo or transient network blip is the
+        # worst class of misbehaviour. Re-raise so the caller sees what
+        # broke. Opt in to the legacy degrade-to-allow-all behaviour with
+        # `protect(safe_fallback=True)` — it now emits an error-level
+        # banner so it can't be missed.
+        if options.get("safe_fallback"):
+            print(
+                "[veto] WARNING: Veto initialization failed — falling back "
+                "to ALLOW-ALL because safe_fallback=True was set. Every "
+                "tool call will be permitted with no policy enforcement. "
+                f"Original error: {type(init_error).__name__}: {init_error}",
+                file=sys.stderr,
+            )
+            instance = _create_allow_all_instance(options)
+        else:
+            raise
 
     _instance_cache[cache_key] = instance
     return instance, source, inline_rules, packs, False

@@ -4,7 +4,6 @@
 "veto-bash": patch
 "create-veto-app": patch
 "openclaw-veto": patch
-"veto": patch
 "@veto/python-release": patch
 ---
 

@@ -1,5 +1,67 @@
 # veto-sdk
 
+## 2.8.1
+
+### Patch Changes
+
+- [#203](https://github.com/PlawIO/veto/pull/203) [`8ac71d8`](https://github.com/PlawIO/veto/commit/8ac71d810707cbd8c34e6fbee67567656340ce5a) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Close two critical fail-open patterns surfaced by the audit.
+
+  - **Python `protect()` no longer silently degrades to allow-all on init failure.** Previously, _any_ exception during `Veto` initialization (malformed YAML, bad rule shape, transient network error) was caught and replaced with an allow-all instance — every tool call passed with no policy enforcement, no warning, no audit trail. `protect()` now re-raises by default. The legacy degrade-to-allow-all behaviour is reachable via the explicit opt-in `protect(safe_fallback=True)`, which prints a loud `WARNING: Veto initialization failed — falling back to ALLOW-ALL` banner to stderr so it can't be missed.
+  - **Local rule expression errors now propagate** instead of returning `false`. A `block` rule with a parse or eval error used to silently never match, letting the call through. Both compile and evaluate paths in `Veto.evaluateLocalExpression` now log at `error` level and re-raise; the validation engine's existing fail-closed treatment of validator exceptions turns this into a deny.
+  - **`matches` operator on a rejected regex now surfaces a one-time stderr error** in both SDKs. The condition still returns `false` (preserves operator semantics — a non-matching pattern is not a hard error), but a fail-open block rule on a misconfigured pattern is no longer invisible at runtime. Pairs with the load-time scan added in #201; this catches rules added or mutated after init.
+
+  **Behavioural notes:**
+
+  - Existing `protect()` callers that relied on the allow-all degradation as a "soft start" need to either (a) fix their config or (b) add `safe_fallback=True` and accept that every tool call is now permitted.
+  - Local rules with a broken expression now produce a deny instead of an allow. For most users this is the safer default; if the previous behaviour is needed, fix the expression.
+
+- [#202](https://github.com/PlawIO/veto/pull/202) [`bbb69ca`](https://github.com/PlawIO/veto/commit/bbb69ca768ec1a8297acb507afba68e6edf9390e) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Cross-SDK regex parity + small cleanups.
+
+  - TS expression-DSL `matches` operator is now case-insensitive by default, matching the Python SDK. Same policy expression now produces the same decision in both SDKs. Opt back into case-sensitive matching with an inline `(?-i)` prefix at the start of the pattern.
+  - Removed duplicate `len > MAX_PATTERN_LENGTH` checks in `create_safe_regex` (Python) and `createSafeRegex` (TS) — `is_safe_pattern` / `isSafePattern` already enforces the cap.
+
+  Behaviour change: TS-only policies that depended on case-sensitive `matches` will need `(?-i)` added to the pattern.
+
+- [#206](https://github.com/PlawIO/veto/pull/206) [`0f84e26`](https://github.com/PlawIO/veto/commit/0f84e2631a28f8dd4b25db90602fd5635bef6d1a) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Improve CLI policy generation and clean-build reliability.
+
+  - make local `veto policy generate --tool ...` consistently target the requested tool
+  - make `veto guard check --mode local` report real SDK approval decisions
+  - honor `veto init --directory ...`
+  - harden optional-provider and LangChain imports so clean-container builds succeed without extra packages installed
+
+- [#205](https://github.com/PlawIO/veto/pull/205) [`ac02f5d`](https://github.com/PlawIO/veto/commit/ac02f5d6ba716742d0f503b326469e304a702259) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Harden SDK cache reuse and internal snapshot behavior.
+
+  - prevent `protect()` from reusing stale default/cached instances across incompatible policy and approval-callback contexts
+  - stop invalidated cloud policy cache entries from being repopulated by stale background refreshes
+  - return immutable history snapshots so callers cannot mutate internal Veto history state
+  - align browser-side protect caching with the Node runtime behavior
+
+- [#207](https://github.com/PlawIO/veto/pull/207) [`e248124`](https://github.com/PlawIO/veto/commit/e248124b0f358797e1b10f5d9f1cedbf0db9206c) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Harden proxy streaming and benchmark dataset parsing.
+
+  - stop OpenAI streaming proxy responses after a synthetic blocked event so clients receive only one terminal `[DONE]`
+  - preserve `tools: []` as an empty tool list when loading benchmark dataset rules
+  - add focused proxy and benchmark regression coverage for these runtime paths
+
+- [#200](https://github.com/PlawIO/veto/pull/200) [`b910716`](https://github.com/PlawIO/veto/commit/b910716ba8e66a4e23d9cb82254a645426c07d65) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Harden the decision-stream logger.
+
+  - Sanitize control chars and ANSI escapes in arg values + tool names so a multi-line tool input doesn't break the one-line-per-decision invariant.
+  - `\n` / `\t` are visualised as `\n` / `\t`; backslash-escape pass now runs on the original string so visualisation backslashes don't get doubled.
+  - Non-finite latency (`NaN`, `±Infinity`) renders as `-` instead of throwing.
+  - Honor `NO_COLOR` and `FORCE_COLOR` env-var conventions.
+  - Default `HH:MM:SS` field to UTC; `VETO_LOG_LOCALTIME=1` opts back into host time.
+  - New `BaseStreamLogger` base class — stream-mode detection is now `instanceof`-strict instead of duck-typed on the `streamDecision` attribute.
+  - Validator's `"Tool call blocked by local rule"` warn is now filtered locally by `StreamLogger` instead of suppressed cross-layer in `Veto`. Other loggers (Console, Memory, custom) see the warn unchanged.
+  - Compact-mode call portion hard-truncated to 80 chars so long calls can't push the latency column off-screen.
+  - Single arg formatter shared between compact + verbose modes.
+
+- [#201](https://github.com/PlawIO/veto/pull/201) [`959f91c`](https://github.com/PlawIO/veto/commit/959f91c4fe1b8b253c2bfa0134725587e42f50e6) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Close audit findings in the validation core.
+
+  - Python `priority=0` is no longer silently treated as priority 100 by the validator-engine sort and `normalize_validator` (was using `priority or 100`, which evaluates 0 as falsy).
+  - `decision: 'modify'` audit-trail mismatch — `HistoryTracker.record(...)` now uses the _final_ arguments the tool actually saw, not the original `call.arguments`. Fixed in both SDKs.
+  - Unsafe `matches` regex patterns (rejected by the ReDoS-safety heuristic) are surfaced at load time with an `error`-level log per offending rule, so misconfigured rules don't fail-open silently. Walks both `rule.conditions` (flat AND) and `rule.condition_groups` (OR-of-AND).
+  - New token-based `BudgetTracker.reserveCall` / `releaseReservation` API — `releaseReservation` is idempotent so a double-release can't silently zero `spent`. The interceptor and browser veto switched to the token API. Legacy `reserve(name, args): number` / `refund(amount: number)` pair preserved for backward compatibility.
+  - Interceptor now releases the budget reservation on `require_approval` decisions too (was only releasing on `deny`), so a rejected approval doesn't permanently hold budget.
+
 ## 2.8.0
 
 ### Minor Changes

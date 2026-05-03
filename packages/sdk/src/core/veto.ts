@@ -2034,22 +2034,29 @@ export class Veto {
         }
         this.compiledExpressionCache.set(expression, ast);
       } catch (error) {
-        this.logger.warn('Failed to compile local rule expression', {
+        // Earlier this returned `false` and let the validator chain proceed —
+        // i.e. a `block` rule with a parse error silently never matched and
+        // the call was permitted. That's a fail-open. Surface as an error
+        // and propagate; the validation engine treats validator errors as
+        // a deny (see `validator.ts` — fail-closed on validator exceptions).
+        this.logger.error('Failed to compile local rule expression', {
           expression,
           error: error instanceof Error ? error.message : String(error),
         });
-        return false;
+        throw error;
       }
     }
 
     try {
       return Boolean(evaluate(ast, context));
     } catch (error) {
-      this.logger.warn('Failed to evaluate local rule expression', {
+      // Same fail-open class as the compile path above — propagate so the
+      // engine fails closed instead of silently dropping the rule.
+      this.logger.error('Failed to evaluate local rule expression', {
         expression,
         error: error instanceof Error ? error.message : String(error),
       });
-      return false;
+      throw error;
     }
   }
 
