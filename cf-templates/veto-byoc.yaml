@@ -56,14 +56,17 @@ Resources:
                 - !Sub aws eks update-kubeconfig --name ${ClusterName}
                 - !Sub kubectl create namespace ${Namespace} --dry-run=client -o yaml | kubectl apply -f -
                 - !Sub |
+                  set +x
+                  VETO_LICENSE="$(aws secretsmanager get-secret-value --secret-id '${VetoLicenseSecret}' --query SecretString --output text)"
                   helm upgrade --install veto oci://ghcr.io/plawio/charts/veto-operator \
                     --namespace ${Namespace} \
                     --version ${ChartVersion} \
-                    --set license='${License}' \
+                    --set-string license="$VETO_LICENSE" \
                     --set images.operator.digest='${OperatorDigest}' \
                     --set images.server.digest='${ServerDigest}' \
                     --set images.dashboard.digest='${DashboardDigest}' \
                     --set telemetry.enabled=false
+                  unset VETO_LICENSE
 
 Outputs:
   LicenseSecretArn:
