@@ -1,0 +1,14 @@
+services:
+  veto:
+    image: ghcr.io/plawio/veto-server:latest
+    ports:
+      - "3001:3001"
+    environment:
+      SELF_HOSTED: "true"
+      STORAGE_DRIVER: sqlite
+      SQLITE_PATH: /var/lib/veto/veto.sqlite
+    volumes:
+      - veto-data:/var/lib/veto
+
+volumes:
+  veto-data:

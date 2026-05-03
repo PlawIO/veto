@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { protect, __resetProtectCacheForTests } from '../../src/core/protect.js';
@@ -235,7 +235,35 @@ describe('protect', () => {
     ).rejects.toBeInstanceOf(ToolCallDeniedError);
   });
 
-  it('falls back to allow-all when no heuristics match', async () => {
+  it('uses safe defaults in log mode when no heuristics match', async () => {
+    const tool = createTool('non_matching_tool', 'allowed');
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    await protect([tool], { logLevel: 'silent' });
+
+    expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'log',
+      rules: expect.arrayContaining([
+        expect.objectContaining({ id: 'safe-defaults-warn-destructive-shell', action: 'warn' }),
+      ]),
+    }));
+  });
+
+  it('allows unknown tools under safe-defaults observe mode', async () => {
+    const tool = createTool('non_matching_tool', 'allowed');
+
+    const wrapped = await protect([tool], { logLevel: 'silent' });
+
+    await expect(wrapped[0].handler({ any: 'value' })).resolves.toBe('allowed');
+  });
+
+  it('falls through when local policy discovery hits broken filesystem entries', async () => {
+    mkdirSync(join(testDir, 'veto', 'rules'), { recursive: true });
+    symlinkSync(join(testDir, 'missing-rules-dir'), join(testDir, 'veto', 'rules', 'broken-link'));
     const tool = createTool('non_matching_tool', 'allowed');
 
     const wrapped = await protect([tool], { logLevel: 'silent' });

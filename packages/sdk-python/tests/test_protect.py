@@ -215,13 +215,45 @@ async def test_protect_heuristics_detect_browser_pack(isolated_cwd):
         await wrapped[0].handler({"url": "javascript:alert(1)"})
 
 
-async def test_protect_no_pattern_falls_back_to_allow_all(isolated_cwd):
+async def test_protect_no_pattern_uses_safe_defaults_in_log_mode(
+    isolated_cwd, monkeypatch: pytest.MonkeyPatch
+):
+    _ = isolated_cwd
+    tool = MockTool("unknown_tool", "allowed")
+    from_rules_mock = MagicMock(return_value=FakeVeto())
+    monkeypatch.setattr(protect_module.Veto, "from_rules", from_rules_mock)
+
+    await protect([tool], log_level="silent")
+
+    assert from_rules_mock.call_count == 1
+    assert from_rules_mock.call_args.kwargs["mode"] == "log"
+    assert any(
+        rule["id"] == "safe-defaults-warn-destructive-shell"
+        and rule["action"] == "warn"
+        for rule in from_rules_mock.call_args.kwargs["rules"]
+    )
+
+
+async def test_protect_no_pattern_observe_mode_allows_unknown_tools(isolated_cwd):
     _ = isolated_cwd
     tool = MockTool("unknown_tool", "allowed")
 
     wrapped = await protect([tool], log_level="silent")
 
     assert await wrapped[0].handler({"anything": True}) == "allowed"
+
+
+async def test_protect_re_evaluates_heuristics_after_no_options_safe_defaults(isolated_cwd):
+    _ = isolated_cwd
+    passthrough_tool = MockTool("unknown_tool", "allowed")
+    transfer_tool = MockTool("transfer_funds")
+
+    first_wrapped = await protect([passthrough_tool])
+    assert await first_wrapped[0].handler({"anything": True}) == "allowed"
+
+    second_wrapped = await protect([transfer_tool])
+    with pytest.raises(ToolCallDeniedError):
+        await second_wrapped[0].handler({"amount": 15000, "currency": "USD"})
 
 
 async def test_protect_reuses_cache_for_identical_options(

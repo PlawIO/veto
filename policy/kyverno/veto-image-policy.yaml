@@ -1,0 +1,99 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-veto-images
+  annotations:
+    policies.kyverno.io/title: Verify Veto BYOC Images
+    policies.kyverno.io/subject: ghcr.io/plawio BYOC images
+    policies.kyverno.io/description: >
+      Verifies keyless signatures and required CycloneDX, SPDX, SLSA provenance,
+      and OpenVEX attestations. BYOC platform images must be signed by the
+      PlawIO/veto-platform release-images workflow; public-repo-only images are
+      split into their own rule.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-platform-image-signatures-and-attestations
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - ghcr.io/plawio/veto-server*
+            - ghcr.io/plawio/veto-operator*
+            - ghcr.io/plawio/veto-dashboard*
+            - ghcr.io/plawio/veto-frontend*
+            - ghcr.io/plawio/veto-docs*
+          required: true
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
+          attestations:
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
+            - type: https://spdx.dev/Document
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
+            - type: https://slsa.dev/provenance/v1
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
+            - type: https://openvex.dev/ns/v0.2.0
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto-platform/.github/workflows/release-images\.ya?ml@refs/(heads/main|tags/.*)
+
+    - name: require-public-repo-image-signatures-and-attestations
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - ghcr.io/plawio/veto-bash*
+          required: true
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    subjectRegExp: https://github.com/PlawIO/veto/.github/workflows/.*@refs/(heads/master|tags/.*)
+          attestations:
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto/.github/workflows/.*@refs/(heads/master|tags/.*)
+            - type: https://spdx.dev/Document
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto/.github/workflows/.*@refs/(heads/master|tags/.*)
+            - type: https://slsa.dev/provenance/v1
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto/.github/workflows/.*@refs/(heads/master|tags/.*)
+            - type: https://openvex.dev/ns/v0.2.0
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: https://github.com/PlawIO/veto/.github/workflows/.*@refs/(heads/master|tags/.*)

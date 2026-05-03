@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Public Veto BYOC AWS path. Creates a customer-owned license secret and an SSM runbook with the Helm install command; creates no Plaw cross-account IAM.
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Existing EKS cluster name.
+  Namespace:
+    Type: String
+    Default: veto-system
+  License:
+    Type: String
+    NoEcho: true
+    Description: Veto BYOC license string. Stored only in the customer AWS account.
+  ChartVersion:
+    Type: String
+    Default: 0.1.0
+  OperatorDigest:
+    Type: String
+    Description: ghcr.io/plawio/veto-operator image digest (sha256:...).
+  ServerDigest:
+    Type: String
+    Description: ghcr.io/plawio/veto-server image digest (sha256:...).
+  DashboardDigest:
+    Type: String
+    Description: ghcr.io/plawio/veto-dashboard image digest (sha256:...).
+
+Resources:
+  VetoLicenseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub /veto/${ClusterName}/license
+      Description: Customer-owned Veto BYOC license. Not shared with Plaw by this template.
+      SecretString: !Ref License
+      Tags:
+        - Key: Application
+          Value: Veto
+        - Key: CustomerPlane
+          Value: "true"
+
+  VetoInstallRunbook:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      DocumentFormat: YAML
+      Name: !Sub Veto-BYOC-Install-${ClusterName}
+      Content:
+        schemaVersion: "2.2"
+        description: Install Veto BYOC into an existing EKS cluster from customer-owned credentials. Outbound-only; no Plaw cross-account IAM.
+        parameters: {}
+        mainSteps:
+          - action: aws:runShellScript
+            name: installVeto
+            inputs:
+              runCommand:
+                - !Sub aws eks update-kubeconfig --name ${ClusterName}
+                - !Sub kubectl create namespace ${Namespace} --dry-run=client -o yaml | kubectl apply -f -
+                - !Sub |
+                  helm upgrade --install veto oci://ghcr.io/plawio/charts/veto-operator \
+                    --namespace ${Namespace} \
+                    --version ${ChartVersion} \
+                    --set license='${License}' \
+                    --set images.operator.digest='${OperatorDigest}' \
+                    --set images.server.digest='${ServerDigest}' \
+                    --set images.dashboard.digest='${DashboardDigest}' \
+                    --set telemetry.enabled=false
+
+Outputs:
+  LicenseSecretArn:
+    Value: !Ref VetoLicenseSecret
+  InstallRunbookName:
+    Value: !Ref VetoInstallRunbook
+  Boundary:
+    Value: Customer policy, decision rows, tool args, identities, Slack content, prompts, env vars, and secrets remain in the customer AWS account; this template creates no Plaw cross-account IAM.

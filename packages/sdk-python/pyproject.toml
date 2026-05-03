@@ -5,16 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "veto"
 version = "0.15.1"
-description = "A guardrail system that intercepts and validates AI agent tool calls"
+description = "Policy runtime for AI agent tool calls"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 keywords = [
     "ai",
     "agent",
-    "guardrail",
+    "policy-runtime",
     "tool-calls",
-    "safety",
+    "runtime-governance",
     "llm",
     "openai",
     "anthropic",

@@ -1,6 +1,6 @@
 # openclaw-veto
 
-Veto guardrails for OpenClaw agents.
+Veto policy checks for OpenClaw agents.
 
 `openclaw-veto` intercepts every OpenClaw tool call, validates it through Veto, and either allows it, blocks it, or routes it into a human approval flow.
 

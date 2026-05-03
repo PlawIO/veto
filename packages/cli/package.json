@@ -32,5 +32,5 @@
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

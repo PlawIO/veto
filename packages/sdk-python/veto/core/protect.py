@@ -141,11 +141,12 @@ ProtectInitSource = Literal[
     "local",
     "pack",
     "heuristic",
+    "safe_defaults",
     "allow_all",
 ]
 
 
-_default_instance: Optional[Veto] = None
+_default_instance: Optional[tuple[Veto, ProtectInitSource, Path]] = None
 _instance_cache: dict[str, Veto] = {}
 
 
@@ -191,6 +192,22 @@ def _collect_heuristic_packs(tools: list[T]) -> list[str]:
                 packs.add(str(heuristic["pack"]))
 
     return sorted(packs)
+
+
+def _has_yaml_rule_file(path: Path) -> bool:
+    if not path.exists():
+        return False
+
+    return any(
+        child.is_file() and child.suffix.lower() in {".yaml", ".yml"}
+        or child.is_dir() and _has_yaml_rule_file(child)
+        for child in path.iterdir()
+    )
+
+
+def _has_local_policy_project() -> bool:
+    veto_dir = Path.cwd() / "veto"
+    return (veto_dir / "veto.config.yaml").exists() or _has_yaml_rule_file(veto_dir / "rules")
 
 
 def _load_policy_pack(pack_name: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
@@ -255,20 +272,32 @@ def _build_init_decision(
     if options.get("config_dir"):
         return "config_dir", [], [], []
 
-    if (Path.cwd() / "veto").exists():
-        return "local", [], [], []
-
     pack_name = options.get("pack")
     if isinstance(pack_name, str) and pack_name.strip() != "":
         rules_from_pack, output_rules_from_pack, normalized_packs = _load_inline_rules_from_packs([pack_name])
         return "pack", rules_from_pack, output_rules_from_pack, normalized_packs
+
+    if _has_local_policy_project():
+        return "local", [], [], []
 
     heuristic_packs = _collect_heuristic_packs(tools)
     if heuristic_packs:
         rules_from_pack, output_rules_from_pack, normalized_packs = _load_inline_rules_from_packs(heuristic_packs)
         return "heuristic", rules_from_pack, output_rules_from_pack, normalized_packs
 
-    return "allow_all", [], [], []
+    rules_from_pack, output_rules_from_pack, normalized_packs = _load_inline_rules_from_packs(["@veto/safe-defaults"])
+    return "safe_defaults", rules_from_pack, output_rules_from_pack, normalized_packs
+
+
+def _resolve_protect_mode(options: dict[str, Any], source: ProtectInitSource) -> Optional[ProtectMode]:
+    raw_mode = options.get("mode")
+    if raw_mode in ("strict", "log", "shadow"):
+        return cast(ProtectMode, raw_mode)
+
+    if source == "safe_defaults":
+        return "log"
+
+    return None
 
 
 def _resolve_protect_log_level(options: dict[str, Any]) -> Optional[LogLevel]:
@@ -329,7 +358,7 @@ def _create_cache_key(
         "pack": options.get("pack"),
         "api_key": options.get("api_key"),
         "endpoint": options.get("endpoint"),
-        "mode": options.get("mode"),
+        "mode": _resolve_protect_mode(options, source),
         "log_level": _resolve_protect_log_level(options),
         "stream": options.get("stream"),
         "stream_mode": _resolve_protect_stream_mode(options),
@@ -405,11 +434,11 @@ async def _initialize_veto(
         return cached, source, inline_rules, packs, True
 
     try:
-        if source in ("rules", "pack", "heuristic", "allow_all"):
+        if source in ("rules", "pack", "heuristic", "safe_defaults", "allow_all"):
             instance = Veto.from_rules(
                 rules=inline_rules,
                 output_rules=inline_output_rules,
-                mode=options.get("mode"),
+                mode=_resolve_protect_mode(options, source),
                 log_level=_resolve_protect_log_level(options),
                 stream_mode=_resolve_protect_stream_mode(options),
                 session_id=options.get("session_id"),
@@ -479,9 +508,11 @@ async def protect(tools: Union[T, list[T]], **kwargs: Any) -> Union[T, list[T]]:
     global _default_instance
 
     if not kwargs and _default_instance is not None:
-        if isinstance(tools, list):
-            return _default_instance.wrap(tools)
-        return _default_instance.wrap_tool(tools)
+        default_instance, default_source, default_cwd = _default_instance
+        if default_source == "local" and default_cwd == Path.cwd():
+            if isinstance(tools, list):
+                return default_instance.wrap(tools)
+            return default_instance.wrap_tool(tools)
 
     normalized_options = dict(kwargs)
 
@@ -498,7 +529,7 @@ async def protect(tools: Union[T, list[T]], **kwargs: Any) -> Union[T, list[T]]:
         )
 
     if not kwargs:
-        _default_instance = instance
+        _default_instance = (instance, source, Path.cwd())
 
     if isinstance(tools, list):
         return instance.wrap(tools)

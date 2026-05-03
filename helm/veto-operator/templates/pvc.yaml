@@ -1,0 +1,13 @@
+{{- if eq .Values.storage.driver "sqlite" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "veto.fullname" . }}-data
+  labels:
+    {{- include "veto.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.storage.size | quote }}
+{{- end }}

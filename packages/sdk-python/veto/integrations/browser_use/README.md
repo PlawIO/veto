@@ -1,6 +1,14 @@
 # Veto × Browser-Use Integration
 
-Add Veto guardrails to [browser-use](https://github.com/browser-use/browser-use) AI browser agents. Every browser action (navigate, click, input, search, etc.) is validated against your Veto policies before execution.
+Add Veto policy checks to [browser-use](https://github.com/browser-use/browser-use) AI browser agents. Every browser action (navigate, click, input, search, etc.) is validated against your Veto policies before execution.
+
+For ordinary Python tool lists, start with the public entrypoint:
+
+```python
+from veto import protect
+
+safe = await protect(tools)
+```
 
 ## Installation
 
@@ -18,7 +26,7 @@ from browser_use import Agent, BrowserSession
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 async def main():
-    # 1. Initialize Veto
+    # 1. Advanced integration: create an explicit Veto instance
     veto = await Veto.init(VetoOptions(api_key="your-veto-api-key"))
 
     # 2. Create Veto-wrapped browser tools
@@ -36,7 +44,7 @@ async def main():
 asyncio.run(main())
 ```
 
-That's it — two lines to add guardrails to any browser-use agent.
+That's it — use `protect(tools)` for ordinary tools, or `wrap_browser_use(veto)` when the browser-use adapter needs an explicit Veto instance.
 
 ## How It Works
 

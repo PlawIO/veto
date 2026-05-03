@@ -1,11 +1,17 @@
 {
   "id": "veto",
-  "name": "Veto Guardrails",
+  "name": "Veto Policy Runtime",
   "description": "Intercept, validate, and control every agent tool call with Veto policies. Supports local YAML rules and Veto Cloud with human-in-the-loop approvals.",
   "version": "0.1.0",
   "author": "Plaw",
   "homepage": "https://veto.so",
   "repository": "https://github.com/PlawIO/veto",
-  "keywords": ["guardrail", "safety", "authorization", "approval"],
+  "keywords": [
+    "policy-runtime",
+    "tool-calls",
+    "runtime-governance",
+    "authorization",
+    "approval"
+  ],
   "capabilities": ["hooks"]
 }

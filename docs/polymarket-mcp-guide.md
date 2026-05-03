@@ -65,6 +65,16 @@ This keeps the policy logic explicit:
 
 ## 2) Guard an MCP-style runtime
 
+For ordinary agent tool lists, start with the public entrypoint:
+
+```ts
+import { protect } from "veto-sdk";
+
+const safeTools = await protect(tools);
+```
+
+MCP runtimes that need a raw decision before staging simulation or approval can use the advanced explicit instance API:
+
 ```ts
 import { Veto } from "veto-sdk";
 
@@ -81,7 +91,7 @@ type ToolContext = {
 async function callTool(
   toolName: string,
   args: Record<string, unknown>,
-  context: ToolContext,
+  context: ToolContext
 ) {
   const decision = await veto.guard(toolName, args, context);
 

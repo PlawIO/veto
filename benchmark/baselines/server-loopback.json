@@ -1,0 +1,21 @@
+{
+  "id": "server-loopback",
+  "workload": "localhost PDP server eval",
+  "source": "measured",
+  "source_command": "node benchmark/run.mjs --mode=pr --include-server --gate --baseline-dir=benchmark/baselines --output=benchmark/results/baseline.json",
+  "generated_at": "2026-05-02T12:59:55.075Z",
+  "hardware": {
+    "runner": "local",
+    "os": "linux",
+    "arch": "x64",
+    "node": "v24.13.0"
+  },
+  "iterations": 250,
+  "p50_ms": 0.4020510000000286,
+  "p95_ms": 0.8416509999999562,
+  "p99_ms": 2.0922630000000026,
+  "min_ms": 0.31296999999995023,
+  "max_ms": 8.041420000000016,
+  "threshold_p99_ms": 30,
+  "server_source": "benchmark/pdp-fixture.mjs using SDK local evaluator over loopback HTTP"
+}

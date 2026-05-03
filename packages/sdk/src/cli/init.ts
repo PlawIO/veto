@@ -240,10 +240,9 @@ export async function init(options: InitOptions = {}): Promise<InitResult> {
     log('  2. Use Veto in your application (local mode is default):', quiet);
     log('  3. Optional: set VETO_API_KEY to switch to cloud mode', quiet);
     log('', quiet);
-    log('     import { Veto } from "veto-sdk";', quiet);
+    log('     import { protect } from "veto-sdk";', quiet);
     log('', quiet);
-    log('     const veto = await Veto.init();', quiet);
-    log('     const tools = veto.wrapTools(myTools);', quiet);
+    log('     const safeTools = await protect(myTools);', quiet);
     log('', quiet);
 
   } catch (error) {

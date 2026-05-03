@@ -1,0 +1,98 @@
+version: "1.0"
+name: "@veto/safe-defaults"
+description: >
+  Zero-config observe-mode defaults for AI agent tool calls. Rules only warn or
+  log for obviously destructive shell, file, database, and money-movement
+  network patterns; they do not hard-block execution.
+
+rules:
+  - id: safe-defaults-warn-destructive-shell
+    name: Warn on destructive shell commands
+    description: Observe recursive deletes, disk formatting, shutdowns, and privilege escalation.
+    enabled: true
+    severity: high
+    action: warn
+    tools:
+      - bash
+      - shell
+      - run_shell
+      - execute_command
+      - exec
+      - terminal
+    condition_groups:
+      - - field: arguments.command
+          operator: matches
+          value: '(^|[;&|\s])(rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|sudo\s+rm|chmod\s+-R\s+777)($|[;&|\s])'
+      - - field: arguments.cmd
+          operator: matches
+          value: '(^|[;&|\s])(rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|sudo\s+rm|chmod\s+-R\s+777)($|[;&|\s])'
+
+  - id: safe-defaults-warn-sensitive-file-mutation
+    name: Warn on sensitive file mutations
+    description: Observe writes, edits, appends, or deletes targeting sensitive system or credential paths.
+    enabled: true
+    severity: high
+    action: warn
+    tools:
+      - write_file
+      - edit_file
+      - append_file
+      - delete_file
+      - remove_file
+      - file_write
+      - file_delete
+    condition_groups:
+      - - field: arguments.path
+          operator: starts_with
+          value: /etc
+      - - field: arguments.path
+          operator: starts_with
+          value: /root
+      - - field: arguments.path
+          operator: contains
+          value: .ssh
+      - - field: arguments.path
+          operator: ends_with
+          value: .env
+
+  - id: safe-defaults-log-database-mutations
+    name: Log database mutations
+    description: Observe SQL or database operations that mutate rows or schema.
+    enabled: true
+    severity: medium
+    action: log
+    tools:
+      - query
+      - sql
+      - database
+      - db_query
+      - execute_sql
+      - run_query
+    condition_groups:
+      - - field: arguments.query
+          operator: matches
+          value: '\b(drop|delete|truncate|alter|update|insert|merge|grant|revoke)\b'
+      - - field: arguments.sql
+          operator: matches
+          value: '\b(drop|delete|truncate|alter|update|insert|merge|grant|revoke)\b'
+
+  - id: safe-defaults-warn-network-money-movement
+    name: Warn on network money-movement calls
+    description: Observe outbound API calls that appear to initiate payments, withdrawals, payouts, or transfers.
+    enabled: true
+    severity: medium
+    action: warn
+    tools:
+      - fetch
+      - http_request
+      - request
+      - call_api
+      - post
+      - webhook
+    condition_groups:
+      - - field: arguments.url
+          operator: matches
+          value: '\b(charge|payment|payout|withdraw|transfer|wire|refund|invoice|checkout|bank)\b'
+      - - field: arguments.endpoint
+          operator: matches
+          value: '\b(charge|payment|payout|withdraw|transfer|wire|refund|invoice|checkout|bank)\b'

@@ -1,5 +1,5 @@
 /**
- * Veto - A guardrail system for AI agent tool calls.
+ * Veto - Policy runtime for AI agent tool calls.
  *
  * Veto sits between the AI model and tool execution, intercepting and
  * validating tool calls before they are executed.
@@ -8,25 +8,14 @@
  *
  * @example
  * ```typescript
- * import { Veto, toOpenAITools } from 'veto-sdk';
+ * import { protect } from 'veto-sdk';
  *
- * // Initialize Veto
- * const veto = await Veto.init();
+ * // Protect your tools in one call. Local ./veto rules are loaded when present;
+ * // otherwise zero-config safe defaults run in observe mode.
+ * const safeTools = await protect(myTools);
  *
- * // Wrap your tools
- * const { definitions, implementations } = veto.wrapTools(myTools);
- *
- * // Pass definitions to AI provider
- * const response = await openai.chat.completions.create({
- *   tools: toOpenAITools(definitions),
- *   messages: [...]
- * });
- *
- * // Execute tool calls using implementations (validation is automatic)
- * for (const call of response.choices[0].message.tool_calls) {
- *   const args = JSON.parse(call.function.arguments);
- *   const result = await implementations[call.function.name](args);
- * }
+ * // Pass safeTools to your agent. Tool interfaces and types are preserved.
+ * const agent = createAgent({ tools: safeTools });
  * ```
  *
  * @module veto

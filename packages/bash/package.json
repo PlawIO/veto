@@ -1,7 +1,7 @@
 {
   "name": "veto-bash",
   "version": "0.2.0",
-  "description": "Rust-first guarded bash runtime with MCP support",
+  "description": "Rust-first policy runtime for bash tool calls with MCP support",
   "type": "module",
   "bin": {
     "veto-bash": "./dist/bin.js"
@@ -26,5 +26,5 @@
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }
