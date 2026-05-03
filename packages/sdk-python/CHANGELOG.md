@@ -1,5 +1,12 @@
 # veto (Python SDK)
 
+## 0.15.2
+
+### Patch Changes
+
+- Normalize first-party package metadata to Apache-2.0 and update package descriptions toward policy-runtime/tool-call governance wording.
+- Make `protect(tools)` the protect-first onboarding path and use the built-in `@veto/safe-defaults` observe-mode pack when no local policy or explicit policy source is configured.
+
 ## 0.15.1
 
 ### Patch Changes
