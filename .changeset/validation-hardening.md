@@ -1,6 +1,6 @@
 ---
 "veto-sdk": patch
-"veto": patch
+"@veto/python-release": patch
 ---
 
 Close audit findings in the validation core.
