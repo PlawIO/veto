@@ -4,7 +4,8 @@
   "description": "Compatibility Veto CLI package for Studio and headless workflows",
   "type": "module",
   "bin": {
-    "veto": "./dist/bin.js"
+    "veto": "./dist/bin.js",
+    "veto-mcp-proxy": "./dist/mcp-proxy-bin.js"
   },
   "main": "./dist/bin.js",
   "types": "./dist/bin.d.ts",

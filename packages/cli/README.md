@@ -38,6 +38,14 @@ npx veto init
 npx veto guard check --tool bash --args '{"command":"rm -rf /tmp/demo"}' --json
 ```
 
+Install Veto directly into developer tools:
+
+```bash
+npx veto install claude-code
+npx veto install cursor
+npx veto install codex
+```
+
 `Veto.init()` and `.wrap()` are advanced/internal-facing SDK APIs; new app integrations should start with `protect(tools)`.
 
 ## Studio (interactive TUI)
@@ -184,17 +192,19 @@ veto mcp connect --cloud
 veto mcp connect --cloud --output ~/.cursor/mcp.json --json
 ```
 
-| Flag       | Default    | Description                                                         |
-| ---------- | ---------- | ------------------------------------------------------------------- |
-| `--output` | `mcp.json` | MCP client config JSON file to create or update                     |
-| `--config` | --         | Local gateway config path to initialize and reference in local mode |
-| `--cloud`  | `false`    | Persist a remote MCP entry for `https://api.veto.so/v1/mcp/default` |
+| Flag            | Default    | Description                                                         |
+| --------------- | ---------- | ------------------------------------------------------------------- |
+| `--output`      | `mcp.json` | MCP client config JSON file to create or update                     |
+| `--config`      | --         | Local gateway config path to initialize and reference in local mode |
+| `--server-name` | `veto`     | MCP server key to create or update                                  |
+| `--cloud`       | `false`    | Persist a remote MCP entry for `https://api.veto.so/v1/mcp/default` |
 
 ### Serve
 
 ```bash
 veto mcp serve --upstream http://localhost:3000
 veto mcp serve --config ./veto/mcp.config.yaml
+veto-mcp-proxy --config ./veto/mcp.config.yaml
 veto mcp serve --listen 127.0.0.1:8799 --transport mcp-sse --timeout-ms 60000
 veto mcp serve --api-key $VETO_API_KEY --policy-server http://localhost:3001
 ```

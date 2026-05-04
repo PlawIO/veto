@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   createMcpGatewayServerForTesting,
   createDefaultMcpConfigTemplate,
@@ -10,6 +10,7 @@ import {
   runMcpDoctorCommand,
   runMcpInitCommand,
 } from '../../src/cli/mcp.js';
+import { parseMcpProxyOptions } from '../../src/cli/mcp-proxy-bin.js';
 
 const TMP_ROOT = `/tmp/veto-mcp-cli-test-${Date.now()}`;
 
@@ -249,6 +250,54 @@ describe('mcp cli commands', () => {
 
     const raw = readFileSync(path, 'utf-8');
     expect(raw.length).toBeGreaterThan(50);
+  });
+
+  it('publishes veto-mcp-proxy bin paths in first-party CLI packages', () => {
+    const sdkPackage = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf-8')) as {
+      bin?: Record<string, string>;
+    };
+    const cliPackage = JSON.parse(readFileSync(resolve(process.cwd(), '../cli/package.json'), 'utf-8')) as {
+      bin?: Record<string, string>;
+    };
+    const vetoPackage = JSON.parse(readFileSync(resolve(process.cwd(), '../veto/package.json'), 'utf-8')) as {
+      bin?: Record<string, string>;
+    };
+
+    expect(sdkPackage.bin?.['veto-mcp-proxy']).toBe('./dist/cli/mcp-proxy-bin.js');
+    expect(cliPackage.bin?.['veto-mcp-proxy']).toBe('./dist/mcp-proxy-bin.js');
+    expect(vetoPackage.bin?.['veto-mcp-proxy']).toBe('./dist/mcp-proxy-bin.js');
+  });
+
+  it('parses veto-mcp-proxy options for the shared MCP serve command', () => {
+    expect(parseMcpProxyOptions([
+      '--config',
+      './veto/mcp.config.yaml',
+      '--listen',
+      '127.0.0.1:9000',
+      '--upstream',
+      'http://localhost:3000/mcp',
+      '--transport',
+      'mcp-sse',
+      '--api-key',
+      'veto_test_key_1234567890',
+      '--policy-server',
+      'http://localhost:3001',
+      '--timeout-ms',
+      '1234',
+      '--json',
+    ])).toEqual({
+      configPath: './veto/mcp.config.yaml',
+      listen: '127.0.0.1:9000',
+      upstream: 'http://localhost:3000/mcp',
+      transport: 'mcp-sse',
+      apiKey: 'veto_test_key_1234567890',
+      policyServer: 'http://localhost:3001',
+      timeoutMs: 1234,
+      asJson: true,
+    });
+
+    expect(parseMcpProxyOptions(['--help'])).toBeNull();
+    expect(() => parseMcpProxyOptions(['--timeout-ms', '0'])).toThrow('positive integer');
   });
 
   it('rejects tools/call requests without a non-empty tool name', async () => {

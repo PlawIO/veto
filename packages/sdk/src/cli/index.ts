@@ -67,6 +67,17 @@ export {
 } from './repl.js';
 export { startStudio, selectStudioRenderer, type StartStudioOptions } from './studio/start.js';
 export { runCli, runCliOrExit } from './runner.js';
+export { parseMcpProxyOptions, runMcpProxyCli, runMcpProxyCliOrExit } from './mcp-proxy-bin.js';
+export {
+  formatInstallResult,
+  runInstallCommand,
+  type InstallCommandResult,
+  type InstallOptions,
+  type InstallTarget,
+  type ClaudeCodeInstallResult,
+  type CursorInstallResult,
+  type CodexInstallResult,
+} from './install.js';
 export {
   printHeadlessResult,
   runPolicyGenerateCommand,
@@ -89,9 +100,9 @@ export {
   runMcpDoctorCommand,
   runMcpServeCommand,
   resolveMcpConfigForTesting,
+  type McpServeOptions,
   type McpConfig,
   type McpConnectOptions,
-  type McpServeOptions,
   type McpDoctorOptions,
   type McpInitOptions,
   type McpDoctorReport,

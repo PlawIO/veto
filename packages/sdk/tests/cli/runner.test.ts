@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('cli agent compatibility', () => {
+  const originalCwd = process.cwd();
+
   beforeEach(() => {
     vi.resetModules();
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     vi.restoreAllMocks();
     vi.doUnmock('../../src/cli/agent.js');
+    vi.doUnmock('../../src/cli/install.js');
   });
 
   it('prints agent help without deprecated label or warning', async () => {
@@ -60,5 +64,106 @@ describe('cli agent compatibility', () => {
       directory: '/tmp/veto-cli-target',
       quiet: true,
     }));
+  });
+
+  it('prints top-level help with install targets', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli(['help'])).resolves.toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('install <claude-code|cursor|codex>'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('veto install claude-code'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('veto install cursor'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('veto install codex'));
+  });
+
+  it('prints install subcommand help', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli(['install'])).resolves.toBe(0);
+    expect(logSpy).toHaveBeenCalledWith('  veto install claude-code [--directory <path>] [--force] [--json]');
+    expect(logSpy).toHaveBeenCalledWith('  veto install cursor [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]');
+    expect(logSpy).toHaveBeenCalledWith('  veto install codex [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--json]');
+  });
+
+  it('dispatches install command with parsed flags and JSON output', async () => {
+    const result = {
+      ok: true,
+      data: {
+        target: 'cursor',
+        projectDir: '/tmp/project',
+        path: '/tmp/project/.cursor/mcp.json',
+        serverName: 'team-veto',
+        serverCreated: true,
+        updated: true,
+        mode: 'local',
+        endpoint: './veto/mcp.config.yaml',
+        messages: ['updated'],
+      },
+    };
+    const runInstallCommand = vi.fn().mockReturnValue(result);
+    const formatInstallResult = vi.fn().mockReturnValue('formatted');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    vi.doMock('../../src/cli/install.js', () => ({
+      formatInstallResult,
+      runInstallCommand,
+    }));
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli([
+      'install',
+      'cursor',
+      '--directory',
+      '/tmp/project',
+      '--output',
+      '.cursor/mcp.json',
+      '--config',
+      'veto/mcp.config.yaml',
+      '--server-name',
+      'team-veto',
+      '--cloud',
+      '--force',
+      '--json',
+    ])).resolves.toBe(0);
+
+    expect(runInstallCommand).toHaveBeenCalledWith({
+      target: 'cursor',
+      directory: '/tmp/project',
+      outputPath: '.cursor/mcp.json',
+      configPath: 'veto/mcp.config.yaml',
+      serverName: 'team-veto',
+      cloud: true,
+      force: true,
+    });
+    expect(formatInstallResult).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify(result));
+  });
+
+  it('prints formatted install errors and exits non-zero', async () => {
+    const result = {
+      ok: false,
+      error: {
+        code: 'install_target_unknown',
+        message: 'Unknown install target: nope',
+      },
+    };
+    const runInstallCommand = vi.fn().mockReturnValue(result);
+    const formatInstallResult = vi.fn().mockReturnValue('formatted error');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    vi.doMock('../../src/cli/install.js', () => ({
+      formatInstallResult,
+      runInstallCommand,
+    }));
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli(['install', 'nope'])).resolves.toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith('formatted error');
   });
 });

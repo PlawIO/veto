@@ -73,6 +73,14 @@ import { protect } from "veto-sdk";
 const safeTools = await protect(tools);
 ```
 
+For MCP clients that can run a local proxy, install a project-local config and start the standalone proxy:
+
+```bash
+npx veto install cursor
+npx veto install codex
+veto-mcp-proxy --config ./veto/mcp.config.yaml
+```
+
 MCP runtimes that need a raw decision before staging simulation or approval can use the advanced explicit instance API:
 
 ```ts
