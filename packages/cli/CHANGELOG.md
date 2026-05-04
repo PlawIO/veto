@@ -1,5 +1,12 @@
 # veto-cli
 
+## 1.16.22
+
+### Patch Changes
+
+- Updated dependencies [[`c2acd1f`](https://github.com/PlawIO/veto/commit/c2acd1f1f198439bc51827ce3f1c0c4679913d47)]:
+  - veto-sdk@2.9.1
+
 ## 1.16.21
 
 ### Patch Changes
