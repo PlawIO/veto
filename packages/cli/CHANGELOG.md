@@ -1,5 +1,14 @@
 # veto-cli
 
+## 1.16.18
+
+### Patch Changes
+
+- [#216](https://github.com/PlawIO/veto/pull/216) [`61fdae9`](https://github.com/PlawIO/veto/commit/61fdae9c27cd676187e40dcfcc384725220a850e) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add installer commands for Claude Code, Cursor, and Codex integrations, plus the standalone `veto-mcp-proxy` binary for MCP clients.
+
+- Updated dependencies [[`61fdae9`](https://github.com/PlawIO/veto/commit/61fdae9c27cd676187e40dcfcc384725220a850e)]:
+  - veto-sdk@2.8.4
+
 ## 1.16.17
 
 ### Patch Changes
