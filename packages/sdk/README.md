@@ -65,6 +65,39 @@ rules:
 
 Actions are `block`, `allow`, `warn`, `log`, and `require_approval`.
 
+## Runtime adapters
+
+All adapters are dependency-free TypeScript surfaces unless noted; provider-specific schemas reuse the SDK provider adapters.
+
+| Runtime                 | Import                                | Artifact                                     | Status         |
+| ----------------------- | ------------------------------------- | -------------------------------------------- | -------------- |
+| Provider-agnostic tools | `veto-sdk`                            | `protect(tools)`, `Veto.wrap()`              | Canonical path |
+| Vercel AI SDK           | `veto-sdk/integrations/vercel-ai`     | middleware + guard helper                    | Supported      |
+| OpenAI Agents           | `veto-sdk/integrations/openai-agents` | input/output/tool guardrails + guard helper  | Supported      |
+| LangChain / LangGraph   | `veto-sdk/integrations/langchain`     | middleware, ToolNode, callback, guard helper | Supported      |
+| MCP                     | `veto-sdk/providers/adapters`         | MCP conversion + `Veto.wrapMCPTools()`       | Supported      |
+| Browser Use             | `veto-sdk/integrations/browser-use`   | action wrapping                              | Supported      |
+| OpenClaw                | `veto-sdk/integrations/openclaw`      | before/after tool hooks                      | Supported      |
+| Claude SDK              | `veto-sdk/integrations/claude-sdk`    | Anthropic tool/tool-use helpers              | Added P2       |
+| Google ADK              | `veto-sdk/integrations/google-adk`    | function declarations/calls                  | Added P2       |
+| Mastra                  | `veto-sdk/integrations/mastra`        | tool wrappers                                | Added P2       |
+| AutoGen                 | `veto-sdk/integrations/autogen`       | function/tool wrappers                       | Added P2       |
+| CrewAI                  | `veto-sdk/integrations/crewai`        | tool-function wrappers                       | Added P2       |
+
+```ts
+import { guardClaudeToolUse } from "veto-sdk/integrations/claude-sdk";
+import { guardGoogleADKFunctionCall } from "veto-sdk/integrations/google-adk";
+import { wrapMastraTool } from "veto-sdk/integrations/mastra";
+import { wrapAutoGenFunction } from "veto-sdk/integrations/autogen";
+import { wrapCrewAITool } from "veto-sdk/integrations/crewai";
+
+const claudeDecision = await guardClaudeToolUse(veto, toolUse);
+const googleDecision = await guardGoogleADKFunctionCall(veto, functionCall);
+const safeMastraTool = wrapMastraTool(veto, mastraTool);
+const safeAutoGenFn = wrapAutoGenFunction(veto, "delete_file", deleteFile);
+const safeCrewTool = wrapCrewAITool(veto, crewTool);
+```
+
 ## API
 
 ### `protect(tools, options?)`

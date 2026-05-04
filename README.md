@@ -31,7 +31,7 @@ const safeTools = await protect(tools);
 npm install veto-sdk
 ```
 
-Pass `safeTools` to LangChain, Vercel AI SDK, OpenAI Agents, MCP adapters, or your own tool runner. If `./veto/veto.config.yaml` and `./veto/rules/*.yaml` exist, `protect()` loads them. Without local policy, Veto applies `@veto/safe-defaults` in observe mode so suspicious shell/file/db/money-movement patterns are logged without surprise blocking.
+Pass `safeTools` to LangChain, LangGraph, Vercel AI SDK, OpenAI Agents, MCP adapters, Claude SDK, Google ADK, Mastra, AutoGen, CrewAI, or your own tool runner. If `./veto/veto.config.yaml` and `./veto/rules/*.yaml` exist, `protect()` loads them. Without local policy, Veto applies `@veto/safe-defaults` in observe mode so suspicious shell/file/db/money-movement patterns are logged without surprise blocking.
 
 The unscoped `veto` npm name is not controlled by Plaw yet; use the owned `veto-cli` package form until transfer completes.
 
@@ -54,6 +54,23 @@ npx --package veto-cli@latest veto install cursor
 npx --package veto-cli@latest veto install codex
 veto-mcp-proxy --config ./veto/mcp.config.yaml
 ```
+
+## Runtime adapter matrix
+
+| Runtime                 | Artifact                                                             | Status         |
+| ----------------------- | -------------------------------------------------------------------- | -------------- |
+| Provider-agnostic tools | `protect(tools)`, `Veto.wrap()`                                      | Canonical path |
+| Vercel AI SDK           | `veto-sdk/integrations/vercel-ai` middleware + guard helper          | Supported      |
+| OpenAI Agents           | `veto-sdk/integrations/openai-agents` guardrails + guard helper      | Supported      |
+| LangChain / LangGraph   | `veto-sdk/integrations/langchain` middleware, ToolNode, guard helper | Supported      |
+| MCP                     | provider adapters + `Veto.wrapMCPTools()`                            | Supported      |
+| Browser Use             | `veto-sdk/integrations/browser-use`                                  | Supported      |
+| OpenClaw                | `veto-sdk/integrations/openclaw` hooks                               | Supported      |
+| Claude SDK              | `veto-sdk/integrations/claude-sdk` Anthropic tool-use helpers        | Added P2       |
+| Google ADK              | `veto-sdk/integrations/google-adk` function declaration/call helpers | Added P2       |
+| Mastra                  | `veto-sdk/integrations/mastra` tool wrappers                         | Added P2       |
+| AutoGen                 | `veto-sdk/integrations/autogen` function/tool wrappers               | Added P2       |
+| CrewAI                  | `veto-sdk/integrations/crewai` tool-function wrappers                | Added P2       |
 
 ## TypeScript
 
@@ -125,14 +142,14 @@ const decision = await veto.guard("transfer_funds", { amount: 1500 });
 
 ## Packages
 
-| Package                                         | Language    | Install                    | Purpose                                      |
-| ----------------------------------------------- | ----------- | -------------------------- | -------------------------------------------- |
-| [`packages/veto`](./packages/veto)              | TypeScript  | local workspace only       | Reserved/local wrapper pending npm-name transfer |
-| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | Policy runtime for agent tool calls              |
-| [`veto` (Python)](./packages/sdk-python)        | Python      | `pip install veto`         | Python parity SDK with `protect()`               |
-| [`veto-cli`](./packages/cli)                    | TypeScript  | `npx --package veto-cli@latest veto init` | Currently published CLI package exposing `veto` |
-| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install --global veto-bash` | Native bash tool-call enforcement path       |
-| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Starter TypeScript app                           |
+| Package                                         | Language    | Install                                   | Purpose                                          |
+| ----------------------------------------------- | ----------- | ----------------------------------------- | ------------------------------------------------ |
+| [`packages/veto`](./packages/veto)              | TypeScript  | local workspace only                      | Reserved/local wrapper pending npm-name transfer |
+| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`                    | Policy runtime for agent tool calls              |
+| [`veto` (Python)](./packages/sdk-python)        | Python      | `pip install veto`                        | Python parity SDK with `protect()`               |
+| [`veto-cli`](./packages/cli)                    | TypeScript  | `npx --package veto-cli@latest veto init` | Currently published CLI package exposing `veto`  |
+| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install --global veto-bash`          | Native bash tool-call enforcement path           |
+| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`                     | Starter TypeScript app                           |
 
 ## Self-host locally
 

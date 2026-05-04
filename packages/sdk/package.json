@@ -168,6 +168,26 @@
       "types": "./dist/integrations/browser-use/index.d.ts",
       "import": "./dist/integrations/browser-use/index.js"
     },
+    "./integrations/claude-sdk": {
+      "types": "./dist/integrations/claude-sdk/index.d.ts",
+      "import": "./dist/integrations/claude-sdk/index.js"
+    },
+    "./integrations/google-adk": {
+      "types": "./dist/integrations/google-adk/index.d.ts",
+      "import": "./dist/integrations/google-adk/index.js"
+    },
+    "./integrations/mastra": {
+      "types": "./dist/integrations/mastra/index.d.ts",
+      "import": "./dist/integrations/mastra/index.js"
+    },
+    "./integrations/autogen": {
+      "types": "./dist/integrations/autogen/index.d.ts",
+      "import": "./dist/integrations/autogen/index.js"
+    },
+    "./integrations/crewai": {
+      "types": "./dist/integrations/crewai/index.d.ts",
+      "import": "./dist/integrations/crewai/index.js"
+    },
     "./integrations/vercel-ai": {
       "types": "./dist/integrations/vercel-ai/index.d.ts",
       "import": "./dist/integrations/vercel-ai/index.js"
