@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.8.6
+
+### Patch Changes
+
+- [#220](https://github.com/PlawIO/veto/pull/220) [`b758b06`](https://github.com/PlawIO/veto/commit/b758b06b71f051f7cca1429c01179d898fef88d7) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Update CLI and SDK docs to use the owned `veto-cli` package form while the unscoped `veto` npm name is externally owned.
+
 ## 2.8.5
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "veto-sdk",
-  "version": "2.8.5",
+  "version": "2.8.6",
   "description": "Policy runtime for AI agent tool calls",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
