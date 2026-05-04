@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname, basename, extname } from 'node:path';
-import { stringify } from 'yaml';
+import { parse as parseYaml, stringify } from 'yaml';
 import type { CustomProvider } from '../custom/types.js';
 import {
   PROVIDER_ENV_VARS,
@@ -8,6 +8,8 @@ import {
   CustomError,
 } from '../custom/types.js';
 import { createSafeRegex } from '../rules/condition-evaluator.js';
+import { createReplSessionContext } from './repl-context.js';
+import { generatePolicyFromPrompt, validateGeneratedYaml } from './repl-generate.js';
 
 export interface CompileOptions {
   input?: string;
@@ -442,6 +444,97 @@ function log(message: string, quiet: boolean): void {
   }
 }
 
+function shouldUseLegacyProvider(options: CompileOptions): boolean {
+  return options.provider !== undefined || detectProvider() !== null;
+}
+
+function resolveCompileOutputPath(options: CompileOptions): string {
+  const outputPath = resolve(options.output);
+  const outputDir = dirname(outputPath);
+
+  if (!existsSync(outputDir)) {
+    mkdirSync(outputDir, { recursive: true });
+  }
+
+  if (extname(outputPath) === '.yaml' || extname(outputPath) === '.yml') {
+    return outputPath;
+  }
+
+  if (!existsSync(outputPath)) {
+    mkdirSync(outputPath, { recursive: true });
+  }
+
+  const name = options.file
+    ? basename(options.file, extname(options.file))
+    : 'compiled';
+  return resolve(outputPath, `${name}.yaml`);
+}
+
+function countGeneratedRules(yaml: string): { inputRules: number; outputRules: number } {
+  const parsed = parseYaml(yaml) as { rules?: unknown; output_rules?: unknown } | null;
+  return {
+    inputRules: Array.isArray(parsed?.rules) ? parsed.rules.length : 0,
+    outputRules: Array.isArray(parsed?.output_rules) ? parsed.output_rules.length : 0,
+  };
+}
+
+async function compileWithSharedGeneration(
+  policyText: string,
+  options: CompileOptions,
+  result: CompileResult,
+  quiet: boolean
+): Promise<CompileResult> {
+  log('Generating policy YAML from prose...', quiet);
+
+  try {
+    const projectDir = process.cwd();
+    const context = await createReplSessionContext(projectDir);
+    const generated = await generatePolicyFromPrompt({
+      prompt: policyText,
+      projectDir,
+      rulesDirectory: context.rulesDir,
+      tools: context.discoveredTools,
+      existingRules: context.allRules,
+      allowTemplateFallback: true,
+      modeHint: 'deterministic',
+    });
+
+    validateGeneratedYaml(generated.yaml);
+
+    const finalPath = resolveCompileOutputPath(options);
+    writeFileSync(finalPath, generated.yaml, 'utf-8');
+
+    result.yaml = generated.yaml;
+    result.outputPath = finalPath;
+    result.success = true;
+
+    const counts = countGeneratedRules(generated.yaml);
+    const generatedSummary = counts.outputRules > 0
+      ? `  Generated ${counts.inputRules} input rule(s), ${counts.outputRules} output rule(s)`
+      : `  Generated ${counts.inputRules} rule(s)`;
+    log(generatedSummary, quiet);
+    log(`  Output: ${finalPath}`, quiet);
+
+    if (generated.notes) {
+      log('', quiet);
+      log('  Notes from generator:', quiet);
+      log(`  ${generated.notes}`, quiet);
+      result.messages.push(generated.notes);
+    }
+
+    for (const warning of generated.warnings) {
+      log(`  Warning: ${warning}`, quiet);
+      result.messages.push(warning);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    result.messages.push(`Policy generation failed: ${msg}`);
+    log(`Error: Policy generation failed: ${msg}`, quiet);
+  }
+
+  return result;
+}
+
 export async function compile(options: CompileOptions): Promise<CompileResult> {
   const { quiet = false } = options;
   const result: CompileResult = {
@@ -470,6 +563,10 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
     result.messages.push('Policy text is empty');
     log('Error: Policy text is empty', quiet);
     return result;
+  }
+
+  if (!shouldUseLegacyProvider(options)) {
+    return await compileWithSharedGeneration(policyText, options, result, quiet);
   }
 
   log('Compiling policy to deterministic rules...', quiet);
@@ -509,25 +606,7 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
   const yaml = toYaml(output, policyText);
   result.yaml = yaml;
 
-  const outputPath = resolve(options.output);
-  const outputDir = dirname(outputPath);
-
-  if (!existsSync(outputDir)) {
-    mkdirSync(outputDir, { recursive: true });
-  }
-
-  let finalPath: string;
-  if (extname(outputPath) === '.yaml' || extname(outputPath) === '.yml') {
-    finalPath = outputPath;
-  } else {
-    if (!existsSync(outputPath)) {
-      mkdirSync(outputPath, { recursive: true });
-    }
-    const name = options.file
-      ? basename(options.file, extname(options.file))
-      : 'compiled';
-    finalPath = resolve(outputPath, `${name}.yaml`);
-  }
+  const finalPath = resolveCompileOutputPath(options);
 
   writeFileSync(finalPath, yaml, 'utf-8');
   result.outputPath = finalPath;

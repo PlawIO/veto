@@ -95,17 +95,43 @@ const OUTPUT_RULE_RESPONSE = JSON.stringify({
 });
 
 describe('compile', () => {
+  const originalCwd = process.cwd();
+  const originalProviderEnv = {
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    VETO_API_KEY: process.env.VETO_API_KEY,
+    VETO_API_URL: process.env.VETO_API_URL,
+  };
+
   beforeEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
     mkdirSync(TEST_DIR, { recursive: true });
+
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.VETO_API_KEY;
+    delete process.env.VETO_API_URL;
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     vi.restoreAllMocks();
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
+    }
+
+    for (const [key, value] of Object.entries(originalProviderEnv)) {
+      if (value) {
+        process.env[key] = value;
+      } else {
+        delete process.env[key];
+      }
     }
   });
 
@@ -316,32 +342,61 @@ describe('compile', () => {
       expect(result.messages).toContain('Policy text is empty');
     });
 
-    it('should fail without API key', async () => {
-      const origKey = process.env.OPENAI_API_KEY;
-      const origAnthropicKey = process.env.ANTHROPIC_API_KEY;
-      const origGeminiKey = process.env.GEMINI_API_KEY;
-      const origOpenRouterKey = process.env.OPENROUTER_API_KEY;
+    it('should generate YAML without provider API keys via shared fallback', async () => {
+      process.chdir(TEST_DIR);
 
-      delete process.env.OPENAI_API_KEY;
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.GEMINI_API_KEY;
-      delete process.env.OPENROUTER_API_KEY;
+      const result = await compile({
+        input: 'block transfer_funds over $1000',
+        output: join(TEST_DIR, 'out.yaml'),
+        quiet: true,
+      });
 
-      try {
-        const result = await compile({
-          input: 'Block external emails',
-          output: join(TEST_DIR, 'out.yaml'),
-          quiet: true,
-        });
-        expect(result.success).toBe(false);
-        expect(result.messages[0]).toContain('No LLM provider configured');
-      } finally {
-        if (origKey) process.env.OPENAI_API_KEY = origKey;
-        if (origAnthropicKey) process.env.ANTHROPIC_API_KEY = origAnthropicKey;
-        if (origGeminiKey) process.env.GEMINI_API_KEY = origGeminiKey;
-        if (origOpenRouterKey)
-          process.env.OPENROUTER_API_KEY = origOpenRouterKey;
-      }
+      expect(result.success).toBe(true);
+      expect(result.outputPath).toBe(join(TEST_DIR, 'out.yaml'));
+      expect(result.messages.some((message) => message.includes('local deterministic template fallback'))).toBe(true);
+
+      const parsed = parseYaml(readFileSync(result.outputPath!, 'utf-8'));
+      expect(parsed.version).toBe('1.0');
+      expect(parsed.rules[0]).toMatchObject({
+        action: 'block',
+        tools: ['tool_call'],
+      });
+      expect(parsed.rules[0].conditions[0]).toMatchObject({
+        field: 'arguments.amount',
+        operator: 'greater_than',
+        value: 1000,
+      });
+    });
+
+    it('should write fallback YAML to a directory with an auto-generated filename', async () => {
+      process.chdir(TEST_DIR);
+
+      const policyFile = join(TEST_DIR, 'my-policies.txt');
+      writeFileSync(policyFile, 'require approval above $500', 'utf-8');
+      mkdirSync(join(TEST_DIR, 'src'), { recursive: true });
+      writeFileSync(
+        join(TEST_DIR, 'src', 'agent.ts'),
+        `const tools = {
+  approve_invoice: tool({ execute: async () => null }),
+};
+`,
+        'utf-8'
+      );
+      const outDir = join(TEST_DIR, 'rules');
+
+      const result = await compile({
+        file: policyFile,
+        output: outDir,
+        quiet: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.outputPath).toBe(join(outDir, 'my-policies.yaml'));
+      expect(existsSync(join(outDir, 'my-policies.yaml'))).toBe(true);
+
+      const parsed = parseYaml(readFileSync(result.outputPath!, 'utf-8'));
+      expect(parsed.rules[0].action).toBe('require_approval');
+      expect(parsed.rules[0].tools).toEqual(['approve_invoice']);
     });
 
     it('should write YAML file with mocked OpenAI', async () => {

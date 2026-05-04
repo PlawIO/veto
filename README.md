@@ -39,10 +39,11 @@ For a blocking local policy in under a minute:
 ```bash
 npm install veto-sdk
 npx veto init
+npx veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
 node examples/60-second-denied-call/denied-call.mjs
 ```
 
-This path is local-only: no provider SDK or API key is required.
+This path is local-only: no provider SDK or API key is required. For prose generation, Veto tries configured cloud/self-hosted/kernel endpoints first, then uses a local deterministic template fallback with review warnings; in fallback, no prompt or policy data leaves your machine.
 
 Install Veto into developer tools and MCP clients:
 
@@ -86,6 +87,12 @@ npx veto init
 ```
 
 `npx veto init` creates `./veto/veto.config.yaml` and `./veto/rules/defaults.yaml`. The default local rules are strict and include deterministic denials for sensitive paths and destructive shell commands.
+
+Prefer prose for new rules, then review the generated YAML:
+
+```bash
+npx veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
+```
 
 ```yaml
 rules:

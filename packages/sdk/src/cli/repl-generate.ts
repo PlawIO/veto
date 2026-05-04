@@ -39,6 +39,7 @@ export interface GeneratePolicyRequest {
     rulesDirectory?: string;
   };
   model?: string;
+  modeHint?: 'auto' | 'deterministic' | 'llm';
 }
 
 export interface GeneratePolicyResponse {
@@ -257,7 +258,7 @@ function resolveAllowTemplateFallback(
     return config.studio.generation.allowTemplateFallback;
   }
 
-  return false;
+  return true;
 }
 
 function createHeaders(config: EndpointConfig): Record<string, string> {
@@ -440,9 +441,11 @@ function buildKernelGenerateUserPrompt(options: {
   prompt: string;
   tools: DiscoveredTool[];
   existingRules: Rule[];
+  modeHint?: 'auto' | 'deterministic' | 'llm';
 }): string {
   return [
     `User request: ${options.prompt}`,
+    `Mode hint: ${options.modeHint ?? 'auto'}`,
     '',
     'Discovered tools:',
     stringifyToolsForPrompt(options.tools),
@@ -1440,6 +1443,7 @@ async function generateViaKernel(options: {
   prompt: string;
   tools: DiscoveredTool[];
   existingRules: Rule[];
+  modeHint?: 'auto' | 'deterministic' | 'llm';
 }): Promise<GeneratePolicyResult> {
   const raw = await callOpenAICompatible(
     options.endpoint,
@@ -1538,8 +1542,8 @@ export function generateTemplatePolicy(
   validateGeneratedYaml(yaml);
 
   const warnings = [
-    'No API key or kernel config configured. Using template fallback generation.',
-    'Set VETO_API_KEY or enable kernel mode in veto.config.yaml for LLM generation.',
+    'No cloud, self-hosted, or kernel generation endpoint configured. Using local deterministic template fallback; review the generated YAML before enforcing it.',
+    'No prompt or policy data leaves this machine in template fallback. Configure VETO_API_KEY, llm.baseUrl, or kernel mode for LLM-assisted generation.',
   ];
 
   if (hasUnsupportedBuyPriceCap(prompt)) {
@@ -1622,6 +1626,7 @@ export async function generatePolicyFromPrompt(options: {
   tools: DiscoveredTool[];
   existingRules: Rule[];
   allowTemplateFallback?: boolean;
+  modeHint?: 'auto' | 'deterministic' | 'llm';
 }): Promise<GeneratePolicyResult> {
   const projectDir = resolve(options.projectDir ?? process.cwd());
   const config = parseConfig(projectDir);
@@ -1651,10 +1656,21 @@ export async function generatePolicyFromPrompt(options: {
   if (!endpoint) {
     if (!allowTemplateFallback) {
       throw new Error(
-        'No generation endpoint configured. Configure VETO_API_KEY, kernel mode, or self-hosted llm.baseUrl, or enable demo template fallback.'
+        'No generation endpoint configured. Configure VETO_API_KEY, kernel mode, or self-hosted llm.baseUrl, or allow local deterministic template fallback.'
       );
     }
-    return generateTemplatePolicy(options.prompt, generationTools, options.existingRules);
+    const fallback = generateTemplatePolicy(options.prompt, generationTools, options.existingRules);
+    if (options.modeHint === 'llm') {
+      return {
+        ...fallback,
+        warnings: [
+          'Mode hint "llm" requested, but no generation endpoint is configured; using local deterministic template fallback.',
+          ...fallback.warnings,
+        ],
+      };
+    }
+
+    return fallback;
   }
 
   if (endpoint.mode === 'kernel') {
@@ -1664,6 +1680,7 @@ export async function generatePolicyFromPrompt(options: {
         prompt: options.prompt,
         tools: generationTools,
         existingRules: options.existingRules,
+        modeHint: options.modeHint,
       });
     } catch (error) {
       if (!allowTemplateFallback) {
@@ -1693,6 +1710,7 @@ export async function generatePolicyFromPrompt(options: {
       rulesDirectory: options.rulesDirectory,
     },
     model: endpoint.model,
+    modeHint: options.modeHint ?? 'auto',
   };
 
   if (endpoint.mode === 'cloud') {
@@ -1713,7 +1731,7 @@ export async function generatePolicyFromPrompt(options: {
         {
           toolName: selectedToolName,
           prompt: options.prompt,
-          modeHint: 'auto',
+          modeHint: options.modeHint ?? 'auto',
         },
         createHeaders(endpoint),
         endpoint.timeoutMs

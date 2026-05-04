@@ -35,6 +35,7 @@ Use the CLI to add local blocking rules when you are ready:
 
 ```bash
 npx veto init
+npx veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
 npx veto guard check --tool bash --args '{"command":"rm -rf /tmp/demo"}' --json
 ```
 
@@ -69,7 +70,7 @@ veto studio --legacy                     # line-based REPL instead of TUI
 
 ### Generate
 
-Convert a plain-language description into policy YAML.
+Convert a plain-language description into policy YAML. This is the canonical NL-to-YAML command.
 
 ```bash
 veto policy generate \
@@ -85,7 +86,9 @@ veto policy generate \
   --json
 ```
 
-`--mode-hint` accepts `auto`, `deterministic`, or `llm`. `--target` accepts `local` (default) or `cloud`.
+`--mode-hint` accepts `auto`, `deterministic`, or `llm`; local generation passes it through to configured endpoints and records review warnings when fallback is used. `--target` accepts `local` (default) or `cloud`.
+
+Keyless local generation tries configured endpoints in order: Veto Cloud via `VETO_API_KEY`, self-hosted `llm.baseUrl`, then kernel/Ollama when kernel mode is configured. If none is available, it uses local deterministic template fallback with warnings to review the YAML. No customer prompt or policy data leaves the machine in fallback. Use `--no-template-fallback` to fail instead of falling back; `--demo-template` remains a compatibility alias.
 
 ### Apply
 
@@ -253,7 +256,7 @@ Input format (one JSON object per line):
 
 ## Compile
 
-Compile a natural-language policy description into deterministic YAML rules using an LLM. Requires an API key for one of: OpenAI, Anthropic, Gemini, or OpenRouter.
+Compatibility command for older NL-to-YAML workflows. Prefer `veto policy generate`; `compile` now uses the same shared local generation stack by default and preserves legacy provider behavior when `--provider` is passed or provider environment variables are configured.
 
 ```bash
 veto compile --input "block external emails" --output ./veto/rules/
@@ -266,10 +269,10 @@ veto compile --file ./policy.txt --output ./rules/ --provider anthropic --model 
 | `--input`    | --               | Inline policy text                               |
 | `--file`     | --               | File containing policy text                      |
 | `--output`   | --               | Output path (file or directory, required)        |
-| `--provider` | auto-detected    | `openai`, `anthropic`, `gemini`, or `openrouter` |
+| `--provider` | optional legacy  | `openai`, `anthropic`, `gemini`, or `openrouter` |
 | `--model`    | provider default | Model to use for compilation                     |
 
-Auto-detection checks environment variables in order: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`.
+Provider auto-detection checks environment variables in order: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`. Without those provider env vars, `compile` is keyless and uses the policy-as-prose fallback behavior described under `policy generate`.
 
 ## Replay
 
@@ -378,7 +381,7 @@ veto version               # show version
 | `veto mcp doctor`        | Diagnose MCP configuration                       |
 | `veto mcp init`          | Generate starter MCP config                      |
 | `veto learn`             | Generate policies from observed tool calls       |
-| `veto compile`           | Compile NL policy to deterministic YAML via LLM  |
+| `veto compile`           | Compatibility NL-to-YAML wrapper                 |
 | `veto replay`            | Replay historical calls against a policy         |
 | `veto repl`              | Interactive REPL for rules and testing           |
 | `veto audit verify`      | Verify tamper-evident audit chain                |

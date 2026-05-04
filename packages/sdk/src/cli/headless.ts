@@ -63,6 +63,7 @@ interface PolicyGenerateCommandOptions {
   target: 'local' | 'cloud';
   savePath?: string;
   demoTemplate?: boolean;
+  allowTemplateFallback?: boolean;
 }
 
 interface PolicyApplyCommandOptions {
@@ -366,7 +367,8 @@ export async function runPolicyGenerateCommand(
         rulesDirectory: context.rulesDir,
         tools: context.discoveredTools,
         existingRules: context.allRules,
-        allowTemplateFallback: options.demoTemplate,
+        allowTemplateFallback: options.allowTemplateFallback ?? options.demoTemplate,
+        modeHint: options.modeHint,
       });
 
       const parsed = validateGeneratedYaml(generated.yaml);
