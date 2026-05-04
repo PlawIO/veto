@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.9.1
+
+### Patch Changes
+
+- [#224](https://github.com/PlawIO/veto/pull/224) [`c2acd1f`](https://github.com/PlawIO/veto/commit/c2acd1f1f198439bc51827ce3f1c0c4679913d47) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add dependency-free runtime adapter helpers for Claude SDK, Google ADK, Mastra, AutoGen, and CrewAI.
+
 ## 2.9.0
 
 ### Minor Changes
