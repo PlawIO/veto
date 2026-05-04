@@ -1,6 +1,6 @@
 {
   "name": "veto",
-  "version": "1.16.16",
+  "version": "1.16.17",
   "description": "Canonical Veto CLI package for npx veto init",
   "type": "module",
   "bin": {
