@@ -7,7 +7,10 @@ const TEST_DIR = `/tmp/veto-output-validation-test-${Date.now()}`;
 const VETO_DIR = join(TEST_DIR, 'veto');
 const RULES_DIR = join(VETO_DIR, 'rules');
 
-function writeConfig(mode: 'strict' | 'log' | 'shadow' = 'strict'): void {
+function writeConfig(
+  mode: 'strict' | 'log' | 'shadow' = 'strict',
+  piiConfig = ''
+): void {
   writeFileSync(
     join(VETO_DIR, 'veto.config.yaml'),
     `
@@ -17,6 +20,7 @@ validation:
   mode: "local"
 logging:
   level: "silent"
+${piiConfig}
 rules:
   directory: "./rules"
 `,
@@ -28,17 +32,53 @@ function writePolicy(content: string): void {
   writeFileSync(join(RULES_DIR, 'policy.yaml'), content, 'utf-8');
 }
 
+function mockNvidiaFetch(
+  createEntities: (text: string) => unknown[]
+): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async (_url: string, init?: { body?: unknown }) => {
+    const requestBody = JSON.parse(String(init?.body ?? '{}')) as {
+      messages?: Array<{ content?: string }>;
+    };
+    const text = requestBody.messages?.[0]?.content ?? '';
+    const entities = createEntities(text);
+
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              total_entities: entities.length,
+              entities,
+              tagged_text: '',
+            }),
+          },
+        }],
+      }),
+    };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
 describe('Veto output validation', () => {
   beforeEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
     mkdirSync(RULES_DIR, { recursive: true });
+    vi.stubEnv('NVIDIA_API_KEY', '');
+    vi.stubEnv('VETO_NVIDIA_API_KEY', '');
+    vi.stubEnv('VETO_PII_ENABLED', '');
+    vi.stubEnv('VETO_PII_PROVIDER', '');
     writeConfig();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
@@ -377,7 +417,225 @@ output_rules:
     expect(output.note).toBe('contains SECRET value');
   });
 
-  it('records real output validation latency in cloud decision logs', () => {
+  it('redacts nested output with async NVIDIA GLiNER PII detection', async () => {
+    writeConfig('strict', `pii:
+  enabled: true
+  provider: "nvidia-gliner-pii"
+  apiKey: "test-nvidia-key"
+  threshold: 0.4
+  maxFields: 8
+  maxTextChars: 1000`);
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: semantic-redact
+    name: Semantic PII redaction
+    enabled: true
+    severity: high
+    action: redact
+    tools: [profile_tool]
+    metadata:
+      detector: "nvidia-gliner-pii"
+      labels: [email, phone_number]
+      threshold: 0.4
+      fields: [output.profile.notes]
+    redact_with: "[PII]"
+`
+    );
+
+    const fetchMock = mockNvidiaFetch((text) => {
+      const email = 'alice@example.com';
+      const phone = '555-123-4567';
+      return [
+        { text: email, label: 'email', start: text.indexOf(email), end: text.indexOf(email) + email.length, score: 0.99 },
+        { text: phone, label: 'phone_number', start: text.indexOf(phone), end: text.indexOf(phone) + phone.length, score: 0.97 },
+      ];
+    });
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const result = await veto.validateOutputAsync('profile_tool', {
+      profile: {
+        notes: 'Contact alice@example.com or 555-123-4567 for follow-up.',
+      },
+    });
+
+    expect(result.decision).toBe('allow');
+    expect((result.output as any).profile.notes).toBe('Contact [PII] or [PII] for follow-up.');
+    expect(result.redactions).toBe(2);
+    expect(result.matchedRuleIds).toContain('semantic-redact');
+    expect(result.trace).toEqual([
+      expect.objectContaining({
+        ruleId: 'semantic-redact',
+        field: 'output.profile.notes',
+        pattern: 'nvidia-gliner-pii:email,phone_number',
+        redactedCount: 2,
+        replacement: '[PII]',
+      }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks semantic detector matches without leaking raw entity values', async () => {
+    writeConfig('strict', `pii:
+  enabled: true
+  provider: "nvidia-gliner-pii"
+  apiKey: "test-nvidia-key"`);
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: semantic-block
+    name: Semantic PII block
+    description: PII detected in output
+    enabled: true
+    severity: critical
+    action: block
+    tools: [report_tool]
+    metadata:
+      detector: "nvidia/gliner-pii"
+      labels: [email]
+      fields: [output.message]
+`
+    );
+
+    mockNvidiaFetch((text) => {
+      const email = 'alice@example.com';
+      return [{
+        value: email,
+        suggested_label: 'email',
+        start_position: text.indexOf(email),
+        end_position: text.indexOf(email) + email.length,
+        score: 0.98,
+      }];
+    });
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const result = await veto.validateOutputAsync('report_tool', {
+      message: 'Send the report to alice@example.com',
+    });
+
+    expect(result.decision).toBe('block');
+    expect(result.output).toBeNull();
+    expect(result.reason).toBe('PII detected in output');
+    expect(result.matchedRuleIds).toContain('semantic-block');
+    expect(JSON.stringify(result)).not.toContain('alice@example.com');
+  });
+
+  it('keeps semantic detector disabled without a key while regex fallback still works', async () => {
+    writeConfig('strict', `pii:
+  enabled: true
+  provider: "nvidia-gliner-pii"`);
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: semantic-with-regex-fallback
+    name: Semantic with regex fallback
+    enabled: true
+    severity: high
+    action: redact
+    tools: [profile_tool]
+    output_conditions:
+      - field: output.email
+        operator: matches
+        value: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}"
+    metadata:
+      detector: "nvidia-gliner-pii"
+      labels: [email]
+    redact_with: "[EMAIL]"
+`
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const result = await veto.validateOutputAsync('profile_tool', { email: 'alice@example.com' });
+
+    expect(result.decision).toBe('allow');
+    expect((result.output as any).email).toBe('[EMAIL]');
+    expect(result.redactions).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps validateOutput synchronous and does not call fetch for semantic-only rules', async () => {
+    writeConfig('strict', `pii:
+  enabled: true
+  provider: "nvidia-gliner-pii"
+  apiKey: "test-nvidia-key"`);
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: semantic-only
+    name: Semantic only
+    enabled: true
+    severity: high
+    action: block
+    tools: [profile_tool]
+    metadata:
+      detector: "nvidia-gliner-pii"
+      labels: [email]
+      fields: [output.email]
+`
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const result = veto.validateOutput('profile_tool', { email: 'alice@example.com' });
+
+    expect(result.decision).toBe('allow');
+    expect((result.output as any).email).toBe('alice@example.com');
+    expect(result.matchedRuleIds).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('awaits async semantic detector redaction in wrapped tools', async () => {
+    writeConfig('strict', `pii:
+  enabled: true
+  provider: "nvidia-gliner-pii"
+  apiKey: "test-nvidia-key"`);
+    writePolicy(
+      `
+version: "1.0"
+rules: []
+output_rules:
+  - id: semantic-wrap-redact
+    name: Semantic wrapped redaction
+    enabled: true
+    severity: high
+    action: redact
+    tools: [get_profile]
+    metadata:
+      detector: "nvidia-gliner-pii"
+      labels: [email]
+      fields: [output.email]
+    redact_with: "[EMAIL]"
+`
+    );
+
+    mockNvidiaFetch((text) => {
+      const email = 'alice@example.com';
+      return [{ text: email, label: 'email', start: text.indexOf(email), end: text.indexOf(email) + email.length, score: 0.99 }];
+    });
+
+    const veto = await Veto.init({ configDir: VETO_DIR });
+    const wrapped = veto.wrap([{
+      name: 'get_profile',
+      inputSchema: { type: 'object' },
+      handler: async (_input: Record<string, unknown>) => ({ email: 'alice@example.com' }),
+    }]);
+
+    const result = await wrapped[0].handler({});
+    expect((result as any).email).toBe('[EMAIL]');
+  });
+
+  it('records real output validation latency in cloud decision logs', async () => {
     const logDecision = vi.fn();
     const veto = Veto.fromRules({
       rules: [],
@@ -413,7 +671,7 @@ output_rules:
       return originalDateNow();
     });
 
-    (veto as any).validateOutputOrThrow('report_tool', {}, { note: 'contains SECRET value' });
+    await (veto as any).validateOutputOrThrow('report_tool', {}, { note: 'contains SECRET value' });
 
     expect(logDecision).toHaveBeenCalledWith(
       expect.objectContaining({
