@@ -1,5 +1,14 @@
 # veto
 
+## 1.16.19
+
+### Patch Changes
+
+- [#218](https://github.com/PlawIO/veto/pull/218) [`2568739`](https://github.com/PlawIO/veto/commit/2568739c10cb71caca2a222bb1092ec1acc53242) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Make policy-as-prose generation keyless by default with local deterministic fallback warnings, and route `veto compile` through the shared generation stack unless legacy providers are explicitly configured.
+
+- Updated dependencies [[`2568739`](https://github.com/PlawIO/veto/commit/2568739c10cb71caca2a222bb1092ec1acc53242)]:
+  - veto-sdk@2.8.5
+
 ## 1.16.18
 
 ### Patch Changes
