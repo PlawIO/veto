@@ -4,3 +4,5 @@ export { createVetoToolNode } from './tool-node.js';
 export type { VetoToolNodeOptions } from './tool-node.js';
 export { createVetoCallbackHandler } from './callback.js';
 export type { VetoCallbackOptions } from './callback.js';
+export { guardLangChainToolCall } from './guard.js';
+export type { LangChainGuardToolCall } from './guard.js';

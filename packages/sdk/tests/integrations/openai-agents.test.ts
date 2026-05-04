@@ -6,7 +6,7 @@ import {
 } from '../../src/integrations/openai-agents/index.js';
 
 function createMockVeto(
-  guardDecision: 'allow' | 'deny' = 'allow',
+  guardDecision: 'allow' | 'deny' | 'require_approval' = 'allow',
   guardReason?: string,
   outputDecision: 'allow' | 'block' = 'allow',
   outputReason?: string,
@@ -128,6 +128,25 @@ describe('OpenAI Agents Integration', () => {
     expect(result).toEqual({
       behavior: {
         type: 'allow',
+      },
+    });
+  });
+
+  it('tool input guardrail rejects approval-gated calls', async () => {
+    const veto = createMockVeto('require_approval', 'Approval required');
+    const [toolInputGuardrail] = createVetoToolGuardrails(veto);
+
+    const result = await toolInputGuardrail.guardrailFunction({
+      context: {
+        tool_name: 'deploy',
+        tool_arguments: '{"environment":"production"}',
+      },
+    });
+
+    expect(result).toEqual({
+      behavior: {
+        type: 'reject_content',
+        message: 'Approval required',
       },
     });
   });

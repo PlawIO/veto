@@ -1,4 +1,9 @@
 import type { Veto } from '../../core/veto.js';
+import {
+  guardRuntimeToolCall,
+  type RuntimeGuardDecision,
+  type RuntimeGuardOptions,
+} from '../shared.js';
 
 export interface GuardrailFunctionOutput {
   tripwireTriggered: boolean;
@@ -201,7 +206,7 @@ export function createVetoToolGuardrails(
     const args = parseToolArguments(resolveToolArguments(data.context));
     const result = await veto.guard(toolName, args);
 
-    if (result.decision === 'deny' && result.shadow !== true) {
+    if (result.decision !== 'allow' && result.shadow !== true) {
       return rejectToolGuardrail(result.reason ?? 'Policy violation');
     }
 
@@ -231,4 +236,21 @@ export function createVetoToolGuardrails(
       execute: outputGuardrailFunction,
     },
   ];
+}
+
+export type OpenAIAgentsToolGuardInput = ToolGuardrailContext | ToolInputGuardrailData;
+export type { RuntimeGuardDecision, RuntimeGuardOptions } from '../shared.js';
+
+export async function guardOpenAIAgentsToolCall(
+  veto: Veto,
+  input: OpenAIAgentsToolGuardInput,
+  options?: RuntimeGuardOptions,
+): Promise<RuntimeGuardDecision> {
+  const context = 'context' in input ? input.context : input;
+  const toolName = resolveToolName(context);
+  const args = parseToolArguments(resolveToolArguments(context));
+  return await guardRuntimeToolCall(veto, {
+    name: toolName,
+    arguments: args,
+  }, options);
 }
