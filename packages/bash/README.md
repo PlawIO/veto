@@ -1,6 +1,6 @@
 # veto-bash
 
-[![npm](https://img.shields.io/npm/v/veto-bash?color=000000)](https://www.npmjs.com/package/veto-bash)
+![npm](https://img.shields.io/npm/v/veto-bash?color=000000)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
 `veto-bash` is a Rust-first policy runtime for bash tool calls with MCP support. The npm package in @packages/bash ships the native runtime plus a small Node helper command; the hot path lives in the native crate at @crates/veto-bash.
@@ -37,7 +37,7 @@ The `<=3ms` target applies to the warm deterministic path, not a cold cloud roun
 ## Install
 
 ```bash
-npm install -g veto-bash
+npm install --global veto-bash
 ```
 
 This PR intentionally does not fake a universal native distribution pipeline. Today the supported story is:

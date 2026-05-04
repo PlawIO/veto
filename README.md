@@ -2,8 +2,7 @@
 
 Veto is the policy runtime for AI agent tool calls — write deny rules in plain English, enforce them deterministically, in 5 lines of code.
 
-[![npm](https://img.shields.io/npm/v/veto?label=veto&color=000000)](https://www.npmjs.com/package/veto)
-[![npm](https://img.shields.io/npm/v/veto-sdk?label=veto-sdk&color=000000)](https://www.npmjs.com/package/veto-sdk)
+![npm veto-sdk](https://img.shields.io/npm/v/veto-sdk?label=veto-sdk&color=000000)
 [![PyPI](https://img.shields.io/pypi/v/veto?label=python%20veto&color=000000)](https://pypi.org/project/veto)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
@@ -34,12 +33,14 @@ npm install veto-sdk
 
 Pass `safeTools` to LangChain, Vercel AI SDK, OpenAI Agents, MCP adapters, or your own tool runner. If `./veto/veto.config.yaml` and `./veto/rules/*.yaml` exist, `protect()` loads them. Without local policy, Veto applies `@veto/safe-defaults` in observe mode so suspicious shell/file/db/money-movement patterns are logged without surprise blocking.
 
+The unscoped `veto` npm name is not controlled by Plaw yet; use the owned `veto-cli` package form until transfer completes.
+
 For a blocking local policy in under a minute:
 
 ```bash
 npm install veto-sdk
-npx veto init
-npx veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
+npx --package veto-cli@latest veto init
+npx --package veto-cli@latest veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
 node examples/60-second-denied-call/denied-call.mjs
 ```
 
@@ -48,9 +49,9 @@ This path is local-only: no provider SDK or API key is required. For prose gener
 Install Veto into developer tools and MCP clients:
 
 ```bash
-npx veto install claude-code
-npx veto install cursor
-npx veto install codex
+npx --package veto-cli@latest veto install claude-code
+npx --package veto-cli@latest veto install cursor
+npx --package veto-cli@latest veto install codex
 veto-mcp-proxy --config ./veto/mcp.config.yaml
 ```
 
@@ -83,15 +84,15 @@ agent = create_agent(tools=safe)
 ## Add local deny rules
 
 ```bash
-npx veto init
+npx --package veto-cli@latest veto init
 ```
 
-`npx veto init` creates `./veto/veto.config.yaml` and `./veto/rules/defaults.yaml`. The default local rules are strict and include deterministic denials for sensitive paths and destructive shell commands.
+`npx --package veto-cli@latest veto init` creates `./veto/veto.config.yaml` and `./veto/rules/defaults.yaml`. The default local rules are strict and include deterministic denials for sensitive paths and destructive shell commands.
 
 Prefer prose for new rules, then review the generated YAML:
 
 ```bash
-npx veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
+npx --package veto-cli@latest veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
 ```
 
 ```yaml
@@ -126,12 +127,12 @@ const decision = await veto.guard("transfer_funds", { amount: 1500 });
 
 | Package                                         | Language    | Install                    | Purpose                                      |
 | ----------------------------------------------- | ----------- | -------------------------- | -------------------------------------------- |
-| [`veto`](./packages/veto)                       | TypeScript  | `npx veto init`            | Canonical CLI package behind `npx veto init` |
-| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | Policy runtime for agent tool calls          |
-| [`veto` (Python)](./packages/sdk-python)        | Python      | `pip install veto`         | Python parity SDK with `protect()`           |
-| [`veto-cli`](./packages/cli)                    | TypeScript  | `npx veto-cli@latest`      | Compatibility CLI package exposing `veto`    |
-| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install -g veto-bash` | Native bash tool-call enforcement path       |
-| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Starter TypeScript app                       |
+| [`packages/veto`](./packages/veto)              | TypeScript  | local workspace only       | Reserved/local wrapper pending npm-name transfer |
+| [`veto-sdk`](./packages/sdk)                    | TypeScript  | `npm install veto-sdk`     | Policy runtime for agent tool calls              |
+| [`veto` (Python)](./packages/sdk-python)        | Python      | `pip install veto`         | Python parity SDK with `protect()`               |
+| [`veto-cli`](./packages/cli)                    | TypeScript  | `npx --package veto-cli@latest veto init` | Currently published CLI package exposing `veto` |
+| [`veto-bash`](./packages/bash)                  | Rust + Node | `npm install --global veto-bash` | Native bash tool-call enforcement path       |
+| [`create-veto-app`](./packages/create-veto-app) | TypeScript  | `npm create veto-app`      | Starter TypeScript app                           |
 
 ## Self-host locally
 

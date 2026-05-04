@@ -76,8 +76,8 @@ const safeTools = await protect(tools);
 For MCP clients that can run a local proxy, install a project-local config and start the standalone proxy:
 
 ```bash
-npx veto install cursor
-npx veto install codex
+npx --package veto-cli@latest veto install cursor
+npx --package veto-cli@latest veto install codex
 veto-mcp-proxy --config ./veto/mcp.config.yaml
 ```
 

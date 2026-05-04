@@ -1,6 +1,6 @@
 # veto-sdk
 
-[![npm](https://img.shields.io/npm/v/veto-sdk?color=000000)](https://www.npmjs.com/package/veto-sdk)
+![npm](https://img.shields.io/npm/v/veto-sdk?color=000000)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
 TypeScript policy runtime for AI agent tool calls. Veto wraps your tools, evaluates deterministic policy before each handler runs, and preserves the original tool interface.
@@ -26,11 +26,11 @@ const agent = createAgent({ tools: safeTools });
 
 ```bash
 npm install veto-sdk
-npx veto init
+npx --package veto-cli@latest veto init
 node examples/60-second-denied-call/denied-call.mjs
 ```
 
-`npx veto init` creates blocking local defaults in `veto/rules/defaults.yaml`, so the example deterministically denies `bash` with `rm -rf` before the handler runs. No provider SDK or API key is required.
+`npx --package veto-cli@latest veto init` creates blocking local defaults in `veto/rules/defaults.yaml`, so the example deterministically denies `bash` with `rm -rf` before the handler runs. No provider SDK or API key is required.
 
 ## Python parity
 
@@ -44,10 +44,10 @@ agent = create_agent(tools=safe)
 ## Local policy
 
 ```bash
-npx veto init
+npx --package veto-cli@latest veto init
 ```
 
-The canonical npm package for `npx veto` is `veto`. The `veto-cli` and `veto-sdk` bins remain compatibility paths for existing users.
+For public no-install CLI usage, use the owned `veto-cli` package form: `npx --package veto-cli@latest veto ...`. The unscoped `veto` npm name is reserved/local pending transfer; `veto-cli` and `veto-sdk` bins remain compatibility paths for existing users.
 
 ```yaml
 rules:

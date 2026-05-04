@@ -1,7 +1,8 @@
 {
   "name": "veto",
   "version": "1.16.19",
-  "description": "Canonical Veto CLI package for npx veto init",
+  "private": true,
+  "description": "Local unpublished Veto CLI wrapper reserved for the future canonical npm package once npm ownership transfers",
   "type": "module",
   "bin": {
     "veto": "./dist/bin.js",
