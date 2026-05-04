@@ -1,5 +1,12 @@
 # create-veto-app
 
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies [[`3e46d8b`](https://github.com/PlawIO/veto/commit/3e46d8bfd7f8c61e96779490d037d08ba89463a9)]:
+  - veto-sdk@2.9.0
+
 ## 0.2.7
 
 ### Patch Changes
