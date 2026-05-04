@@ -1,5 +1,17 @@
 # veto-sdk
 
+## 2.9.0
+
+### Minor Changes
+
+- [#221](https://github.com/PlawIO/veto/pull/221) [`3e46d8b`](https://github.com/PlawIO/veto/commit/3e46d8bfd7f8c61e96779490d037d08ba89463a9) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add optional NVIDIA GLiNER PII semantic output detection for async output validation and wrapped-tool redaction while preserving synchronous output validation behavior.
+
+## 2.8.6
+
+### Patch Changes
+
+- [#220](https://github.com/PlawIO/veto/pull/220) [`b758b06`](https://github.com/PlawIO/veto/commit/b758b06b71f051f7cca1429c01179d898fef88d7) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Update CLI and SDK docs to use the owned `veto-cli` package form while the unscoped `veto` npm name is externally owned.
+
 ## 2.8.5
 
 ### Patch Changes

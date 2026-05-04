@@ -143,6 +143,17 @@ ${cloudConfigYaml}
 #   maxTokens: 500
 #   # baseUrl: "https://api.openai.com/v1"  # Optional override
 
+# Optional semantic PII detector for output_rules with metadata.detector: "nvidia-gliner-pii"
+# pii:
+#   enabled: false
+#   provider: "nvidia-gliner-pii"
+#   # apiKey: "NVIDIA_API_KEY"  # Prefer NVIDIA_API_KEY or VETO_NVIDIA_API_KEY env vars
+#   model: "nvidia/gliner-pii"
+#   threshold: 0.45
+#   timeout: 5000
+#   maxFields: 32
+#   maxTextChars: 8000
+
 # Human-in-the-loop approvals (for action: "require_approval" in local rules)
 # approval:
 #   callbackUrl: "http://localhost:8787/approvals"

@@ -4,6 +4,7 @@ import {
   evaluateConditionCollections,
 } from '../rules/condition-evaluator.js';
 import type { OutputRule, RuleCondition } from '../rules/types.js';
+import { isSemanticOutputRule } from './output-rule-detectors.js';
 
 const DEFAULT_REDACT_WITH = '[REDACTED]';
 
@@ -126,12 +127,21 @@ export class OutputValidator {
     rule: OutputRule,
     context: Record<string, unknown>
   ): boolean {
+    if (isSemanticOutputRule(rule) && !this.hasFallbackConditions(rule)) {
+      return false;
+    }
+
     return evaluateConditionCollections(
       rule.output_conditions,
       rule.output_condition_groups,
       context,
       { allowNestedObjectStringSearch: true }
     );
+  }
+
+  private hasFallbackConditions(rule: OutputRule): boolean {
+    return (rule.output_conditions?.length ?? 0) > 0
+      || (rule.output_condition_groups?.length ?? 0) > 0;
   }
 
   private buildEvaluationContext(

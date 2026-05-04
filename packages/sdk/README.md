@@ -98,6 +98,32 @@ const safeAutoGenFn = wrapAutoGenFunction(veto, "delete_file", deleteFile);
 const safeCrewTool = wrapCrewAITool(veto, crewTool);
 ```
 
+## Optional semantic PII output detection
+
+Output rules can opt into NVIDIA GLiNER PII detection for semantic redaction or blocking beyond regex fallbacks. Enable it explicitly and provide `NVIDIA_API_KEY` or `VETO_NVIDIA_API_KEY`; the synchronous `validateOutput()` API remains regex-only, while wrapped tools and `validateOutputAsync()` run the detector when configured.
+
+```yaml
+pii:
+  enabled: true
+  provider: "nvidia-gliner-pii"
+  model: "nvidia/gliner-pii"
+  threshold: 0.45
+
+output_rules:
+  - id: redact-pii
+    name: Redact semantic PII
+    enabled: true
+    severity: high
+    action: redact
+    metadata:
+      detector: "nvidia-gliner-pii"
+      labels: [email, phone_number, ssn, credit_debit_card]
+      fields: [output]
+    redact_with: "[REDACTED_PII]"
+```
+
+Detector failures fail open by default. Do not enable this in browser builds with client-side NVIDIA keys.
+
 ## API
 
 ### `protect(tools, options?)`

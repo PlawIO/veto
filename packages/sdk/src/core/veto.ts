@@ -60,6 +60,8 @@ import { PolicyCache } from '../cloud/policy-cache.js';
 import { validateDeterministic } from '../deterministic/validator.js';
 import type { LocalValidationResult } from '../deterministic/types.js';
 import { OutputValidator, type OutputValidationResult } from './output-validator.js';
+import { SemanticOutputValidator } from './semantic-output-validator.js';
+import { NvidiaGlinerPiiClient, NvidiaGlinerPiiError } from '../pii/nvidia-gliner-pii.js';
 import type {
   VetoBrowserOptions as SharedVetoBrowserOptions,
   VetoFromCloudOptions as SharedVetoFromCloudOptions,
@@ -151,6 +153,19 @@ const RESERVED_LOCAL_CONTEXT_KEYS = new Set(['market', 'budget', 'portfolio']);
 /**
  * Parsed veto.config.yaml structure.
  */
+export interface VetoPiiConfig {
+  enabled?: boolean;
+  provider?: 'nvidia-gliner-pii';
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  threshold?: number;
+  labels?: string[];
+  timeout?: number;
+  maxTextChars?: number;
+  maxFields?: number;
+}
+
 interface VetoConfigFile {
   version?: string;
   mode?: VetoMode;
@@ -180,6 +195,7 @@ interface VetoConfigFile {
     timeout?: number;
     baseUrl?: string;
   };
+  pii?: VetoPiiConfig;
   cloud?: {
     apiKey?: string;
     baseUrl?: string;
@@ -401,6 +417,8 @@ export interface VetoOptions {
     path?: string;
   };
 
+  pii?: VetoPiiConfig;
+
   /** @internal Pre-resolved tracer injected by init() after async OTEL load. */
   _otelTracer?: VetoTracer | null;
 }
@@ -445,6 +463,7 @@ export class Veto {
   private readonly economicBudgetEngine: LocalBudgetEngine | null;
   private readonly interceptor: Interceptor;
   private readonly outputValidator: OutputValidator;
+  private readonly semanticOutputValidator: SemanticOutputValidator | null;
   private readonly eventWebhookEmitter: EventWebhookEmitter;
 
   // Configuration
@@ -816,6 +835,17 @@ export class Veto {
       getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
     });
 
+    const piiDetector = this.resolvePiiDetector(options, config);
+    this.semanticOutputValidator = piiDetector
+      ? new SemanticOutputValidator({
+          logger: this.logger,
+          getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
+          piiClient: piiDetector.client,
+          maxFields: piiDetector.maxFields,
+          maxTextChars: piiDetector.maxTextChars,
+        })
+      : null;
+
     this.interceptor = new Interceptor({
       logger: this.logger,
       validationEngine: this.validationEngine,
@@ -829,7 +859,9 @@ export class Veto {
         this.emitDecisionEvent(context, result);
         this.streamDecisionRow(context, result, durationMs);
       },
-      outputValidator: this.outputValidator,
+      outputValidator: {
+        validate: (toolName, output) => this.validateOutputAsync(toolName, output),
+      },
     });
 
     this.logger.info('Veto initialized successfully');
@@ -1028,11 +1060,94 @@ export class Veto {
     return veto;
   }
 
+  private resolvePiiDetector(
+    options: VetoOptions,
+    config: VetoConfigFile
+  ): { client: NvidiaGlinerPiiClient; maxFields?: number; maxTextChars?: number } | null {
+    const piiConfig = options.pii ?? config.pii;
+    const envEnabled = this.browserMode
+      ? undefined
+      : Veto.parseEnvBoolean(process.env.VETO_PII_ENABLED);
+    const enabled = piiConfig?.enabled ?? envEnabled ?? false;
+    if (!enabled) {
+      return null;
+    }
+
+    if (this.browserMode) {
+      this.logger.warn('NVIDIA GLiNER PII output detector disabled in browser mode');
+      return null;
+    }
+
+    const envProvider = process.env.VETO_PII_PROVIDER;
+    const provider = piiConfig?.provider ?? envProvider ?? 'nvidia-gliner-pii';
+    if (provider !== 'nvidia-gliner-pii' && provider !== 'nvidia/gliner-pii') {
+      this.logger.warn('Unsupported PII detector provider configured', { provider });
+      return null;
+    }
+
+    const apiKey = piiConfig?.apiKey
+      ?? process.env.VETO_NVIDIA_API_KEY
+      ?? process.env.NVIDIA_API_KEY;
+    if (!apiKey || apiKey.trim().length === 0) {
+      this.logger.warn('NVIDIA GLiNER PII output detector enabled without an API key', {
+        provider: 'nvidia-gliner-pii',
+      });
+      return null;
+    }
+
+    try {
+      const client = new NvidiaGlinerPiiClient({
+        provider: 'nvidia-gliner-pii',
+        apiKey,
+        baseUrl: piiConfig?.baseUrl ?? process.env.NVIDIA_GLINER_PII_BASE_URL,
+        model: piiConfig?.model ?? process.env.NVIDIA_GLINER_PII_MODEL,
+        threshold: piiConfig?.threshold ?? Veto.parseEnvNumber(process.env.NVIDIA_GLINER_PII_THRESHOLD),
+        labels: piiConfig?.labels,
+        timeoutMs: piiConfig?.timeout,
+      });
+
+      this.logger.info('NVIDIA GLiNER PII output detector enabled', {
+        provider: client.provider,
+        model: client.model,
+      });
+
+      return {
+        client,
+        maxFields: piiConfig?.maxFields,
+        maxTextChars: piiConfig?.maxTextChars,
+      };
+    } catch (error) {
+      const metadata: Record<string, unknown> = { provider: 'nvidia-gliner-pii' };
+      if (error instanceof NvidiaGlinerPiiError) {
+        metadata.errorCode = error.code;
+        metadata.status = error.status;
+      } else if (error instanceof Error) {
+        metadata.errorName = error.name;
+      }
+      this.logger.warn('NVIDIA GLiNER PII output detector disabled after configuration error', metadata);
+      return null;
+    }
+  }
+
   private static parseEnvMode(mode: string | undefined): VetoMode | undefined {
     if (mode === 'strict' || mode === 'log' || mode === 'shadow') {
       return mode;
     }
     return undefined;
+  }
+
+  private static parseEnvBoolean(value: string | undefined): boolean | undefined {
+    if (!value) return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return undefined;
+  }
+
+  private static parseEnvNumber(value: string | undefined): number | undefined {
+    if (!value) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
 
   private static parseEnvLogSetting(value: string | undefined): {
@@ -3404,13 +3519,13 @@ export class Veto {
     });
   }
 
-  private validateOutputOrThrow(
+  private async validateOutputOrThrow(
     toolName: string,
     args: Record<string, unknown>,
     output: unknown
-  ): unknown {
+  ): Promise<unknown> {
     const startedAt = Date.now();
-    const outputResult = this.validateOutput(toolName, output);
+    const outputResult = await this.validateOutputAsync(toolName, output);
     const latencyMs = Date.now() - startedAt;
     this.logOutputValidation(toolName, args, outputResult, latencyMs);
     if (outputResult.decision === 'block') {
@@ -3511,7 +3626,7 @@ export class Veto {
         // Execute the original function with potentially modified arguments
         const finalArgs = result.finalArguments ?? input;
         const executionResult = await originalFunc.call(tool, finalArgs);
-        return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
+        return await veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
       };
 
       // Replace func
@@ -3541,7 +3656,7 @@ export class Veto {
           // Call original invoke with potentially modified arguments
           const finalArgs = result.finalArguments ?? input;
           const executionResult = await originalInvoke.call(tool, finalArgs, ...rest);
-          return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
+          return await veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
         };
       }
 
@@ -3586,10 +3701,10 @@ export class Veto {
           const finalArgs = result.finalArguments ?? callArgs;
           if (args.length === 1 && typeof args[0] === 'object') {
             const executionResult = await originalFunc.call(tool, finalArgs);
-            return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
+            return await veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
           }
           const executionResult = await originalFunc.apply(tool, args);
-          return veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
+          return await veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
         };
 
         wrapped[key] = wrappedFunc;
@@ -3688,7 +3803,8 @@ export class Veto {
 
       const finalArgs = result.finalArguments ?? callArgs;
       const executionResult = await serverClient.callTool({ name: args.name, arguments: finalArgs });
-      return veto.validateOutputOrThrow(args.name, finalArgs, executionResult) as MCPToolResult;
+      const validatedOutput = await veto.validateOutputOrThrow(args.name, finalArgs, executionResult);
+      return validatedOutput as MCPToolResult;
     };
 
     this.logger.debug('MCP tools wrapped', { count: tools.length });
@@ -3731,6 +3847,15 @@ export class Veto {
    */
   validateOutput(toolName: string, output: unknown): OutputValidationResult {
     return this.outputValidator.validate(toolName, output);
+  }
+
+  async validateOutputAsync(toolName: string, output: unknown): Promise<OutputValidationResult> {
+    const syncResult = this.outputValidator.validate(toolName, output);
+    if (syncResult.decision === 'block' || !this.semanticOutputValidator) {
+      return syncResult;
+    }
+
+    return await this.semanticOutputValidator.validate(toolName, syncResult);
   }
 
   isCloudReady(): boolean {
