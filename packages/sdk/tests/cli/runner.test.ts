@@ -12,6 +12,7 @@ describe('cli agent compatibility', () => {
     vi.restoreAllMocks();
     vi.doUnmock('../../src/cli/agent.js');
     vi.doUnmock('../../src/cli/install.js');
+    vi.doUnmock('../../src/cli/headless.js');
   });
 
   it('prints agent help without deprecated label or warning', async () => {
@@ -76,6 +77,58 @@ describe('cli agent compatibility', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('veto install claude-code'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('veto install cursor'));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('veto install codex'));
+  });
+
+  it('prints policy generate help with keyless fallback opt-out', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli(['help'])).resolves.toBe(0);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('--no-template-fallback'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('local deterministic fallback'));
+  });
+
+  it('passes --no-template-fallback through to policy generate', async () => {
+    const result = { ok: false, error: { code: 'policy_generate_failed', message: 'No generation endpoint configured.' } };
+    const runPolicyGenerateCommand = vi.fn().mockResolvedValue(result);
+    const printHeadlessResult = vi.fn();
+
+    vi.doMock('../../src/cli/headless.js', () => ({
+      printHeadlessResult,
+      resolvePolicySavePath: vi.fn((_projectDir: string, _tool: string, savePath?: string) => savePath),
+      runCloudLoginCommand: vi.fn(),
+      runCloudLogoutCommand: vi.fn(),
+      runCloudOrgUseCommand: vi.fn(),
+      runCloudProjectUseCommand: vi.fn(),
+      runCloudWhoamiCommand: vi.fn(),
+      runDoctorCommand: vi.fn(),
+      runGuardCheckCommand: vi.fn(),
+      runPolicyApplyCommand: vi.fn(),
+      runPolicyGenerateCommand,
+    }));
+
+    const { runCli } = await import('../../src/cli/runner.js');
+
+    await expect(runCli([
+      'policy',
+      'generate',
+      '--tool',
+      'bash',
+      '--prompt',
+      'block rm -rf',
+      '--mode-hint',
+      'deterministic',
+      '--no-template-fallback',
+    ])).resolves.toBe(1);
+
+    expect(runPolicyGenerateCommand).toHaveBeenCalledWith(expect.objectContaining({
+      tool: 'bash',
+      prompt: 'block rm -rf',
+      modeHint: 'deterministic',
+      allowTemplateFallback: false,
+    }));
+    expect(printHeadlessResult).toHaveBeenCalledWith(result, false);
   });
 
   it('prints install subcommand help', async () => {

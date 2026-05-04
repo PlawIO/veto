@@ -55,7 +55,7 @@ Usage:
 
 Canonical Commands:
   studio                               Start Veto Studio
-  policy generate --tool <name> --prompt <text> [--mode-hint auto|deterministic|llm] [--target local|cloud] [--save <path>] [--json]
+  policy generate --tool <name> --prompt <text> [--mode-hint auto|deterministic|llm] [--target local|cloud] [--save <path>] [--no-template-fallback] [--json]
   policy apply --file <path> [--target local|cloud] [--project <id>] [--json]
   guard check --tool <name> --args <json> [--context <json>] [--mode local|cloud|kernel|custom] [--json]
   cloud login
@@ -97,7 +97,8 @@ Options:
   --theme <name>                Theme: veto, claude, high-contrast
   --include-examples            Include examples/** in scan scope
   --include-tests               Include test/**, tests/**, __tests__/** in scan scope
-  --demo-template               Allow explicit template fallback generation
+  --demo-template               Compatibility alias for local template fallback
+  --no-template-fallback        Fail generation instead of using local deterministic fallback
   --json                        Print deterministic machine JSON output
   --non-interactive             Disable interactive prompts
   --base-url <url>              Override cloud API base URL for cloud commands
@@ -455,6 +456,7 @@ async function runPolicyCommand(
       target,
       savePath,
       demoTemplate: flags['demo-template'],
+      allowTemplateFallback: !flags['no-template-fallback'],
     });
 
     printHeadlessResult(result, json);

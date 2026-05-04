@@ -177,7 +177,7 @@ rules:
     expect(afterClearList.lines.join('\n')).not.toContain('extra-rule');
   });
 
-  it('uses template generation when explicitly enabled without LLM configuration', async () => {
+  it('uses template generation by default without LLM configuration', async () => {
     const result = await generatePolicyFromPrompt({
       prompt: 'block transfer_funds over $25000',
       projectDir: TEST_DIR,
@@ -194,12 +194,12 @@ rules:
         },
       ],
       existingRules: [],
-      allowTemplateFallback: true,
     });
 
     expect(result.mode).toBe('template');
     expect(result.yaml).toContain('transfer_funds');
-    expect(result.warnings.some((warning) => warning.includes('No API key or kernel config configured'))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes('local deterministic template fallback'))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes('No prompt or policy data leaves this machine'))).toBe(true);
   });
 
   it('rejects invalid YAML documents via schema validation', () => {

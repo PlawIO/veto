@@ -14,11 +14,19 @@ function writeFixture(relativePath: string, content: string): void {
 }
 
 describe('policy generate', () => {
+  const originalEnv = {
+    VETO_API_KEY: process.env.VETO_API_KEY,
+    VETO_API_URL: process.env.VETO_API_URL,
+  };
+
   beforeEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
     mkdirSync(TEST_DIR, { recursive: true });
+
+    delete process.env.VETO_API_KEY;
+    delete process.env.VETO_API_URL;
 
     writeFixture(
       'src/agent.ts',
@@ -50,6 +58,53 @@ rules:
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
+
+    if (originalEnv.VETO_API_KEY) {
+      process.env.VETO_API_KEY = originalEnv.VETO_API_KEY;
+    } else {
+      delete process.env.VETO_API_KEY;
+    }
+
+    if (originalEnv.VETO_API_URL) {
+      process.env.VETO_API_URL = originalEnv.VETO_API_URL;
+    } else {
+      delete process.env.VETO_API_URL;
+    }
+  });
+
+  it('uses local deterministic fallback by default for keyless local generation', async () => {
+    const result = await runPolicyGenerateCommand({
+      projectDir: TEST_DIR,
+      tool: 'bash',
+      prompt: 'block rm -rf',
+      modeHint: 'deterministic',
+      target: 'local',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.mode).toBe('template');
+    expect(result.data?.warnings.some((warning) => warning.includes('local deterministic template fallback'))).toBe(true);
+    expect(result.data?.warnings.some((warning) => warning.includes('No prompt or policy data leaves this machine'))).toBe(true);
+
+    const parsed = parseYaml(result.data!.yaml) as {
+      rules: Array<{ action: string; tools: string[] }>;
+    };
+    expect(parsed.rules[0]?.action).toBe('block');
+    expect(parsed.rules[0]?.tools).toEqual(['bash']);
+  });
+
+  it('fails keyless local generation when template fallback is disabled', async () => {
+    const result = await runPolicyGenerateCommand({
+      projectDir: TEST_DIR,
+      tool: 'bash',
+      prompt: 'block rm -rf',
+      target: 'local',
+      allowTemplateFallback: false,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe('policy_generate_failed');
+    expect(result.error?.message).toContain('No generation endpoint configured');
   });
 
   it('honors the requested tool in local generation and produces an enforceable rule', async () => {

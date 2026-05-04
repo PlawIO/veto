@@ -13,6 +13,8 @@ npx -y veto-cli@latest policy generate \
   --json
 ```
 
+Without a configured generation endpoint, this uses local deterministic template fallback with review warnings. No prompt or policy data leaves the machine in fallback. Add `--no-template-fallback` for endpoint-only strict mode.
+
 ## Create Policy (LLM-Assisted)
 
 ```bash

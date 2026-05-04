@@ -46,6 +46,8 @@ npx -y veto-cli@latest policy generate \
   --json
 ```
 
+Keyless local generation tries configured cloud/self-hosted/kernel endpoints first, then uses local deterministic template fallback with warnings. In fallback, no prompt or policy data leaves the machine. Use `--no-template-fallback` if strict endpoint-only behavior is required.
+
 3. If semantics are too broad for strict constraints, use LLM generation explicitly:
 
 ```bash
