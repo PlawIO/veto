@@ -1,23 +1,23 @@
 # veto-cli
 
-[![npm](https://img.shields.io/npm/v/veto-cli?color=000000)](https://www.npmjs.com/package/veto-cli)
+![npm](https://img.shields.io/npm/v/veto-cli?color=000000)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 
-Compatibility Veto CLI package. The canonical npm CLI package is `veto`; it ships the same `veto` bin and is the package behind `npx veto init`.
+Published Veto CLI package. It ships the `veto` bin; use the owned `veto-cli` package form while the unscoped `veto` npm name is externally owned.
 
 ## Install
 
 ```bash
-npm install -g veto
+npx --package veto-cli@latest veto init
 ```
 
-Or run without installing:
+Analogous commands use the same owned-package form:
 
 ```bash
-npx veto@latest init
+npx --package veto-cli@latest veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
 ```
 
-Existing `veto-cli` installs continue to work as a compatibility path:
+Existing `veto-cli` invocations continue to work as a compatibility path:
 
 ```bash
 npx veto-cli@latest init
@@ -34,17 +34,17 @@ const safeTools = await protect(tools);
 Use the CLI to add local blocking rules when you are ready:
 
 ```bash
-npx veto init
-npx veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
-npx veto guard check --tool bash --args '{"command":"rm -rf /tmp/demo"}' --json
+npx --package veto-cli@latest veto init
+npx --package veto-cli@latest veto policy generate --tool bash --prompt "block rm -rf" --save ./veto/rules/block-rm-rf.yaml
+npx --package veto-cli@latest veto guard check --tool bash --args '{"command":"rm -rf /tmp/demo"}' --json
 ```
 
 Install Veto directly into developer tools:
 
 ```bash
-npx veto install claude-code
-npx veto install cursor
-npx veto install codex
+npx --package veto-cli@latest veto install claude-code
+npx --package veto-cli@latest veto install cursor
+npx --package veto-cli@latest veto install codex
 ```
 
 `Veto.init()` and `.wrap()` are advanced/internal-facing SDK APIs; new app integrations should start with `protect(tools)`.
@@ -396,12 +396,12 @@ veto version               # show version
 
 ## Compatibility
 
-`veto` is the canonical npm package. `veto-cli` and `veto-sdk` still expose the `veto` bin for existing users.
+The unscoped `veto` npm package is reserved/local pending transfer. `veto-cli` is the currently published CLI package and exposes the `veto` bin; `veto-sdk` also retains a compatibility bin for existing users.
 
 ```bash
-npx veto@latest init      # canonical
-npx veto-cli@latest init  # compatibility
-npx veto-sdk@latest init  # compatibility
+npx --package veto-cli@latest veto init  # currently safe public CLI path
+npx veto-cli@latest init                 # compatibility
+npx veto-sdk@latest init                 # compatibility
 ```
 
 ## License

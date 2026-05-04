@@ -43,11 +43,11 @@
       },
       {
         "label": "veto-sdk",
-        "href": "https://www.npmjs.com/package/veto-sdk"
+        "href": "https://github.com/PlawIO/veto/tree/master/packages/sdk"
       },
       {
-        "label": "veto",
-        "href": "https://www.npmjs.com/package/veto"
+        "label": "veto-cli",
+        "href": "https://github.com/PlawIO/veto/tree/master/packages/cli"
       }
     ]
   },
@@ -61,11 +61,11 @@
         "items": [
           {
             "label": "veto-sdk",
-            "href": "https://www.npmjs.com/package/veto-sdk"
+            "href": "https://github.com/PlawIO/veto/tree/master/packages/sdk"
           },
           {
-            "label": "veto",
-            "href": "https://www.npmjs.com/package/veto"
+            "label": "veto-cli",
+            "href": "https://github.com/PlawIO/veto/tree/master/packages/cli"
           }
         ]
       }
