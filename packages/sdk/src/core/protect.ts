@@ -23,6 +23,11 @@ export interface ProtectOptions {
   logLevel?: LogLevel;
   stream?: boolean;
   streamMode?: StreamLogMode;
+  /**
+   * UNSAFE: if Veto initialization fails, continue with no active policies.
+   * Defaults to fail-closed so tools are not accidentally run unprotected.
+   */
+  allowAllOnInitError?: boolean;
 
   // Tracking
   sessionId?: string;
@@ -283,6 +288,7 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     logLevel: resolveProtectLogLevel(options),
     stream: options.stream,
     streamMode: options.streamMode,
+    allowAllOnInitError: options.allowAllOnInitError,
     sessionId: options.sessionId,
     agentId: options.agentId,
     userId: options.userId,
@@ -318,6 +324,32 @@ function createAllowAllInstance(options: ProtectOptions): Veto {
     budget: options.budget,
     costs: options.costs,
   });
+}
+
+function toInitError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function reportInitError(options: ProtectOptions, error: Error, allowAll: boolean): void {
+  const message = allowAll
+    ? 'UNSAFE Veto initialization fallback enabled; running in allow-all mode with no active policies'
+    : 'Veto initialization failed; failing closed and refusing to run tools unprotected';
+  const metadata = { error: error.message };
+
+  try {
+    options.onInitError?.(error);
+  } catch (callbackError) {
+    void callbackError;
+  }
+
+  if (options.logger) {
+    options.logger.warn(message, metadata);
+    return;
+  }
+
+  if (resolveProtectLogLevel(options) !== 'silent') {
+    process.stderr.write(`[veto] ${message}: ${error.message}\n`);
+  }
 }
 
 function shouldEmitAutoApplyMessage(logLevel: LogLevel | undefined): boolean {
@@ -412,13 +444,10 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
       }
     }
   } catch (error) {
-    if (options.onInitError) {
-      options.onInitError(error instanceof Error ? error : new Error(String(error)));
-    }
-    if (options.logger) {
-      options.logger.warn('Veto initialization failed, running in allow-all mode', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const initError = toInitError(error);
+    reportInitError(options, initError, options.allowAllOnInitError === true);
+    if (options.allowAllOnInitError !== true) {
+      throw initError;
     }
     instance = createAllowAllInstance(options);
   }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { runInstallCommand } from '../../src/cli/install.js';
 
 const TMP_ROOT = `/tmp/veto-install-cli-test-${Date.now()}`;
@@ -11,6 +12,41 @@ function tmpDir(name: string): string {
 
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
+}
+
+function runClaudeHook(
+  projectDir: string,
+  input: string,
+  env: Record<string, string> = {}
+): { decision: string; reason: string; stderr: string } {
+  const hookPath = join(projectDir, '.claude', 'hooks', 'veto-hook.mjs');
+  const result = spawnSync(process.execPath, [hookPath], {
+    input,
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      CLAUDE_PROJECT_DIR: projectDir,
+      ...env,
+    },
+  });
+  expect(result.status).toBe(0);
+  const parsed = JSON.parse(result.stdout) as {
+    hookSpecificOutput?: {
+      permissionDecision?: string;
+      permissionDecisionReason?: string;
+    };
+  };
+  return {
+    decision: parsed.hookSpecificOutput?.permissionDecision ?? '',
+    reason: parsed.hookSpecificOutput?.permissionDecisionReason ?? '',
+    stderr: result.stderr,
+  };
+}
+
+function writeExecutable(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content, 'utf-8');
+  chmodSync(path, 0o755);
 }
 
 describe('install cli commands', () => {
@@ -74,6 +110,65 @@ describe('install cli commands', () => {
     expect(second.data?.hookStatus).toBe('unchanged');
     expect(second.data?.settingsUpdated).toBe(false);
     expect(readFileSync(settingsPath, 'utf-8')).toBe(afterFirst);
+  });
+
+  it('allows missing Veto config bootstrap from the Claude hook', () => {
+    const projectDir = tmpDir('claude-hook-bootstrap');
+    const installed = runInstallCommand({ target: 'claude-code', directory: projectDir });
+    expect(installed.ok).toBe(true);
+
+    const result = runClaudeHook(projectDir, '{not-json');
+
+    expect(result.decision).toBe('allow');
+    expect(result.reason).toContain('Veto is not initialized');
+  });
+
+  it('fails closed from the Claude hook when Veto is configured but broken', () => {
+    const projectDir = tmpDir('claude-hook-fail-closed');
+    const installed = runInstallCommand({ target: 'claude-code', directory: projectDir });
+    expect(installed.ok).toBe(true);
+    mkdirSync(join(projectDir, 'veto'), { recursive: true });
+    writeFileSync(join(projectDir, 'veto', 'veto.config.yaml'), 'rules:\n  directory: ./rules\n', 'utf-8');
+
+    const malformed = runClaudeHook(projectDir, '{not-json');
+    expect(malformed.decision).toBe('deny');
+    expect(malformed.reason).toContain('payload was not valid JSON');
+
+    const missingTool = runClaudeHook(projectDir, '{}');
+    expect(missingTool.decision).toBe('deny');
+    expect(missingTool.reason).toContain('tool_name');
+
+    const startupFailure = runClaudeHook(projectDir, JSON.stringify({ tool_name: 'Bash', tool_input: {} }), {
+      VETO_CLI: join(projectDir, 'missing-veto-cli'),
+    });
+    expect(startupFailure.decision).toBe('deny');
+    expect(startupFailure.reason).toContain('failed to start');
+
+    const invalidJsonCli = join(projectDir, 'bin', 'invalid-json-cli');
+    writeExecutable(invalidJsonCli, '#!/usr/bin/env node\nprocess.stdout.write("not json\\n");\n');
+    const invalidJson = runClaudeHook(projectDir, JSON.stringify({ tool_name: 'Bash', tool_input: {} }), {
+      VETO_CLI: invalidJsonCli,
+    });
+    expect(invalidJson.decision).toBe('deny');
+    expect(invalidJson.reason).toContain('invalid JSON');
+
+    const errorCli = join(projectDir, 'bin', 'error-cli');
+    writeExecutable(
+      errorCli,
+      '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ ok: false, error: { message: "guard failed" } }) + "\\n");\n'
+    );
+    const guardError = runClaudeHook(projectDir, JSON.stringify({ tool_name: 'Bash', tool_input: {} }), {
+      VETO_CLI: errorCli,
+    });
+    expect(guardError.decision).toBe('deny');
+    expect(guardError.reason).toContain('guard failed');
+
+    const unsafeOptIn = runClaudeHook(projectDir, JSON.stringify({ tool_name: 'Bash', tool_input: {} }), {
+      VETO_CLI: errorCli,
+      VETO_HOOK_FAIL_OPEN: '1',
+    });
+    expect(unsafeOptIn.decision).toBe('allow');
+    expect(unsafeOptIn.reason).toContain('VETO_HOOK_FAIL_OPEN=1');
   });
 
   it('does not overwrite custom Claude hook without --force', () => {
