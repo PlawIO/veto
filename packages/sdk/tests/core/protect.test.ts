@@ -120,6 +120,58 @@ describe('protect', () => {
     }));
   });
 
+  it('fails closed by default when initialization fails', async () => {
+    const tool = createTool('cloud_tool');
+    const initError = new Error('cloud init failed');
+    const logger = { warn: vi.fn() };
+    const onInitError = vi.fn();
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules');
+    vi.spyOn(Veto, 'init').mockRejectedValue(initError);
+
+    await expect(protect([tool], {
+      apiKey: 'veto_xxx',
+      logLevel: 'silent',
+      logger,
+      onInitError,
+    })).rejects.toBe(initError);
+
+    expect(onInitError).toHaveBeenCalledWith(initError);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Veto initialization failed; failing closed and refusing to run tools unprotected',
+      { error: 'cloud init failed' }
+    );
+    expect(fromRulesSpy).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit unsafe option to allow-all after initialization failure', async () => {
+    const tool = createTool('cloud_tool', 'allowed');
+    const initError = new Error('cloud init failed');
+    const logger = { warn: vi.fn() };
+    const fakeVeto = {
+      wrap: vi.fn((tools: TestTool[]) => tools),
+      wrapTool: vi.fn((singleTool: TestTool) => singleTool),
+    } as unknown as Veto;
+    vi.spyOn(Veto, 'init').mockRejectedValue(initError);
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules').mockReturnValue(fakeVeto);
+
+    const wrapped = await protect([tool], {
+      apiKey: 'veto_xxx',
+      allowAllOnInitError: true,
+      logLevel: 'silent',
+      logger,
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      'UNSAFE Veto initialization fallback enabled; running in allow-all mode with no active policies',
+      { error: 'cloud init failed' }
+    );
+    expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      rules: [],
+      outputRules: [],
+    }));
+    await expect(wrapped[0].handler({})).resolves.toBe('allowed');
+  });
+
   it('uses fromRules path when inline rules are provided', async () => {
     const tool = createTool('transfer_funds');
     const fakeVeto = {

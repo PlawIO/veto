@@ -1,0 +1,6 @@
+{
+  "tags": ["docker", "github-actions", "node"],
+  "sentinels": ["Dockerfile", "package.json"],
+  "detectedAt": "2026-05-06T14:20:27.717Z",
+  "rootPath": "/home/veto"
+}

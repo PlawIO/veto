@@ -6,6 +6,10 @@ import {
   ToolCallDeniedError,
   wrapAction,
 } from '../index.js';
+import {
+  protect as browserProtect,
+  __resetProtectCacheForTests,
+} from '../protect.js';
 import type { OutputRule, Rule } from '../../rules/types.js';
 
 const fetchMock = vi.fn();
@@ -30,6 +34,7 @@ function createNavigateBlockRule(): Rule {
 
 describe('browser entry', () => {
   beforeEach(() => {
+    __resetProtectCacheForTests();
     vi.clearAllMocks();
     fetchMock.mockResolvedValue({
       ok: true,
@@ -40,6 +45,7 @@ describe('browser entry', () => {
   });
 
   afterEach(() => {
+    __resetProtectCacheForTests();
     vi.restoreAllMocks();
   });
 
@@ -440,6 +446,58 @@ describe('browser entry', () => {
         }),
       })
     );
+  });
+
+  it('browser protect fails closed by default when cloud initialization fails', async () => {
+    const initError = new Error('cloud policies failed');
+    const logger = { warn: vi.fn() };
+    const onInitError = vi.fn();
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules');
+    vi.spyOn(Veto, 'fromCloud').mockRejectedValue(initError);
+
+    await expect(browserProtect({
+      name: 'navigate',
+      handler: async () => 'ok',
+    }, {
+      apiKey: 'veto_test_key',
+      logLevel: 'silent',
+      logger,
+      onInitError,
+    })).rejects.toBe(initError);
+
+    expect(onInitError).toHaveBeenCalledWith(initError);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Veto initialization failed; failing closed and refusing to run tools unprotected',
+      { error: 'cloud policies failed' }
+    );
+    expect(fromRulesSpy).not.toHaveBeenCalled();
+  });
+
+  it('browser protect requires explicit unsafe allow-all on cloud initialization failure', async () => {
+    const initError = new Error('cloud policies failed');
+    const logger = { warn: vi.fn() };
+    vi.spyOn(Veto, 'fromCloud').mockRejectedValue(initError);
+    const fromRulesSpy = vi.spyOn(Veto, 'fromRules');
+
+    const wrapped = await browserProtect({
+      name: 'navigate',
+      handler: async () => 'ok',
+    }, {
+      apiKey: 'veto_test_key',
+      allowAllOnInitError: true,
+      logLevel: 'silent',
+      logger,
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      'UNSAFE Veto initialization fallback enabled; running in allow-all mode with no active policies',
+      { error: 'cloud policies failed' }
+    );
+    expect(fromRulesSpy).toHaveBeenCalledWith(expect.objectContaining({
+      rules: [],
+      outputRules: [],
+    }));
+    expect(wrapped.name).toBe('navigate');
   });
 
   it('fromCloud passes mode through to the instance', async () => {

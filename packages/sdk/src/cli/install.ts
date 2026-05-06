@@ -36,9 +36,25 @@ function respond(permissionDecision, permissionDecisionReason) {
   process.exit(0);
 }
 
-function failOpen(reason) {
+function unsafeFailOpenEnabled() {
+  return process.env.VETO_HOOK_FAIL_OPEN === '1';
+}
+
+function allowNotConfigured(reason) {
   process.stderr.write('[veto-hook] ' + reason + '\\n');
   respond('allow', reason);
+}
+
+function failClosed(reason) {
+  if (unsafeFailOpenEnabled()) {
+    const unsafeReason = reason + ' VETO_HOOK_FAIL_OPEN=1 is set; allowing call unsafely.';
+    process.stderr.write('[veto-hook] ' + unsafeReason + '\\n');
+    respond('allow', unsafeReason);
+    return;
+  }
+
+  process.stderr.write('[veto-hook] ' + reason + '\\n');
+  respond('deny', reason);
 }
 
 function asRecord(value) {
@@ -60,25 +76,25 @@ function formatReason(data) {
 }
 
 async function main() {
+  const projectDir = resolve(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  const configPath = resolve(projectDir, 'veto', 'veto.config.yaml');
+  if (!existsSync(configPath)) {
+    allowNotConfigured('Veto is not initialized in this project; run npx veto init to enable enforcement.');
+    return;
+  }
+
   let envelope;
   try {
     const input = await readStdin();
     envelope = JSON.parse(input || '{}');
   } catch {
-    failOpen('Claude Code hook payload was not valid JSON; allowing call.');
-    return;
-  }
-
-  const projectDir = resolve(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  const configPath = resolve(projectDir, 'veto', 'veto.config.yaml');
-  if (!existsSync(configPath)) {
-    failOpen('Veto is not initialized in this project; run npx veto init to enable enforcement.');
+    failClosed('Claude Code hook payload was not valid JSON; denying call because Veto is configured.');
     return;
   }
 
   const toolName = typeof envelope.tool_name === 'string' ? envelope.tool_name : '';
   if (!toolName) {
-    failOpen('Claude Code hook payload did not include tool_name; allowing call.');
+    failClosed('Claude Code hook payload did not include tool_name; denying call because Veto is configured.');
     return;
   }
 
@@ -104,7 +120,7 @@ async function main() {
   });
 
   if (guard.error) {
-    failOpen('Veto guard check failed to start: ' + guard.error.message + '; allowing call.');
+    failClosed('Veto guard check failed to start: ' + guard.error.message + '; denying call.');
     return;
   }
 
@@ -112,7 +128,7 @@ async function main() {
   const lastLine = stdout.split(/\\r?\\n/).filter(Boolean).at(-1);
   if (!lastLine) {
     const stderr = (guard.stderr || '').trim();
-    failOpen('Veto guard check produced no JSON output' + (stderr ? ': ' + stderr : '') + '; allowing call.');
+    failClosed('Veto guard check produced no JSON output' + (stderr ? ': ' + stderr : '') + '; denying call.');
     return;
   }
 
@@ -120,7 +136,7 @@ async function main() {
   try {
     result = JSON.parse(lastLine);
   } catch {
-    failOpen('Veto guard check returned invalid JSON; allowing call.');
+    failClosed('Veto guard check returned invalid JSON; denying call.');
     return;
   }
 
@@ -128,7 +144,7 @@ async function main() {
     const message = result.error && typeof result.error.message === 'string'
       ? result.error.message
       : 'Veto guard check failed';
-    failOpen(message + '; allowing call.');
+    failClosed(message + '; denying call.');
     return;
   }
 
