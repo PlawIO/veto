@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
@@ -172,8 +172,11 @@ function loadCloudSession(): CloudSession | null {
 
 function persistCloudSession(session: CloudSession): void {
   const sessionPath = getCloudSessionPath();
-  mkdirSync(resolve(sessionPath, '..'), { recursive: true });
-  writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8');
+  const sessionDir = resolve(sessionPath, '..');
+  mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+  chmodSync(sessionDir, 0o700);
+  writeFileSync(sessionPath, JSON.stringify(session, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  chmodSync(sessionPath, 0o600);
 }
 
 function clearCloudSession(): void {
@@ -633,7 +636,7 @@ export async function runGuardCheckCommand(
 
   if (options.mode === 'local') {
     try {
-      const context = await createReplSessionContext(projectDir);
+      const context = await createReplSessionContext(projectDir, { strictPolicies: true });
       const veto = Veto.fromRules({
         rules: context.allRules,
         logLevel: 'silent',

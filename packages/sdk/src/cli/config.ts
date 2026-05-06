@@ -16,6 +16,7 @@ import { RuleValidator } from '../rules/rule-validator.js';
 import type { RuleValidatorConfig } from '../rules/rule-validator.js';
 import type { ValidationAPIConfig } from '../rules/api-client.js';
 import type { YamlParser } from '../rules/loader.js';
+import { resolvePolicyRulesDirectory } from './policy-paths.js';
 
 /**
  * Parsed veto.config.yaml structure.
@@ -149,8 +150,11 @@ export async function loadVetoConfig(
   };
 
   // Resolve rules directory
-  const rulesRelative = rawConfig.rules?.directory ?? './rules';
-  const rulesDir = resolve(resolvedVetoDir, rulesRelative);
+  const rulesDir = resolvePolicyRulesDirectory({
+    vetoDir: resolvedVetoDir,
+    configuredDirectory: rawConfig.rules?.directory,
+    requireExists: true,
+  });
   const recursiveRules = rawConfig.rules?.recursive ?? true;
 
   // Fail mode
@@ -162,6 +166,7 @@ export async function loadVetoConfig(
     rulesDir: rulesDir,
     yamlParser: options.yamlParser,
     recursiveRuleSearch: recursiveRules,
+    strictRuleLoading: true,
     failMode: failMode,
     sessionId: options.sessionId,
     agentId: options.agentId,

@@ -30,6 +30,8 @@ export interface RuleValidatorConfig {
   yamlParser?: YamlParser;
   /** Whether to search subdirectories for rules */
   recursiveRuleSearch?: boolean;
+  /** Whether rule load errors should abort initialization */
+  strictRuleLoading?: boolean;
   /** Behavior when API is unavailable */
   failMode?: 'open' | 'closed';
   /** Session ID for tracking */
@@ -120,7 +122,8 @@ export class RuleValidator {
       } else {
         this.ruleLoader.loadFromDirectory(
           this.config.rulesDir,
-          this.config.recursiveRuleSearch ?? true
+          this.config.recursiveRuleSearch ?? true,
+          this.config.strictRuleLoading ?? false
         );
       }
     }

@@ -39,6 +39,28 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
+async function readSsePayload(reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs = 1000): Promise<string | null> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const read = (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return null;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const match = buffer.match(/^data: (.*)$/m);
+      if (match) {
+        return match[1] ?? '';
+      }
+    }
+  })();
+  const timeout = new Promise<null>((resolveTimeout) => {
+    setTimeout(() => resolveTimeout(null), timeoutMs);
+  });
+  return await Promise.race([read, timeout]);
+}
+
 describe('mcp cli commands', () => {
   afterEach(() => {
     if (existsSync(TMP_ROOT)) {
@@ -391,6 +413,125 @@ describe('mcp cli commands', () => {
       expect(body.error?.message).toContain('Request body exceeds');
     } finally {
       await gateway.stop();
+    }
+  });
+
+  it('denies tool calls when policy server returns malformed decisions', async () => {
+    let upstreamCalls = 0;
+    const policyServer = createServer((req, res) => {
+      if (req.url === '/v1/validate') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ decision: 'definitely_allow' }));
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    const upstreamServer = createServer((req, res) => {
+      upstreamCalls += 1;
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }));
+    });
+
+    const policyPort = await listen(policyServer);
+    const upstreamPort = await listen(upstreamServer);
+    const gateway = createMcpGatewayServerForTesting({
+      listen: { host: '127.0.0.1', port: 0 },
+      policy: { serverUrl: `http://127.0.0.1:${policyPort}`, apiKey: 'veto_test_key_1234567890' },
+      upstreams: [
+        { name: 'default', transport: 'mcp-sse', url: `http://127.0.0.1:${upstreamPort}`, timeoutMs: 1000 },
+      ],
+      logging: { level: 'info' },
+    });
+
+    await gateway.start();
+    const address = gateway.getAddress();
+    expect(address).not.toBeNull();
+
+    try {
+      const response = await fetch(`http://${address!.host}:${address!.port}/default`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'dangerous_tool', arguments: {} },
+        }),
+      });
+      const body = await response.json() as { error?: { code?: number; message?: string } };
+
+      expect(body.error?.code).toBe(-32001);
+      expect(body.error?.message).toContain('invalid decision payload');
+      expect(upstreamCalls).toBe(0);
+    } finally {
+      await gateway.stop();
+      await closeServer(policyServer);
+      await closeServer(upstreamServer);
+    }
+  });
+
+  it('does not broadcast policy decisions to unrelated SSE subscribers', async () => {
+    const policyServer = createServer((req, res) => {
+      if (req.url === '/v1/validate') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ decision: 'allow' }));
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    const upstreamServer = createServer((req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { ok: true } }));
+    });
+
+    const policyPort = await listen(policyServer);
+    const upstreamPort = await listen(upstreamServer);
+    const gateway = createMcpGatewayServerForTesting({
+      listen: { host: '127.0.0.1', port: 0 },
+      policy: { serverUrl: `http://127.0.0.1:${policyPort}`, apiKey: 'veto_test_key_1234567890' },
+      upstreams: [
+        { name: 'default', transport: 'mcp-sse', url: `http://127.0.0.1:${upstreamPort}`, timeoutMs: 1000 },
+      ],
+      logging: { level: 'info' },
+    });
+
+    await gateway.start();
+    const address = gateway.getAddress();
+    expect(address).not.toBeNull();
+
+    const sseResponse = await fetch(`http://${address!.host}:${address!.port}/default`);
+    const reader = sseResponse.body?.getReader();
+    expect(reader).toBeDefined();
+
+    try {
+      const session = await readSsePayload(reader!);
+      expect(session).toContain('notifications/session');
+
+      const response = await fetch(`http://${address!.host}:${address!.port}/default`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/call',
+          params: { name: 'safe_tool', arguments: {} },
+        }),
+      });
+      expect(response.status).toBe(200);
+
+      const leaked = await readSsePayload(reader!, 100);
+      expect(leaked).toBeNull();
+    } finally {
+      await reader?.cancel();
+      await gateway.stop();
+      await closeServer(policyServer);
+      await closeServer(upstreamServer);
     }
   });
 });

@@ -604,6 +604,16 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
   }
 
   const yaml = toYaml(output, policyText);
+
+  try {
+    validateGeneratedYaml(yaml);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    result.messages.push(`Invalid compiled YAML: ${msg}`);
+    log(`Error: Invalid compiled YAML: ${msg}`, quiet);
+    return result;
+  }
+
   result.yaml = yaml;
 
   const finalPath = resolveCompileOutputPath(options);

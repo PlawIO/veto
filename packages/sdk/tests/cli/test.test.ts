@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   test as vetoTest,
@@ -158,7 +158,7 @@ rules:
       expect(result.flatMap(rs => rs.rules)).toHaveLength(2);
     });
 
-    it('should skip invalid YAML files', () => {
+    it('should reject invalid YAML files', () => {
       writeFileSync(join(TEST_DIR, 'bad.yaml'), '{{invalid yaml', 'utf-8');
       writeFileSync(
         join(TEST_DIR, 'good.yaml'),
@@ -166,8 +166,30 @@ rules:
         'utf-8'
       );
 
+      expect(() => loadRuleSets(TEST_DIR)).toThrow('Invalid policy file');
+    });
+
+    it('should not follow symlink loops during YAML discovery', () => {
+      const subDir = join(TEST_DIR, 'sub');
+      mkdirSync(subDir, { recursive: true });
+      symlinkSync(TEST_DIR, join(subDir, 'loop'), 'dir');
+      writeFileSync(
+        join(TEST_DIR, 'rules.yaml'),
+        `version: "1.0"\nname: rules\nrules:\n  - id: r1\n    name: Rule 1\n    action: block\n`,
+        'utf-8'
+      );
+
       const result = loadRuleSets(TEST_DIR);
       expect(result).toHaveLength(1);
+    });
+
+    it('test command should fail on invalid YAML files', async () => {
+      writeFileSync(join(TEST_DIR, 'bad.yaml'), '{{invalid yaml', 'utf-8');
+
+      const result = await vetoTest({ policy: TEST_DIR, quiet: true });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid policy file');
     });
   });
 

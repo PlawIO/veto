@@ -94,6 +94,18 @@ const OUTPUT_RULE_RESPONSE = JSON.stringify({
   notes: '',
 });
 
+const SCHEMA_INVALID_RESPONSE = JSON.stringify({
+  rules: [
+    {
+      id: 'bad-extra-field',
+      name: 'Bad extra field',
+      action: 'block',
+      unsupported: true,
+    },
+  ],
+  notes: '',
+});
+
 describe('compile', () => {
   const originalCwd = process.cwd();
   const originalProviderEnv = {
@@ -429,6 +441,37 @@ describe('compile', () => {
         const parsed = parseYaml(content);
         expect(parsed.version).toBe('1.0');
         expect(parsed.rules[0].id).toBe('block-external-emails');
+      } finally {
+        vi.doUnmock('openai');
+        delete process.env.OPENAI_API_KEY;
+      }
+    });
+
+    it('should reject legacy LLM output that compiles to schema-invalid YAML', async () => {
+      const mockCreate = vi.fn().mockResolvedValue({
+        choices: [{ message: { content: SCHEMA_INVALID_RESPONSE } }],
+      });
+
+      vi.doMock('openai', () => ({
+        default: class {
+          chat = { completions: { create: mockCreate } };
+        },
+      }));
+
+      process.env.OPENAI_API_KEY = 'test-key';
+
+      try {
+        const outputPath = join(TEST_DIR, 'schema-invalid.yaml');
+        const result = await compile({
+          input: 'Block something',
+          output: outputPath,
+          provider: 'openai',
+          quiet: true,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.messages[0]).toContain('Invalid compiled YAML');
+        expect(existsSync(outputPath)).toBe(false);
       } finally {
         vi.doUnmock('openai');
         delete process.env.OPENAI_API_KEY;

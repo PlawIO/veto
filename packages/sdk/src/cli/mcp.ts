@@ -346,6 +346,23 @@ function parseTransport(value: unknown): McpTransport {
   throw new Error("Invalid upstream.transport: expected 'mcp-sse' or 'mcp-stdio'");
 }
 
+function parsePolicyDecisionBody(body: unknown): { decision: PolicyValidationResult['decision']; reason?: string } | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null;
+  }
+
+  const record = body as Record<string, unknown>;
+  const decision = record.decision;
+  if (decision !== 'allow' && decision !== 'deny' && decision !== 'require_approval') {
+    return null;
+  }
+
+  return {
+    decision,
+    reason: typeof record.reason === 'string' ? record.reason : undefined,
+  };
+}
+
 function parseConfigDocument(document: unknown): McpConfig {
   const root = asRecord(document);
   const listen = asRecord(root.listen);
@@ -613,14 +630,19 @@ class PolicyClient {
         };
       }
 
-      const body = await response.json() as {
-        decision: 'allow' | 'deny' | 'require_approval';
-        reason?: string;
-      };
+      const body = await response.json() as unknown;
+      const parsed = parsePolicyDecisionBody(body);
+      if (!parsed) {
+        return {
+          decision: 'deny',
+          reason: 'Policy server returned an invalid decision payload',
+          latencyMs: Date.now() - startedAt,
+        };
+      }
 
       return {
-        decision: body.decision,
-        reason: body.reason,
+        decision: parsed.decision,
+        reason: parsed.reason,
         latencyMs: Date.now() - startedAt,
       };
     } catch (error) {
@@ -878,10 +900,11 @@ class UpstreamRuntime {
             continue;
           }
 
-          this.broadcast(payload);
-
           try {
             const parsed = JSON.parse(payload) as JsonRpcResponse;
+            if (parsed.id === undefined) {
+              this.broadcast(payload);
+            }
             if (parsed.id === requestId) {
               matched = parsed;
             }
@@ -1055,8 +1078,6 @@ class UpstreamRuntime {
           continue;
         }
 
-        this.broadcast(trimmed);
-
         let parsed: JsonRpcResponse;
         try {
           parsed = JSON.parse(trimmed) as JsonRpcResponse;
@@ -1065,6 +1086,7 @@ class UpstreamRuntime {
         }
 
         if (parsed.id === undefined) {
+          this.broadcast(trimmed);
           continue;
         }
 
@@ -1092,7 +1114,7 @@ class UpstreamRuntime {
   }
 
   private emitDecision(event: GatewayDecisionEvent): void {
-    this.broadcast(JSON.stringify(event));
+    void event;
   }
 
   private broadcast(payload: string): void {
