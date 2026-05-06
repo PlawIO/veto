@@ -8,9 +8,10 @@
  * @module cli/test
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { validatePolicyIR } from '../rules/schema-validator.js';
 
 // ── Types ──
 
@@ -51,6 +52,7 @@ export interface TestOptions {
 export interface TestResult {
   success: boolean;
   report: TestReport;
+  error?: string;
 }
 
 // ── Parsed rule structures (simplified for analysis) ──
@@ -82,15 +84,29 @@ export interface ParsedRuleSet {
 
 // ── YAML Loading (standalone, no external deps) ──
 
-function findYamlFiles(dirPath: string): string[] {
+const MAX_DISCOVERY_DEPTH = 50;
+
+function findYamlFiles(dirPath: string, visited = new Set<string>(), depth = 0): string[] {
   const files: string[] = [];
   if (!existsSync(dirPath)) return files;
+  if (depth > MAX_DISCOVERY_DEPTH) {
+    throw new Error(`Policy directory nesting exceeds ${MAX_DISCOVERY_DEPTH} levels: ${dirPath}`);
+  }
+
+  const realDir = realpathSync(dirPath);
+  if (visited.has(realDir)) {
+    return files;
+  }
+  visited.add(realDir);
 
   for (const entry of readdirSync(dirPath)) {
     const fullPath = join(dirPath, entry);
-    const stat = statSync(fullPath);
+    const stat = lstatSync(fullPath);
+    if (stat.isSymbolicLink()) {
+      continue;
+    }
     if (stat.isDirectory()) {
-      files.push(...findYamlFiles(fullPath));
+      files.push(...findYamlFiles(fullPath, visited, depth + 1));
     } else if (stat.isFile()) {
       const ext = extname(entry).toLowerCase();
       if (ext === '.yaml' || ext === '.yml') {
@@ -101,11 +117,16 @@ function findYamlFiles(dirPath: string): string[] {
   return files;
 }
 
-function parseYamlSafe(content: string): Record<string, unknown> | null {
+function parsePolicyYaml(content: string, file: string): Record<string, unknown> {
   try {
-    return parseYaml(content) as Record<string, unknown>;
-  } catch {
-    return null;
+    const parsed = parseYaml(content) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('expected YAML object');
+    }
+    validatePolicyIR(parsed);
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`Invalid policy file ${file}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -115,8 +136,7 @@ export function loadRuleSets(policyDir: string): ParsedRuleSet[] {
 
   for (const file of files) {
     const content = readFileSync(file, 'utf-8');
-    const parsed = parseYamlSafe(content);
-    if (!parsed) continue;
+    const parsed = parsePolicyYaml(content, file);
 
     const rules = extractRules(parsed);
     if (rules.length > 0) {
@@ -767,7 +787,27 @@ export async function test(options: TestOptions = {}): Promise<TestResult> {
     };
   }
 
-  const ruleSets = loadRuleSets(policyDir);
+  let ruleSets: ParsedRuleSet[];
+  try {
+    ruleSets = loadRuleSets(policyDir);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!quiet) {
+      console.error(message);
+    }
+    return {
+      success: false,
+      error: message,
+      report: {
+        timestamp: new Date().toISOString(),
+        policyDir,
+        rulesLoaded: 0,
+        toolsCovered: [],
+        gaps: [],
+        summary: { critical: 0, warning: 0, info: 0, total: 0 },
+      },
+    };
+  }
   const allRules = ruleSets.flatMap(rs => rs.rules);
   const allTools = [...new Set(allRules.flatMap(r => r.tools))];
 

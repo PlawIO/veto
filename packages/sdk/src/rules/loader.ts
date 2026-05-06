@@ -84,16 +84,22 @@ export class RuleLoader {
    * @param recursive - Whether to search subdirectories
    * @returns Loaded rules
    */
-  loadFromDirectory(dirPath: string, recursive = true): LoadedRules {
+  loadFromDirectory(dirPath: string, recursive = true, strict = false): LoadedRules {
     this.logger.info('Loading rules from directory', { path: dirPath, recursive });
 
     if (!existsSync(dirPath)) {
       this.logger.warn('Rules directory does not exist', { path: dirPath });
+      if (strict) {
+        throw new Error(`Rules directory does not exist: ${dirPath}`);
+      }
       return this.loadedRules;
     }
 
     const yamlFiles = this.findYamlFiles(dirPath, recursive);
     this.logger.debug('Found YAML files', { count: yamlFiles.length });
+    if (strict && yamlFiles.length === 0) {
+      throw new Error(`Rules directory does not contain policy YAML files: ${dirPath}`);
+    }
 
     for (const filePath of yamlFiles) {
       try {
@@ -104,6 +110,9 @@ export class RuleLoader {
           { path: filePath },
           error instanceof Error ? error : new Error(String(error))
         );
+        if (strict) {
+          throw error;
+        }
       }
     }
 

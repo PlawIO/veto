@@ -58,6 +58,25 @@ export interface AgentOptions {
   format?: 'json' | 'yaml';
 }
 
+const SECRET_KEY_PATTERN = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization)?|bearer|credential|password|secret|(?:^|[_-])token(?:$|[_-]))/i;
+const REDACTED_VALUE = '[REDACTED]';
+
+function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactSecrets(entry));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    redacted[key] = SECRET_KEY_PATTERN.test(key) ? REDACTED_VALUE : redactSecrets(entry);
+  }
+  return redacted;
+}
+
 /**
  * Initialize Veto in agent mode.
  *
@@ -280,7 +299,7 @@ export async function agentConfig(options: AgentOptions = {}): Promise<AgentResu
     const content = readFileSync(configPath, 'utf-8');
     const config = parseYaml(content) as Record<string, unknown>;
 
-    const result = { initialized: true, ...config };
+    const result = redactSecrets({ initialized: true, ...config }) as Record<string, unknown>;
 
     if (!options.format || options.format === 'json') {
       console.log(JSON.stringify({ success: true, data: result }));

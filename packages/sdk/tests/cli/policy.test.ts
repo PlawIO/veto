@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { runGuardCheckCommand, runPolicyGenerateCommand } from '../../src/cli/headless.js';
+import { runCloudOrgUseCommand, runGuardCheckCommand, runPolicyGenerateCommand } from '../../src/cli/headless.js';
 import { Veto } from '../../src/core/veto.js';
 
 const TEST_DIR = '/tmp/veto-policy-cli-test-' + Date.now();
@@ -17,6 +17,7 @@ describe('policy generate', () => {
   const originalEnv = {
     VETO_API_KEY: process.env.VETO_API_KEY,
     VETO_API_URL: process.env.VETO_API_URL,
+    HOME: process.env.HOME,
   };
 
   beforeEach(() => {
@@ -69,6 +70,12 @@ rules:
       process.env.VETO_API_URL = originalEnv.VETO_API_URL;
     } else {
       delete process.env.VETO_API_URL;
+    }
+
+    if (originalEnv.HOME) {
+      process.env.HOME = originalEnv.HOME;
+    } else {
+      delete process.env.HOME;
     }
   });
 
@@ -167,5 +174,53 @@ rules:
       rules: Array<{ tools: string[] }>;
     };
     expect(parsed.rules[0]?.tools).toEqual(['approve_invoice']);
+  });
+
+  it('fails local guard checks when configured rules cannot be loaded', async () => {
+    const guardCheck = await runGuardCheckCommand({
+      projectDir: TEST_DIR,
+      tool: 'transfer_funds',
+      argsJson: JSON.stringify({ amount: 600 }),
+      mode: 'local',
+    });
+
+    expect(guardCheck.ok).toBe(false);
+    expect(guardCheck.error?.code).toBe('guard_local_failed');
+    expect(guardCheck.error?.message).toContain('Rules directory does not exist');
+  });
+
+  it('fails local guard checks when configured rules are empty', async () => {
+    mkdirSync(join(TEST_DIR, 'veto', 'rules'), { recursive: true });
+
+    const guardCheck = await runGuardCheckCommand({
+      projectDir: TEST_DIR,
+      tool: 'transfer_funds',
+      argsJson: JSON.stringify({ amount: 600 }),
+      mode: 'local',
+    });
+
+    expect(guardCheck.ok).toBe(false);
+    expect(guardCheck.error?.code).toBe('guard_local_failed');
+    expect(guardCheck.error?.message).toContain('does not contain policy YAML files');
+  });
+
+  it('writes cloud session updates with restrictive permissions', () => {
+    const homeDir = join(TEST_DIR, 'home');
+    const sessionDir = join(homeDir, '.veto');
+    const sessionPath = join(sessionDir, 'cloud-session.json');
+    process.env.HOME = homeDir;
+
+    mkdirSync(sessionDir, { recursive: true, mode: 0o755 });
+    writeFileSync(sessionPath, JSON.stringify({ baseUrl: 'https://api.veto.so', accessToken: 'token' }), {
+      encoding: 'utf-8',
+      mode: 0o644,
+    });
+
+    const result = runCloudOrgUseCommand('org_123');
+
+    expect(result.ok).toBe(true);
+    expect(statSync(sessionDir).mode & 0o777).toBe(0o700);
+    expect(statSync(sessionPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(sessionPath, 'utf-8')).toContain('org_123');
   });
 });

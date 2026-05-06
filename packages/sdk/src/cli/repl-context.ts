@@ -6,6 +6,7 @@ import type { LoadedRules, Rule, RuleSet } from '../rules/types.js';
 import { silentLogger } from '../utils/logger.js';
 import { scan, type DiscoveredTool, type ScanReport } from './scan.js';
 import { PolicySchemaError } from '../rules/schema-validator.js';
+import { resolvePolicyRulesDirectory } from './policy-paths.js';
 
 interface ReplConfigFile {
   rules?: {
@@ -17,6 +18,7 @@ interface ReplConfigFile {
 export interface ReplContextScanOptions {
   includeExamples?: boolean;
   includeTests?: boolean;
+  strictPolicies?: boolean;
 }
 
 export interface RuleSourceInfo {
@@ -78,11 +80,11 @@ function createEmptyScanReport(projectDir: string, rulesDir: string): ScanReport
   };
 }
 
-function normalizeRulesConfig(projectDir: string): { vetoDir: string; rulesDir: string; recursiveRules: boolean } {
+function normalizeRulesConfig(projectDir: string, strictPolicies: boolean): { vetoDir: string; rulesDir: string; recursiveRules: boolean } {
   const vetoDir = resolve(projectDir, 'veto');
   const configPath = join(vetoDir, 'veto.config.yaml');
 
-  let rulesDir = resolve(vetoDir, 'rules');
+  let rulesDir = resolvePolicyRulesDirectory({ vetoDir });
   let recursiveRules = true;
 
   if (!existsSync(configPath)) {
@@ -91,13 +93,18 @@ function normalizeRulesConfig(projectDir: string): { vetoDir: string; rulesDir: 
 
   try {
     const parsed = parseYaml(readFileSync(configPath, 'utf-8')) as ReplConfigFile | null;
-    if (parsed?.rules?.directory) {
-      rulesDir = resolve(vetoDir, parsed.rules.directory);
-    }
+    rulesDir = resolvePolicyRulesDirectory({
+      vetoDir,
+      configuredDirectory: parsed?.rules?.directory,
+      requireExists: strictPolicies,
+    });
     if (typeof parsed?.rules?.recursive === 'boolean') {
       recursiveRules = parsed.rules.recursive;
     }
-  } catch {
+  } catch (error) {
+    if (strictPolicies) {
+      throw error;
+    }
     return { vetoDir, rulesDir, recursiveRules };
   }
 
@@ -191,12 +198,14 @@ function createLoadedRuleState(loaded: LoadedRules): LoadedRuleState {
   };
 }
 
-function loadRulesFromDirectory(rulesDir: string, recursiveRules: boolean): LoadedRuleState {
+function loadRulesFromDirectory(rulesDir: string, recursiveRules: boolean, strictPolicies: boolean): LoadedRuleState {
   const loader = new RuleLoader({ logger: silentLogger });
   loader.setYamlParser(parseYaml);
 
   if (existsSync(rulesDir)) {
-    loader.loadFromDirectory(rulesDir, recursiveRules);
+    loader.loadFromDirectory(rulesDir, recursiveRules, strictPolicies);
+  } else if (strictPolicies) {
+    throw new Error(`Rules directory does not exist: ${rulesDir}`);
   }
 
   return createLoadedRuleState(loader.getRules());
@@ -323,13 +332,15 @@ export async function createReplSessionContext(
   options: ReplContextScanOptions = {}
 ): Promise<ReplSessionContext> {
   const resolvedProjectDir = resolve(projectDir);
-  const config = normalizeRulesConfig(resolvedProjectDir);
+  const strictPolicies = options.strictPolicies ?? false;
+  const config = normalizeRulesConfig(resolvedProjectDir, strictPolicies);
   const scanOptions: Required<ReplContextScanOptions> = {
     includeExamples: options.includeExamples ?? false,
     includeTests: options.includeTests ?? false,
+    strictPolicies,
   };
 
-  const baseline = loadRulesFromDirectory(config.rulesDir, config.recursiveRules);
+  const baseline = loadRulesFromDirectory(config.rulesDir, config.recursiveRules, strictPolicies);
   const report = await createScanReport(resolvedProjectDir, config.rulesDir, scanOptions);
 
   const context: ReplSessionContext = {
@@ -359,7 +370,7 @@ export async function rescanReplContext(context: ReplSessionContext): Promise<Sc
 }
 
 export async function reloadReplContext(context: ReplSessionContext): Promise<void> {
-  const baseline = loadRulesFromDirectory(context.rulesDir, context.recursiveRules);
+  const baseline = loadRulesFromDirectory(context.rulesDir, context.recursiveRules, context.scanOptions.strictPolicies);
 
   const sessionSourceByRuleId = new Map<string, RuleSourceInfo>();
   for (const [ruleId, source] of context.sourceByRuleId.entries()) {
@@ -374,7 +385,7 @@ export async function reloadReplContext(context: ReplSessionContext): Promise<vo
 
 export async function clearSessionRules(context: ReplSessionContext): Promise<void> {
   context.sessionRules = [];
-  const baseline = loadRulesFromDirectory(context.rulesDir, context.recursiveRules);
+  const baseline = loadRulesFromDirectory(context.rulesDir, context.recursiveRules, context.scanOptions.strictPolicies);
   applyContextRules(context, baseline, new Map<string, RuleSourceInfo>());
   await rescanReplContext(context);
 }
@@ -473,7 +484,7 @@ export async function addSessionRulesFromYaml(
     context.sessionRules.push(rule);
   }
 
-  const baseline = loadRulesFromDirectory(context.rulesDir, context.recursiveRules);
+  const baseline = loadRulesFromDirectory(context.rulesDir, context.recursiveRules, context.scanOptions.strictPolicies);
   applyContextRules(context, baseline, sessionSourceByRuleId);
 
   return loadedState.rules;

@@ -632,7 +632,7 @@ function mergeClaudeSettings(settingsPath: string): ClaudeSettingsMergeResult {
   }
 
   const preToolUse = Array.isArray(preToolUseValue) ? preToolUseValue : [];
-  let found = false;
+  let hasGlobalCoverage = false;
   let changed = false;
 
   for (const block of preToolUse) {
@@ -640,12 +640,13 @@ function mergeClaudeSettings(settingsPath: string): ClaudeSettingsMergeResult {
       continue;
     }
 
+    let vetoHooksInBlock = 0;
     for (const hook of block.hooks) {
       if (!isRecord(hook) || !commandIsVetoHook(hook.command)) {
         continue;
       }
 
-      found = true;
+      vetoHooksInBlock += 1;
       if (hook.command !== CLAUDE_HOOK_COMMAND) {
         hook.command = CLAUDE_HOOK_COMMAND;
         changed = true;
@@ -655,9 +656,19 @@ function mergeClaudeSettings(settingsPath: string): ClaudeSettingsMergeResult {
         changed = true;
       }
     }
+
+    if (vetoHooksInBlock > 0) {
+      if (block.matcher === '') {
+        hasGlobalCoverage = true;
+      } else if (block.hooks.length === vetoHooksInBlock) {
+        block.matcher = '';
+        hasGlobalCoverage = true;
+        changed = true;
+      }
+    }
   }
 
-  if (!found) {
+  if (!hasGlobalCoverage) {
     preToolUse.push({
       matcher: '',
       hooks: [
