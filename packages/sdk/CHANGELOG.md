@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.9.2
+
+### Patch Changes
+
+- [#226](https://github.com/PlawIO/veto/pull/226) [`4d835c3`](https://github.com/PlawIO/veto/commit/4d835c34f1046b9d5ee3118257a55422d99e005a) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Harden SDK fail-closed behavior: core and browser `protect()` now fail closed on initialization errors by default, while retaining the explicit unsafe `allowAllOnInitError` opt-in; Claude Code hooks now fail closed for configured projects on malformed payloads or guard failures, with `VETO_HOOK_FAIL_OPEN=1` as the explicit unsafe legacy opt-in.
+
 ## 2.9.1
 
 ### Patch Changes
