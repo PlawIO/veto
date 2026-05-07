@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.9.3
+
+### Patch Changes
+
+- [#228](https://github.com/PlawIO/veto/pull/228) [`40f37e9`](https://github.com/PlawIO/veto/commit/40f37e9cb724832c5fd6cf94253a5c72913ea400) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Harden CLI policy loading and validation, secret redaction, MCP policy response validation and SSE behavior, cloud session file permissions, and symlink-safe policy discovery.
+
 ## 2.9.2
 
 ### Patch Changes
