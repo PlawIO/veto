@@ -63,7 +63,8 @@ class KernelClient:
             )
             if hasattr(response, "__await__"):
                 response = await response
-            return response["choices"][0]["message"]["content"]
+            content = response["choices"][0]["message"]["content"]
+            return content if isinstance(content, str) else str(content)
 
         return await asyncio.to_thread(self._complete_http, user_prompt)
 
@@ -87,7 +88,8 @@ class KernelClient:
         )
         with urllib.request.urlopen(request, timeout=self._config.timeout / 1000) as response:
             parsed = json.loads(response.read().decode("utf-8"))
-        return parsed["choices"][0]["message"]["content"]
+        content = parsed["choices"][0]["message"]["content"]
+        return content if isinstance(content, str) else str(content)
 
 
 def create_kernel_client(
@@ -100,4 +102,3 @@ def create_kernel_client(
 
 
 createKernelClient = create_kernel_client
-

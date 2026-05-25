@@ -5,12 +5,12 @@ These adapters enable Veto to work transparently with different AI providers
 while maintaining a consistent internal representation.
 """
 
-from typing import Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar, Union, cast
 from dataclasses import dataclass
 import math
 import json
 
-from veto.types.tool import ToolDefinition, ToolCall
+from veto.types.tool import JsonSchemaProperty, ToolDefinition, ToolCall
 from veto.providers.types import (
     Provider,
     OpenAITool,
@@ -237,22 +237,16 @@ def from_mcp(tool: MCPTool | dict[str, Any]) -> ToolDefinition:
         # dataclasses. This mirrors TS's `inputSchema` shape while keeping
         # Python attrs idiomatic.
         input_schema = _get_attr_or_key(tool, "inputSchema")
+    properties = _schema_properties(input_schema)
+    required = _schema_required(input_schema)
 
     return ToolDefinition(
         name=_get_attr_or_key(tool, "name"),
         description=_get_attr_or_key(tool, "description"),
         input_schema={
             "type": "object",
-            **(
-                {"properties": _schema_properties(input_schema)}
-                if _schema_properties(input_schema) is not None
-                else {}
-            ),
-            **(
-                {"required": _schema_required(input_schema)}
-                if _schema_required(input_schema) is not None
-                else {}
-            ),
+            "properties": cast(dict[str, JsonSchemaProperty], properties or {}),
+            "required": required or [],
         },
     )
 

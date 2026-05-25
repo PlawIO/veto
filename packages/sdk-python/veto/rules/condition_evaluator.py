@@ -5,7 +5,7 @@ import re
 import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from veto.deterministic.regex_safety import is_safe_pattern
@@ -399,12 +399,12 @@ def evaluate_condition(
         expected = condition.get("value")
         if is_condition_value_ref(expected):
             outcome = resolve_feed_ref(
-                expected,
+                cast(dict[str, Any], expected),
                 feed_provider,
                 now.timestamp() * 1000 if now is not None else None,
             )
             if "fallback" in outcome:
-                return outcome["fallback"] == "fail_closed"
+                return bool(outcome["fallback"] == "fail_closed")
             expected = outcome["resolved"]
 
         if operator == "percent_of":
@@ -420,9 +420,9 @@ def evaluate_condition(
                 return False
             if not _is_finite_number(reference_value) or reference_value == 0:
                 return False
-            return (field_value / reference_value) * 100 > expected
+            return bool((field_value / reference_value) * 100 > expected)
 
-        return evaluate_legacy_condition(field_value, operator, expected)
+        return bool(evaluate_legacy_condition(field_value, operator, expected))
 
     return False
 

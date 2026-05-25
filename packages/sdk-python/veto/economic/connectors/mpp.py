@@ -62,13 +62,15 @@ class MPPConnector:
         if session is None:
             return None
 
-        cost = _number(session.get("cost"))
-        currency = session.get("currency")
-        payer = session.get("payer")
+        session_cost = _number(session.get("cost"))
+        session_currency = session.get("currency")
+        session_payer = session.get("payer")
         return EconomicContext(
-            cost=cost if cost is not None else 0,
-            currency=currency.upper() if isinstance(currency, str) else "USD",
-            payer=payer if isinstance(payer, str) else None,
+            cost=session_cost if session_cost is not None else 0,
+            currency=session_currency.upper()
+            if isinstance(session_currency, str)
+            else "USD",
+            payer=session_payer if isinstance(session_payer, str) else None,
             protocol="mpp",
             protocol_metadata={
                 "session_token": session["session_token"],
@@ -102,4 +104,3 @@ def build_mpp_connector_error(error: str) -> EconomicDenialDetails:
 
 def buildMPPConnectorError(error: str) -> EconomicDenialDetails:
     return build_mpp_connector_error(error)
-

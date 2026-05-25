@@ -79,6 +79,7 @@ from veto.economic import (
     EconomicContext,
     EconomicDenialDetails,
     EconomicEvaluator,
+    EconomicProtocol,
     LocalBudgetEngine,
     parse_economic_budget_configs,
 )
@@ -1730,6 +1731,8 @@ class Veto:
         context: ValidationContext,
         label: str,
     ) -> ValidationResult:
+        decision: Literal["pass", "block"]
+        reasoning: Optional[str]
         if isinstance(response, KernelResponse):
             decision = response.decision
             reasoning = response.reasoning
@@ -1739,12 +1742,14 @@ class Veto:
                 "matched_rules": response.matched_rules,
             }
         else:
-            decision = response.get("decision")
-            reasoning = (
-                response.get("reasoning")
-                if isinstance(response.get("reasoning"), str)
-                else None
+            raw_decision = response.get("decision")
+            decision = (
+                cast(Literal["pass", "block"], raw_decision)
+                if raw_decision in ("pass", "block")
+                else "block"
             )
+            raw_reasoning = response.get("reasoning")
+            reasoning = raw_reasoning if isinstance(raw_reasoning, str) else None
             metadata = {
                 "pass_weight": response.get("pass_weight"),
                 "block_weight": response.get("block_weight"),
@@ -1859,10 +1864,15 @@ class Veto:
             )
 
         chain_id = payment_cfg.get("chain_id")
+        normalized_protocol: EconomicProtocol = (
+            cast(EconomicProtocol, protocol)
+            if protocol in ("x402", "mpp", "ap2", "custom")
+            else "custom"
+        )
         economic_context = EconomicContext(
             cost=float(amount),
             currency=currency,
-            protocol=protocol if protocol in ("x402", "mpp", "ap2", "custom") else "custom",
+            protocol=normalized_protocol,
             protocol_metadata={"chain_id": chain_id}
             if chain_id is not None
             else None,

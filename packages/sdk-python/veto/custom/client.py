@@ -59,7 +59,10 @@ class CustomClient:
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=self._config.timeout / 1000) as response:
-            return json.loads(response.read().decode("utf-8"))
+            parsed = json.loads(response.read().decode("utf-8"))
+        if not isinstance(parsed, dict):
+            raise CustomError("Provider response was not a JSON object")
+        return parsed
 
     def _call_chat_completions(self, messages: list[dict[str, str]]) -> str:
         base_url = (self._config.base_url or "https://api.openai.com/v1").rstrip("/")
@@ -73,7 +76,8 @@ class CustomClient:
             },
             {"authorization": f"Bearer {self._config.api_key}"},
         )
-        return parsed["choices"][0]["message"]["content"]
+        content = parsed["choices"][0]["message"]["content"]
+        return content if isinstance(content, str) else str(content)
 
     def _call_anthropic(self, messages: dict[str, Any]) -> str:
         base_url = (self._config.base_url or "https://api.anthropic.com").rstrip("/")
@@ -97,7 +101,7 @@ class CustomClient:
         if isinstance(blocks, list):
             for block in blocks:
                 if isinstance(block, dict) and isinstance(block.get("text"), str):
-                    return block["text"]
+                    return str(block["text"])
         raise CustomError("Anthropic response did not contain text")
 
     def _call_gemini(self, messages: dict[str, Any]) -> str:
@@ -120,7 +124,7 @@ class CustomClient:
         if isinstance(candidates, list) and candidates:
             parts = candidates[0].get("content", {}).get("parts", [])
             if isinstance(parts, list) and parts and isinstance(parts[0].get("text"), str):
-                return parts[0]["text"]
+                return str(parts[0]["text"])
         raise CustomError("Gemini response did not contain text")
 
 

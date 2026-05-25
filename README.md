@@ -140,6 +140,14 @@ const safeTools = veto.wrap(tools);
 const decision = await veto.guard("transfer_funds", { amount: 1500 });
 ```
 
+```python
+from veto import Veto, VetoOptions
+
+veto = await Veto.init(VetoOptions(config_dir="./veto", mode="strict"))
+safe_tools = veto.wrap(tools)
+decision = await veto.guard("transfer_funds", {"amount": 1500})
+```
+
 ## Packages
 
 | Package                                         | Language    | Install                                   | Purpose                                          |

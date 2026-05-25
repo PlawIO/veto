@@ -117,12 +117,14 @@ class AP2Connector:
         if _exceeds_spending_cap(cost, spending_cap, spent):
             return None
 
-        currency = mandate.get("currency")
+        mandate_currency = mandate.get("currency")
         signer = mandate.get("signer")
         categories = mandate.get("categories")
         return EconomicContext(
             cost=cost,
-            currency=currency.upper() if isinstance(currency, str) else "USD",
+            currency=mandate_currency.upper()
+            if isinstance(mandate_currency, str)
+            else "USD",
             payer=signer if isinstance(signer, str) else None,
             protocol="ap2",
             protocol_metadata={
@@ -161,4 +163,3 @@ def build_ap2_connector_error(error: str) -> EconomicDenialDetails:
 
 def buildAP2ConnectorError(error: str) -> EconomicDenialDetails:
     return build_ap2_connector_error(error)
-
