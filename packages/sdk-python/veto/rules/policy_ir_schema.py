@@ -17,6 +17,8 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
         {"required": ["rules"]},
         {"required": ["output_rules"]},
         {"required": ["extends"]},
+        {"required": ["economic"]},
+        {"required": ["sessionConstraints"]},
     ],
     "properties": {
         "version": {
@@ -50,6 +52,12 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
         "settings": {
             "$ref": "#/$defs/Settings",
         },
+        "economic": {
+            "$ref": "#/$defs/EconomicPolicy",
+        },
+        "sessionConstraints": {
+            "$ref": "#/$defs/SessionConstraints",
+        },
     },
     "additionalProperties": False,
     "$defs": {
@@ -70,6 +78,10 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 "description": {
                     "type": "string",
                     "description": "Detailed description of what this rule does.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Optional user-facing message for approvals, warnings, or denials.",
                 },
                 "enabled": {
                     "type": "boolean",
@@ -122,6 +134,35 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "type": "object",
                     "additionalProperties": True,
                     "description": "Arbitrary key-value metadata attached to this rule.",
+                },
+                "rate_limits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["scope", "max_calls", "window_seconds"],
+                        "properties": {
+                            "scope": {
+                                "type": "string",
+                                "enum": ["agent", "user", "session", "global"],
+                            },
+                            "max_calls": {"type": "number"},
+                            "window_seconds": {"type": "number"},
+                        },
+                        "additionalProperties": False,
+                    },
+                    "description": "Sliding-window rate limits evaluated after conditions pass.",
+                },
+                "payment": {
+                    "type": "object",
+                    "required": ["protocol", "amount", "currency"],
+                    "properties": {
+                        "protocol": {"type": "string", "enum": ["x402", "mpp", "ap2"]},
+                        "amount": {"type": "number"},
+                        "currency": {"type": "string"},
+                        "chain_id": {"type": "number"},
+                    },
+                    "additionalProperties": False,
+                    "description": "Payment gate configuration for require_payment action.",
                 },
             },
             "additionalProperties": False,
@@ -192,7 +233,7 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
         },
         "Condition": {
             "type": "object",
-            "required": ["field", "operator", "value"],
+            "required": ["field", "operator"],
             "properties": {
                 "field": {
                     "type": "string",
@@ -205,8 +246,23 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 "value": {
                     "description": "The value to compare the field against.",
                 },
+                "reference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Optional dot-notation reference path used by dynamic operators.",
+                },
             },
             "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "operator": {
+                                "const": "not_exists",
+                            }
+                        }
+                    },
+                    "else": {"required": ["value"]},
+                },
                 {
                     "if": {
                         "properties": {
@@ -217,12 +273,73 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     },
                     "then": {
                         "properties": {
-                            "value": {"$ref": "#/$defs/TimeWindowValue"},
+                            "value": {
+                                "anyOf": [
+                                    {"$ref": "#/$defs/TimeWindowValue"},
+                                    {"$ref": "#/$defs/TimeWindowString"},
+                                ]
+                            },
                         }
                     },
-                }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "operator": {
+                                "const": "percent_of",
+                            }
+                        }
+                    },
+                    "then": {
+                        "required": ["reference"],
+                        "properties": {
+                            "value": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                            }
+                        },
+                    },
+                },
             ],
             "additionalProperties": False,
+        },
+        "FeedRef": {
+            "type": "object",
+            "required": ["kind", "feed_id", "version", "max_staleness_sec", "fallback"],
+            "properties": {
+                "kind": {"const": "feed"},
+                "feed_id": {"type": "string", "minLength": 1},
+                "version": {"type": "string", "minLength": 1},
+                "max_staleness_sec": {"type": "integer", "minimum": 0},
+                "fallback": {
+                    "type": "string",
+                    "enum": ["fail_open", "fail_closed", "last_known_good"],
+                },
+            },
+            "additionalProperties": False,
+            "description": "Typed reference to a dynamic pipeline feed.",
+        },
+        "PipelineRef": {
+            "type": "object",
+            "required": [
+                "kind",
+                "pipeline_id",
+                "version",
+                "max_staleness_sec",
+                "fallback",
+            ],
+            "properties": {
+                "kind": {"const": "pipeline"},
+                "pipeline_id": {"type": "string", "minLength": 1},
+                "version": {"type": "string", "minLength": 1},
+                "max_staleness_sec": {"type": "integer", "minimum": 0},
+                "fallback": {
+                    "type": "string",
+                    "enum": ["fail_open", "fail_closed", "last_known_good"],
+                },
+            },
+            "additionalProperties": False,
+            "description": "Typed reference to a pipeline by id.",
         },
         "TimeWindowValue": {
             "type": "object",
@@ -253,6 +370,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 },
             },
             "additionalProperties": False,
+        },
+        "TimeWindowString": {
+            "type": "string",
+            "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d-(?:[01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Simple time window in HH:MM-HH:MM format.",
         },
         "AgentScope": {
             "oneOf": [
@@ -317,14 +439,66 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                 "ends_with",
                 "matches",
                 "greater_than",
+                "greater_than_or_equal",
                 "less_than",
+                "less_than_or_equal",
+                "percent_of",
                 "length_greater_than",
                 "in",
                 "not_in",
+                "not_exists",
                 "outside_hours",
                 "within_hours",
             ],
             "description": "Comparison operator.",
+        },
+        "SessionCounterConfig": {
+            "type": "object",
+            "required": ["increment"],
+            "properties": {
+                "increment": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "decrement": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "max": {"type": "number"},
+                "maxAction": {
+                    "type": "string",
+                    "enum": ["deny", "require_approval"],
+                },
+            },
+            "additionalProperties": False,
+        },
+        "CumulativeLimit": {
+            "type": "object",
+            "required": ["argumentName", "maxValue"],
+            "properties": {
+                "argumentName": {"type": "string", "minLength": 1},
+                "maxValue": {"type": "number"},
+            },
+            "additionalProperties": False,
+        },
+        "SessionConstraints": {
+            "type": "object",
+            "properties": {
+                "maxCalls": {"type": "number"},
+                "budget": {"type": "number"},
+                "spendArgument": {"type": "string", "minLength": 1},
+                "cumulativeLimits": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/CumulativeLimit"},
+                },
+                "counters": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/SessionCounterConfig"
+                    },
+                },
+            },
+            "additionalProperties": False,
         },
         "Severity": {
             "type": "string",
@@ -334,7 +508,14 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
         },
         "Action": {
             "type": "string",
-            "enum": ["block", "warn", "log", "allow", "require_approval"],
+            "enum": [
+                "block",
+                "warn",
+                "log",
+                "allow",
+                "require_approval",
+                "require_payment",
+            ],
             "description": "Action to take when the rule matches.",
         },
         "OutputAction": {
@@ -358,6 +539,71 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     "items": {"type": "string"},
                     "description": "Tags applied to all rules in this set.",
                 },
+            },
+            "additionalProperties": False,
+        },
+        "EconomicPolicy": {
+            "type": "object",
+            "description": "Economic authorization policy for x402, MPP, and AP2 protocols.",
+            "properties": {
+                "budgets": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/EconomicBudget"},
+                    "description": "Budget configurations per scope.",
+                },
+                "cost_extraction": {
+                    "type": "object",
+                    "properties": {
+                        "default": {
+                            "type": "string",
+                            "description": "Default dot-notation path to extract cost from tool arguments.",
+                        },
+                        "overrides": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                            "description": "Per-tool cost extraction path overrides.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "payer": {
+                    "type": "object",
+                    "properties": {
+                        "required": {"type": "boolean"},
+                        "approved": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                "denial_reasons": {
+                    "type": "object",
+                    "properties": {
+                        "budget_exceeded": {"type": "string"},
+                        "approval_required": {"type": "string"},
+                        "payer_missing": {"type": "string"},
+                        "payer_unauthorized": {"type": "string"},
+                        "currency_mismatch": {"type": "string"},
+                        "connector_error": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "additionalProperties": False,
+        },
+        "EconomicBudget": {
+            "type": "object",
+            "required": ["scope", "limit", "currency", "window"],
+            "properties": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["session", "agent", "user", "global"],
+                },
+                "limit": {"type": "number", "minimum": 0},
+                "currency": {"type": "string", "minLength": 1},
+                "approval_threshold": {"type": "number", "minimum": 0},
+                "window": {"type": "string"},
             },
             "additionalProperties": False,
         },

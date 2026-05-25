@@ -118,7 +118,60 @@ Decision export is local to your process unless you explicitly configure a remot
 
 ## Policy packs
 
-Built-in packs include `@veto/safe-defaults`, `@veto/coding-agent`, `@veto/financial`, `@veto/browser-automation`, `@veto/data-access`, `@veto/communication`, and `@veto/deployment`.
+Built-in packs match the TypeScript SDK: `@veto/safe-defaults`, `@veto/coding-agent`, `@veto/crypto-trading`, `@veto/financial`, `@veto/browser-automation`, `@veto/data-access`, `@veto/communication`, `@veto/deployment`, `@veto/economic-agent`, `@veto/soc2-lite`, `@veto/hipaa-lite`, and `@veto/eu-ai-act-starter`.
+
+## MCP and pipeline-backed rules
+
+Python now exposes the same MCP adapter and feed-backed rule helpers as TypeScript:
+
+```python
+from veto import InMemoryFeedProvider, FeedSnapshot, Veto
+
+feed = InMemoryFeedProvider()
+feed.put("gambling-sites", FeedSnapshot(data=["casino.example"], refreshed_at_ms=0))
+
+veto = Veto.from_rules(
+    rules=[{
+        "id": "block-feed-url",
+        "name": "Block feed URLs",
+        "action": "block",
+        "tools": ["browser_go_to_url"],
+        "conditions": [{
+            "field": "arguments.url",
+            "operator": "in",
+            "value": {
+                "kind": "feed",
+                "feed_id": "gambling-sites",
+                "version": "latest",
+                "max_staleness_sec": 3600,
+                "fallback": "fail_open",
+            },
+        }],
+    }],
+    feed_provider=feed,
+)
+```
+
+## Economic, model, and extractor parity
+
+Python also exposes the TypeScript SDK's economic authorization helpers, kernel/custom validation modes, and deterministic content extractor:
+
+```python
+from veto import Veto, extract_entities, create_x402_connector
+
+entities = extract_entities("Salary: $150,000. Card: 4111 1111 1111 1111")
+assert entities.has_sensitive_pii
+
+veto = Veto.from_rules(
+    rules=[],
+    economic_policy={
+        "budgets": [{"scope": "session", "limit": 50, "currency": "USD", "window": "session"}],
+        "cost_extraction": {"default": "arguments.cost"},
+    },
+)
+decision = await veto.guard("paid_tool", {"cost": 60})
+assert decision.economic_denial.reason == "budget_exceeded"
+```
 
 ## Self-host / BYOC boundary
 

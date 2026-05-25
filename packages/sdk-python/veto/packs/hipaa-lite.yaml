@@ -1,0 +1,154 @@
+# Starter guardrails inspired by HIPAA privacy/security themes.
+# Operators must review, tune detectors, and validate workflows with qualified counsel/compliance owners.
+version: "1.0"
+name: hipaa-lite-pack
+description: Starter guardrails for PHI handling, patient-data export review, and medical-record access context. This pack is not a compliance certification.
+
+rules:
+  - id: hipaa-require-approval-external-phi-transfer
+    name: Require approval for external PHI transfer
+    description: Require review before patient or PHI-related data is emailed, uploaded, exported, or sent over HTTP.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - send_email
+      - http_request
+      - upload_file
+      - export_data
+      - export_records
+    condition_groups:
+      # Expand these field names to match your application payloads.
+      - - field: arguments.data_type
+          operator: matches
+          value: '(?i)\b(phi|patient|medical|clinical|health)\b'
+      - - field: arguments.dataset
+          operator: matches
+          value: '(?i)\b(phi|patient|medical|clinical|health)\b'
+      - - field: arguments.body
+          operator: matches
+          value: '(?i)\b(patient|diagnosis|medication|medical record|mrn)\b'
+      - - field: arguments.file
+          operator: matches
+          value: '(?i)\b(patient|medical|clinical|phi)\b'
+
+  - id: hipaa-block-unapproved-phi-network-send
+    name: Block unapproved PHI network sends
+    description: Block network transfer of PHI when explicit PHI transfer approval is absent from context.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - http_request
+      - upload_file
+      - send_email
+    condition_groups:
+      - - field: custom.phi_transfer_approved
+          operator: not_equals
+          value: true
+        - field: arguments.contains_phi
+          operator: equals
+          value: true
+      - - field: custom.phi_transfer_approved
+          operator: not_equals
+          value: true
+        - field: arguments.data_classification
+          operator: matches
+          value: '(?i)\b(phi|patient|medical)\b'
+
+  - id: hipaa-require-context-for-medical-record-access
+    name: Require context for medical record access
+    description: Restrict patient record reads and writes unless the caller provides approved PHI access context.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - read_record
+      - update_record
+      - query_database
+      - execute_sql
+      - run_query
+    condition_groups:
+      # Add role, purpose-of-use, and break-glass checks in project overrides.
+      - - field: custom.phi_access_approved
+          operator: not_equals
+          value: true
+        - field: arguments.record_type
+          operator: matches
+          value: '(?i)\b(patient|medical|clinical|encounter|claim)\b'
+      - - field: custom.phi_access_approved
+          operator: not_equals
+          value: true
+        - field: arguments.table
+          operator: matches
+          value: '(?i)\b(patient|medical|clinical|encounter|claim)s?\b'
+      - - field: custom.phi_access_approved
+          operator: not_equals
+          value: true
+        - field: arguments.query
+          operator: matches
+          value: '(?i)\b(patient|medical_record|diagnosis|medication|mrn)\b'
+
+  - id: hipaa-require-approval-bulk-record-export
+    name: Require approval for bulk patient record export
+    description: Require human review before exporting large patient or clinical record sets.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - export_data
+      - export_records
+      - query_database
+      - execute_sql
+      - run_query
+    condition_groups:
+      # Tune this threshold to your minimum necessary access policy.
+      - - field: arguments.limit
+          operator: greater_than
+          value: 100
+        - field: arguments.dataset
+          operator: matches
+          value: '(?i)\b(patient|medical|clinical|phi)\b'
+      - - field: arguments.limit
+          operator: greater_than
+          value: 100
+        - field: arguments.query
+          operator: matches
+          value: '(?i)\b(patient|medical_record|diagnosis|medication|mrn)\b'
+
+output_rules:
+  - id: hipaa-redact-patient-identifiers
+    name: Redact patient identifiers
+    description: Redact common patient identifiers when they appear in tool output.
+    enabled: true
+    severity: critical
+    action: redact
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '(?i)\b(MRN|medical record number|patient id)\b\s*[:#]?\s*[A-Za-z0-9-]{4,}'
+    redact_with: "[REDACTED_PATIENT_ID]"
+
+  - id: hipaa-redact-ssn
+    name: Redact SSNs
+    description: Redact US Social Security numbers from patient data output.
+    enabled: true
+    severity: critical
+    action: redact
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '\b\d{3}-\d{2}-\d{4}\b'
+    redact_with: "[REDACTED_SSN]"
+
+  - id: hipaa-redact-dob
+    name: Redact dates of birth
+    description: Redact common DOB labels and date values from outputs.
+    enabled: true
+    severity: high
+    action: redact
+    output_conditions:
+      - field: output
+        operator: matches
+        value: '(?i)\b(DOB|date of birth)\b\s*[:#]?\s*\d{1,2}[/-]\d{1,2}[/-]\d{2,4}'
+    redact_with: "[REDACTED_DOB]"
