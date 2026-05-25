@@ -5,11 +5,12 @@ These adapters enable Veto to work transparently with different AI providers
 while maintaining a consistent internal representation.
 """
 
-from typing import Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar, Union, cast
 from dataclasses import dataclass
+import math
 import json
 
-from veto.types.tool import ToolDefinition, ToolCall
+from veto.types.tool import JsonSchemaProperty, ToolDefinition, ToolCall
 from veto.providers.types import (
     Provider,
     OpenAITool,
@@ -20,6 +21,9 @@ from veto.providers.types import (
     GoogleTool,
     GoogleFunctionDeclaration,
     GoogleFunctionCall,
+    MCPInputSchema,
+    MCPTool,
+    MCPToolCallArgs,
 )
 from veto.utils.id import generate_tool_call_id
 
@@ -190,6 +194,168 @@ def from_google_function_call(function_call: GoogleFunctionCall) -> ToolCall:
 
 
 # ============================================================================
+# MCP (Model Context Protocol) Adapter
+# ============================================================================
+
+
+def _get_attr_or_key(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _schema_properties(schema: Any) -> dict[str, Any] | None:
+    properties = _get_attr_or_key(schema, "properties")
+    return properties if isinstance(properties, dict) else None
+
+
+def _schema_required(schema: Any) -> list[str] | None:
+    required = _get_attr_or_key(schema, "required")
+    if isinstance(required, list):
+        return [item for item in required if isinstance(item, str)]
+    return None
+
+
+def to_mcp(tool: ToolDefinition) -> MCPTool:
+    """Convert Veto tool definition to MCP format."""
+    return MCPTool(
+        name=tool.name,
+        description=tool.description,
+        input_schema=MCPInputSchema(
+            type="object",
+            properties=tool.input_schema.get("properties"),
+            required=tool.input_schema.get("required"),
+        ),
+    )
+
+
+def from_mcp(tool: MCPTool | dict[str, Any]) -> ToolDefinition:
+    """Convert MCP tool format to Veto definition."""
+    input_schema = _get_attr_or_key(tool, "input_schema")
+    if input_schema is None:
+        # Accept canonical camelCase MCP dictionaries as well as Pythonic
+        # dataclasses. This mirrors TS's `inputSchema` shape while keeping
+        # Python attrs idiomatic.
+        input_schema = _get_attr_or_key(tool, "inputSchema")
+    properties = _schema_properties(input_schema)
+    required = _schema_required(input_schema)
+
+    return ToolDefinition(
+        name=_get_attr_or_key(tool, "name"),
+        description=_get_attr_or_key(tool, "description"),
+        input_schema={
+            "type": "object",
+            "properties": cast(dict[str, JsonSchemaProperty], properties or {}),
+            "required": required or [],
+        },
+    )
+
+
+def from_mcp_tool_call(tool_call: MCPToolCallArgs | dict[str, Any]) -> ToolCall:
+    """Convert MCP tool call arguments to Veto format."""
+    return ToolCall(
+        id=generate_tool_call_id(),
+        name=_get_attr_or_key(tool_call, "name"),
+        arguments=_get_attr_or_key(tool_call, "arguments") or {},
+    )
+
+
+def to_mcp_tools(tools: list[ToolDefinition]) -> list[MCPTool]:
+    """Convert multiple Veto tools to MCP format."""
+    return [to_mcp(tool) for tool in tools]
+
+
+def is_mcp_tool(tool: Any) -> bool:
+    """Return True when an object matches the MCP tool shape."""
+    if not isinstance(tool, (dict, MCPTool)):
+        return False
+
+    name = _get_attr_or_key(tool, "name")
+    if not isinstance(name, str):
+        return False
+
+    input_schema = (
+        _get_attr_or_key(tool, "input_schema")
+        if isinstance(tool, MCPTool)
+        else _get_attr_or_key(tool, "inputSchema")
+    )
+    if input_schema is None:
+        return False
+
+    schema_type = _get_attr_or_key(input_schema, "type")
+    if schema_type != "object":
+        return False
+
+    # Exclude Anthropic and OpenAI tool shapes.
+    if isinstance(tool, dict):
+        if "input_schema" in tool:
+            return False
+        if "function" in tool:
+            return False
+        if tool.get("type") == "function":
+            return False
+
+    return True
+
+
+VALID_ECONOMIC_PROTOCOLS = {"x402", "mpp", "ap2", "custom"}
+
+
+def extract_mcp_economic_context(
+    tool_call: MCPToolCallArgs | dict[str, Any],
+) -> dict[str, Any] | None:
+    """Extract economic context from MCP tool call metadata.
+
+    Looks for ``arguments._meta.economic_context`` first, then
+    ``arguments.economic_context``. Returns a normalized dict matching the
+    TypeScript SDK's ``EconomicContext`` surface, or ``None`` if absent/invalid.
+    """
+    arguments = _get_attr_or_key(tool_call, "arguments")
+    if not isinstance(arguments, dict):
+        return None
+
+    data: Any = None
+    meta = arguments.get("_meta")
+    if isinstance(meta, dict) and isinstance(meta.get("economic_context"), dict):
+        data = meta["economic_context"]
+    elif isinstance(arguments.get("economic_context"), dict):
+        data = arguments["economic_context"]
+
+    if not isinstance(data, dict):
+        return None
+
+    cost = data.get("cost")
+    if not isinstance(cost, (int, float)) or isinstance(cost, bool):
+        return None
+    if not math.isfinite(float(cost)) or float(cost) < 0:
+        return None
+
+    currency = data.get("currency") if isinstance(data.get("currency"), str) else "USD"
+    protocol = data.get("protocol") if isinstance(data.get("protocol"), str) else "custom"
+    if protocol not in VALID_ECONOMIC_PROTOCOLS:
+        protocol = "custom"
+
+    context: dict[str, Any] = {
+        "cost": float(cost),
+        "currency": currency,
+        "protocol": protocol,
+    }
+    payer = data.get("payer")
+    if isinstance(payer, str):
+        context["payer"] = payer
+
+    metadata = {
+        key: value
+        for key, value in data.items()
+        if key not in {"cost", "currency", "protocol", "payer"}
+    }
+    if metadata:
+        context["protocol_metadata"] = metadata
+
+    return context
+
+
+# ============================================================================
 # Generic Adapter Factory
 # ============================================================================
 
@@ -225,12 +391,20 @@ anthropic_adapter: ProviderAdapter[AnthropicTool, AnthropicToolUse] = (
     )
 )
 
+mcp_adapter: ProviderAdapter[MCPTool, MCPToolCallArgs] = ProviderAdapter(
+    to_provider_tool=to_mcp,
+    from_provider_tool=from_mcp,
+    from_provider_tool_call=from_mcp_tool_call,
+    to_provider_tools=to_mcp_tools,
+)
+
 
 def get_adapter(
     provider: Provider,
 ) -> Union[
     ProviderAdapter[OpenAITool, OpenAIToolCall],
     ProviderAdapter[AnthropicTool, AnthropicToolUse],
+    ProviderAdapter[MCPTool, MCPToolCallArgs],
 ]:
     """
     Get an adapter for a specific provider.
@@ -243,6 +417,8 @@ def get_adapter(
         return openai_adapter
     elif provider == "anthropic":
         return anthropic_adapter
+    elif provider == "mcp":
+        return mcp_adapter
     elif provider == "google":
         raise ValueError(
             "Google adapter not available via get_adapter(). "

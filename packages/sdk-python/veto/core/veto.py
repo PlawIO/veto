@@ -72,6 +72,21 @@ from veto.cloud.types import ToolRegistration, ToolParameter, ApprovalPollOption
 from veto.cloud.policy_cache import PolicyCache
 from veto.deterministic.validator import validate_deterministic
 from veto.deterministic.types import LocalValidationResult
+from veto.custom import CustomClient
+from veto.economic import (
+    BudgetScope,
+    EconomicBudgetStatus,
+    EconomicContext,
+    EconomicDenialDetails,
+    EconomicEvaluator,
+    EconomicProtocol,
+    LocalBudgetEngine,
+    parse_economic_budget_configs,
+)
+from veto.kernel import KernelClient
+from veto.kernel.types import KernelResponse
+from veto.providers.adapters import from_mcp
+from veto.providers.types import MCPTool, MCPToolCallArgs
 from veto.rules import (
     evaluate_condition_collections,
     evaluate_sequence_constraints,
@@ -79,11 +94,12 @@ from veto.rules import (
     validate_policy_ir,
     PolicySchemaError,
 )
+from veto.rules.feed_provider import FeedProvider
 
 
 # Veto operating mode
 VetoMode = Literal["strict", "log", "shadow"]
-ValidationMode = Literal["cloud", "local"]
+ValidationMode = Literal["cloud", "local", "kernel", "custom", "api"]
 
 # Wrapped handler function type
 WrappedHandler = Callable[[dict[str, Any]], Awaitable[Any]]
@@ -100,6 +116,14 @@ class WrappedTools:
 
 
 @dataclass
+class WrappedMCPTools:
+    """Result of wrapping MCP server tools with Veto validation."""
+
+    tools: list[MCPTool]
+    call_tool: Callable[[MCPToolCallArgs | dict[str, Any]], Awaitable[Any]]
+
+
+@dataclass
 class GuardResult:
     """Standalone validation result returned by ``guard()``."""
 
@@ -110,6 +134,12 @@ class GuardResult:
     approval_id: Optional[str] = None
     shadow: Optional[bool] = None
     shadow_decision: Optional[str] = None
+    economic_denial: Optional[EconomicDenialDetails] = None
+
+    @property
+    def economicDenial(self) -> Optional[EconomicDenialDetails]:
+        """TypeScript-style alias for parity with JS examples."""
+        return self.economic_denial
 
 
 @dataclass
@@ -124,6 +154,7 @@ class LoadedRulesState:
     all_rules: list[dict[str, Any]]
     rules_by_tool: dict[str, list[dict[str, Any]]]
     global_rules: list[dict[str, Any]]
+    economic_policy: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -164,6 +195,15 @@ class VetoOptions:
     approval_poll_interval: Optional[float] = None
     # Max seconds to wait for approval resolution (default: 300.0)
     approval_timeout: Optional[float] = None
+    # Optional local feed provider for feed-/pipeline-backed rule conditions
+    feed_provider: Optional[FeedProvider] = None
+    # Optional economic authorization policy.
+    economic_policy: Optional[dict[str, Any]] = None
+    # Optional kernel/custom clients for local model-backed validation.
+    kernel_client: Optional[Any] = None
+    custom_client: Optional[Any] = None
+    kernel_config: Optional[dict[str, Any]] = None
+    custom_config: Optional[dict[str, Any]] = None
 
 
 @runtime_checkable
@@ -199,11 +239,16 @@ class Veto:
     _BUILT_IN_POLICY_PACK_FILE_NAMES: dict[str, str] = {
         "@veto/safe-defaults": "safe-defaults.yaml",
         "@veto/coding-agent": "coding-agent.yaml",
+        "@veto/crypto-trading": "crypto-trading.yaml",
         "@veto/financial": "financial.yaml",
         "@veto/browser-automation": "browser-automation.yaml",
         "@veto/data-access": "data-access.yaml",
         "@veto/communication": "communication.yaml",
         "@veto/deployment": "deployment.yaml",
+        "@veto/economic-agent": "economic-agent.yaml",
+        "@veto/soc2-lite": "soc2-lite.yaml",
+        "@veto/hipaa-lite": "hipaa-lite.yaml",
+        "@veto/eu-ai-act-starter": "eu-ai-act-starter.yaml",
     }
 
     @staticmethod
@@ -233,6 +278,32 @@ class Veto:
             event_webhook_config,
             self._logger,
         )
+        self._feed_provider = options.feed_provider
+        self._economic_policy = (
+            dict(options.economic_policy)
+            if isinstance(options.economic_policy, dict)
+            else rules.economic_policy
+        )
+        self._economic_budget_engine: Optional[LocalBudgetEngine] = None
+        self._economic_evaluator: Optional[EconomicEvaluator] = None
+        self._init_economic_evaluator()
+        self._kernel_client = options.kernel_client
+        self._custom_client = options.custom_client
+        self._kernel_config = options.kernel_config
+        self._custom_config = options.custom_config
+        self._custom_config_error: Optional[str] = None
+        if self._validation_mode == "custom":
+            if not isinstance(self._custom_config, dict) or not self._custom_config.get("provider"):
+                self._custom_config_error = (
+                    "Missing custom.provider for custom validation. Set custom.provider "
+                    "in veto.config.yaml."
+                )
+            elif not self._custom_config.get("model"):
+                provider = self._custom_config.get("provider")
+                self._custom_config_error = (
+                    f"Missing custom.model for custom provider {provider}. "
+                    "Set custom.model in veto.config.yaml."
+                )
 
         # Approval options
         self._on_approval_required = options.on_approval_required
@@ -258,6 +329,7 @@ class Veto:
                 "base_url": cloud_client._base_url,
                 "rules_loaded": len(rules.all_rules),
                 "output_rules_loaded": len(output_rules.all_output_rules),
+                "economic_enabled": self._economic_evaluator is not None,
             },
         )
 
@@ -276,30 +348,30 @@ class Veto:
         )
 
         # Add the primary rule validator based on validation mode.
-        if self._validation_mode == "local":
-            async def validate_with_local(ctx: ValidationContext) -> ValidationResult:
+        async def validate_with_mode(ctx: ValidationContext) -> ValidationResult:
+            if self._validation_mode == "local":
                 return await self._validate_with_local(ctx)
+            if self._validation_mode == "kernel":
+                return await self._validate_with_kernel(ctx)
+            if self._validation_mode == "custom":
+                return await self._validate_with_custom(ctx)
+            return await self._validate_with_cloud(ctx)
 
-            self._validation_engine.add_validator(
-                NamedValidator(
-                    name="veto-local-validator",
-                    description="Validates tool calls via local YAML rules",
-                    priority=50,
-                    validate=validate_with_local,
-                )
+        descriptions = {
+            "local": "Validates tool calls via local YAML rules",
+            "kernel": "Validates tool calls via local kernel model",
+            "custom": "Validates tool calls via a custom LLM provider",
+            "cloud": "Validates tool calls via Veto Cloud API",
+            "api": "Validates tool calls via external API",
+        }
+        self._validation_engine.add_validator(
+            NamedValidator(
+                name="veto-rule-validator",
+                description=descriptions[self._validation_mode],
+                priority=50,
+                validate=validate_with_mode,
             )
-        else:
-            async def validate_with_cloud(ctx: ValidationContext) -> ValidationResult:
-                return await self._validate_with_cloud(ctx)
-
-            self._validation_engine.add_validator(
-                NamedValidator(
-                    name="veto-cloud-validator",
-                    description="Validates tool calls via Veto Cloud API",
-                    priority=50,
-                    validate=validate_with_cloud,
-                )
-            )
+        )
 
         # Add any additional validators
         if options.validators:
@@ -336,6 +408,31 @@ class Veto:
         self._policy_cache = PolicyCache(self._cloud_client)
 
         self._logger.info("Veto initialized successfully")
+
+    def _init_economic_evaluator(self) -> None:
+        if not isinstance(self._economic_policy, dict):
+            return
+
+        budgets = parse_economic_budget_configs(self._economic_policy.get("budgets"))
+        if not budgets:
+            return
+
+        budget_engine = LocalBudgetEngine(budgets=budgets, logger=self._logger)
+        self._economic_budget_engine = budget_engine
+        self._economic_evaluator = EconomicEvaluator(
+            policy=self._economic_policy,
+            budget_engine=budget_engine,
+            logger=self._logger,
+        )
+        payer_config = self._economic_policy.get("payer")
+        self._logger.info(
+            "Economic evaluator initialized",
+            {
+                "budgets": len(budgets),
+                "payer_required": isinstance(payer_config, dict)
+                and payer_config.get("required") is True,
+            },
+        )
 
     async def close(self) -> None:
         await self._cloud_client.close()
@@ -407,6 +504,9 @@ class Veto:
         config_mode: Optional[VetoMode] = None
         config_validation_mode: Optional[ValidationMode] = None
         event_webhook_config: Optional[EventWebhookConfig] = None
+        config_economic_policy: Optional[dict[str, Any]] = None
+        config_kernel: Optional[dict[str, Any]] = None
+        config_custom: Optional[dict[str, Any]] = None
 
         config_path = resolved_config_dir / "veto.config.yaml"
         if config_path.exists():
@@ -421,7 +521,7 @@ class Veto:
                     validation_config = config_data.get("validation")
                     if isinstance(validation_config, dict):
                         raw_mode = validation_config.get("mode")
-                        if raw_mode in ("cloud", "local"):
+                        if raw_mode in ("cloud", "local", "kernel", "custom", "api"):
                             config_validation_mode = raw_mode
 
                     rules_config = config_data.get("rules")
@@ -439,6 +539,18 @@ class Veto:
                             events_config.get("webhook"),
                             logger,
                         )
+
+                    economic_config = config_data.get("economic")
+                    if isinstance(economic_config, dict):
+                        config_economic_policy = dict(economic_config)
+
+                    kernel_config = config_data.get("kernel")
+                    if isinstance(kernel_config, dict):
+                        config_kernel = dict(kernel_config)
+
+                    custom_config = config_data.get("custom")
+                    if isinstance(custom_config, dict):
+                        config_custom = dict(custom_config)
             except Exception as exc:
                 logger.warn(
                     "Failed to parse veto.config.yaml for rules configuration",
@@ -453,12 +565,16 @@ class Veto:
         env_mode = cls._parse_mode(os.environ.get("VETO_MODE"))
         options.mode = options.mode or config_mode or env_mode or "strict"
         options.log_level = log_level
+        options.kernel_config = options.kernel_config or config_kernel
+        options.custom_config = options.custom_config or config_custom
 
         rules = cls._load_rules(
             rules_dir=rules_dir,
             recursive=recursive_rules,
             logger=logger,
         )
+        if config_economic_policy is not None:
+            rules.economic_policy = config_economic_policy
         output_rules = cls._load_output_rules(
             rules_dir=rules_dir,
             recursive=recursive_rules,
@@ -496,6 +612,13 @@ class Veto:
         on_approval_required: Optional[Callable[..., Any]] = None,
         approval_poll_interval: Optional[float] = None,
         approval_timeout: Optional[float] = None,
+        feed_provider: Optional[FeedProvider] = None,
+        economic_policy: Optional[dict[str, Any]] = None,
+        validation_mode: ValidationMode = "local",
+        kernel_client: Optional[Any] = None,
+        custom_client: Optional[Any] = None,
+        kernel_config: Optional[dict[str, Any]] = None,
+        custom_config: Optional[dict[str, Any]] = None,
     ) -> "Veto":
         # Honor VETO_LOG (e.g. ``stream``, ``stream:verbose``) when no explicit
         # log_level is passed, so the env-var contract holds for from_rules too.
@@ -537,10 +660,18 @@ class Veto:
             on_approval_required=on_approval_required,
             approval_poll_interval=approval_poll_interval,
             approval_timeout=approval_timeout,
-            validation_mode="local",
+            validation_mode=validation_mode,
+            feed_provider=feed_provider,
+            economic_policy=economic_policy,
+            kernel_client=kernel_client,
+            custom_client=custom_client,
+            kernel_config=kernel_config,
+            custom_config=custom_config,
         )
 
         indexed_rules = cls._index_inline_rules(rules)
+        if economic_policy is not None:
+            indexed_rules.economic_policy = dict(economic_policy)
         indexed_output_rules = cls._index_inline_output_rules(output_rules or [])
 
         return cls(
@@ -549,7 +680,7 @@ class Veto:
             cloud_client,
             indexed_rules,
             indexed_output_rules,
-            "local",
+            validation_mode,
             None,
         )
 
@@ -763,6 +894,7 @@ class Veto:
             all_rules=[],
             rules_by_tool={},
             global_rules=[],
+            economic_policy=None,
         )
 
         yaml_files = cls._find_yaml_files(rules_dir, recursive)
@@ -921,6 +1053,7 @@ class Veto:
             all_rules=[],
             rules_by_tool={},
             global_rules=[],
+            economic_policy=None,
         )
 
         for rule in rules:
@@ -1130,6 +1263,67 @@ class Veto:
                     {"message": result.message},
                 )
 
+    async def _register_tool_definitions_with_cloud(
+        self, tools: list[ToolDefinition]
+    ) -> None:
+        """Register canonical tool definitions with the cloud."""
+        registrations: list[ToolRegistration] = []
+        for tool in tools:
+            properties = tool.input_schema.get("properties", {})
+            required = tool.input_schema.get("required", [])
+            parameters: list[ToolParameter] = []
+            if isinstance(properties, dict):
+                for name, prop in properties.items():
+                    if not isinstance(name, str):
+                        continue
+                    prop_map = prop if isinstance(prop, dict) else {}
+                    p_type = prop_map.get("type", "string")
+                    if p_type == "integer":
+                        p_type = "number"
+                    parameters.append(
+                        ToolParameter(
+                            name=name,
+                            type=p_type if isinstance(p_type, str) else "string",
+                            description=prop_map.get("description")
+                            if isinstance(prop_map.get("description"), str)
+                            else None,
+                            required=name in required,
+                            enum=prop_map.get("enum")
+                            if isinstance(prop_map.get("enum"), list)
+                            else None,
+                            minimum=prop_map.get("minimum")
+                            if isinstance(prop_map.get("minimum"), (int, float))
+                            else None,
+                            maximum=prop_map.get("maximum")
+                            if isinstance(prop_map.get("maximum"), (int, float))
+                            else None,
+                            pattern=prop_map.get("pattern")
+                            if isinstance(prop_map.get("pattern"), str)
+                            else None,
+                        )
+                    )
+
+            registrations.append(
+                ToolRegistration(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=parameters,
+                )
+            )
+
+        if registrations:
+            result = await self._cloud_client.register_tools(registrations)
+            if result.success:
+                self._logger.info(
+                    "MCP tools registered with cloud",
+                    {"tools": result.registered_tools},
+                )
+            else:
+                self._logger.warn(
+                    "Failed to register MCP tools with cloud",
+                    {"message": result.message},
+                )
+
     def _is_guard_evaluation(self, context: ValidationContext) -> bool:
         return context.source == "guard"
 
@@ -1295,6 +1489,7 @@ class Veto:
             condition_groups=condition_groups,
             context=local_context,
             now=context.timestamp,
+            feed_provider=self._feed_provider,
         )
         if not conditions_match:
             return False
@@ -1332,6 +1527,9 @@ class Veto:
             )
             metadata = self._to_local_rule_metadata(rule)
             action = rule.get("action")
+
+            if action == "require_payment":
+                return self._validate_require_payment_rule(rule, context, metadata)
 
             if action == "require_approval":
                 if self._should_apply_log_mode_override(context):
@@ -1447,6 +1645,260 @@ class Veto:
             )
 
         return ValidationResult(decision="allow")
+
+    async def _get_kernel_client(self) -> Any:
+        if self._kernel_client is not None:
+            return self._kernel_client
+        if not isinstance(self._kernel_config, dict):
+            raise RuntimeError("Kernel configuration not available")
+        self._kernel_client = KernelClient(config=self._kernel_config, logger=self._logger)
+        return self._kernel_client
+
+    async def _validate_with_kernel(
+        self,
+        context: ValidationContext,
+    ) -> ValidationResult:
+        rules = self._get_rules_for_tool(context.tool_name)
+        if not rules:
+            self._logger.debug(
+                "No rules for tool, allowing",
+                {"tool": context.tool_name},
+            )
+            return ValidationResult(decision="allow")
+
+        try:
+            client = await self._get_kernel_client()
+            response = client.evaluate(
+                {"tool": context.tool_name, "arguments": context.arguments},
+                rules,
+            )
+            if inspect.isawaitable(response):
+                response = await response
+            return self._handle_model_response(response, context, "Kernel")
+        except Exception as exc:
+            return self._handle_model_failure(
+                str(exc),
+                context,
+                "Kernel",
+                "kernel_error",
+            )
+
+    async def _get_custom_client(self) -> Any:
+        if self._custom_client is not None:
+            return self._custom_client
+        if self._custom_config_error:
+            raise RuntimeError(self._custom_config_error)
+        if not isinstance(self._custom_config, dict):
+            raise RuntimeError(
+                'Custom validation is not configured. Set validation.mode="custom" '
+                "and provide custom.provider and custom.model in veto.config.yaml"
+            )
+        self._custom_client = CustomClient(config=self._custom_config, logger=self._logger)
+        return self._custom_client
+
+    async def _validate_with_custom(
+        self,
+        context: ValidationContext,
+    ) -> ValidationResult:
+        rules = self._get_rules_for_tool(context.tool_name)
+        if not rules:
+            self._logger.debug(
+                "No rules for tool, allowing",
+                {"tool": context.tool_name},
+            )
+            return ValidationResult(decision="allow")
+
+        try:
+            client = await self._get_custom_client()
+            response = client.evaluate(
+                {"tool": context.tool_name, "arguments": context.arguments},
+                rules,
+            )
+            if inspect.isawaitable(response):
+                response = await response
+            return self._handle_model_response(response, context, "Custom provider")
+        except Exception as exc:
+            return self._handle_model_failure(
+                str(exc),
+                context,
+                "Custom provider",
+                "custom_provider_failed",
+            )
+
+    def _handle_model_response(
+        self,
+        response: KernelResponse | Mapping[str, Any],
+        context: ValidationContext,
+        label: str,
+    ) -> ValidationResult:
+        decision: Literal["pass", "block"]
+        reasoning: Optional[str]
+        if isinstance(response, KernelResponse):
+            decision = response.decision
+            reasoning = response.reasoning
+            metadata: dict[str, Any] = {
+                "pass_weight": response.pass_weight,
+                "block_weight": response.block_weight,
+                "matched_rules": response.matched_rules,
+            }
+        else:
+            raw_decision = response.get("decision")
+            decision = (
+                cast(Literal["pass", "block"], raw_decision)
+                if raw_decision in ("pass", "block")
+                else "block"
+            )
+            raw_reasoning = response.get("reasoning")
+            reasoning = raw_reasoning if isinstance(raw_reasoning, str) else None
+            metadata = {
+                "pass_weight": response.get("pass_weight"),
+                "block_weight": response.get("block_weight"),
+                "matched_rules": response.get("matched_rules"),
+            }
+
+        if decision == "pass":
+            return ValidationResult(
+                decision="allow",
+                reason=reasoning,
+                metadata=metadata,
+            )
+
+        reason = reasoning or f"{label} blocked tool call"
+        matched_rules = metadata.get("matched_rules")
+        rule_id = (
+            str(matched_rules[0])
+            if isinstance(matched_rules, list) and matched_rules
+            else None
+        )
+        if self._mode in ("log", "shadow"):
+            if self._mode == "shadow":
+                return self._apply_shadow_mode_override(
+                    context,
+                    "deny",
+                    reason,
+                    metadata,
+                    rule_id,
+                )
+            return ValidationResult(
+                decision="allow",
+                reason=f"[LOG MODE] Would block: {reason}",
+                metadata={**metadata, "blocked_in_strict_mode": True},
+            )
+
+        return ValidationResult(decision="deny", reason=reason, metadata=metadata)
+
+    def _handle_model_failure(
+        self,
+        reason: str,
+        context: ValidationContext,
+        label: str,
+        metadata_key: str,
+    ) -> ValidationResult:
+        if self._mode in ("log", "shadow"):
+            self._logger.warn(
+                f"{label} unavailable ({self._mode} mode, allowing)",
+                {"reason": reason},
+            )
+            return ValidationResult(
+                decision="allow",
+                reason=f"{label} unavailable: {reason}",
+                metadata={metadata_key: True},
+            )
+
+        self._logger.error(f"{label} unavailable (strict mode, blocking)", {"reason": reason})
+        return ValidationResult(
+            decision="deny",
+            reason=f"{label} unavailable: {reason}",
+            metadata={metadata_key: True},
+        )
+
+    def _validate_require_payment_rule(
+        self,
+        rule: dict[str, Any],
+        context: ValidationContext,
+        metadata: dict[str, Any],
+    ) -> ValidationResult:
+        payment_cfg = rule.get("payment")
+        if not isinstance(payment_cfg, dict):
+            self._logger.warn(
+                "[veto] require_payment rule has no payment config — treating as block",
+                {"rule_id": rule.get("id")},
+            )
+            return ValidationResult(
+                decision="deny",
+                reason="Payment required but payment config is missing",
+                metadata=metadata,
+            )
+
+        if payment_cfg.get("protocol") == "ap2":
+            self._logger.warn(
+                "[veto] AP2 mandate signature verification not yet implemented. "
+                "Use x402 or MPP for production payment gates."
+            )
+
+        if self._economic_evaluator is None:
+            self._logger.warn(
+                "[veto] require_payment rule matched but no economic evaluator configured — failing closed",
+                {"rule_id": rule.get("id")},
+            )
+            return ValidationResult(
+                decision="deny",
+                reason="Payment required but no payment provider configured",
+                metadata=metadata,
+            )
+
+        amount = payment_cfg.get("amount")
+        currency = payment_cfg.get("currency")
+        protocol = payment_cfg.get("protocol")
+        if not isinstance(amount, (int, float)) or isinstance(amount, bool):
+            return ValidationResult(
+                decision="deny",
+                reason="Payment required but amount is invalid",
+                metadata=metadata,
+            )
+        if not isinstance(currency, str) or not isinstance(protocol, str):
+            return ValidationResult(
+                decision="deny",
+                reason="Payment required but currency/protocol is invalid",
+                metadata=metadata,
+            )
+
+        chain_id = payment_cfg.get("chain_id")
+        normalized_protocol: EconomicProtocol = (
+            cast(EconomicProtocol, protocol)
+            if protocol in ("x402", "mpp", "ap2", "custom")
+            else "custom"
+        )
+        economic_context = EconomicContext(
+            cost=float(amount),
+            currency=currency,
+            protocol=normalized_protocol,
+            protocol_metadata={"chain_id": chain_id}
+            if chain_id is not None
+            else None,
+        )
+        econ_result = self._economic_evaluator.evaluate(economic_context)
+        if econ_result.decision != "allow":
+            return ValidationResult(
+                decision="deny",
+                reason=(
+                    econ_result.denial.reason
+                    if econ_result.denial is not None
+                    else "Payment required"
+                ),
+                metadata={
+                    **metadata,
+                    **self._economic_metadata(econ_result.denial),
+                },
+            )
+
+        return ValidationResult(
+            decision="allow",
+            reason=rule.get("description")
+            if isinstance(rule.get("description"), str)
+            else f"Payment gate passed: {rule.get('name', 'Unnamed Rule')}",
+            metadata=metadata,
+        )
 
     def _try_local_deterministic(
         self, context: ValidationContext
@@ -2067,6 +2519,83 @@ class Veto:
         veto._logger.warn("No wrappable function found on tool", {"name": tool_name})
         return tool
 
+    def wrap_mcp_tools(
+        self,
+        tools: list[MCPTool],
+        server_client: Any,
+    ) -> WrappedMCPTools:
+        """Wrap MCP tools with Veto validation.
+
+        The tool definitions are returned unchanged for the model. Use the
+        returned ``call_tool`` coroutine instead of calling the MCP server
+        directly; it validates arguments before forwarding and validates the
+        server result before returning.
+        """
+        import asyncio
+
+        tool_definitions = [from_mcp(tool) for tool in tools]
+
+        if self._validation_mode == "cloud":
+            try:
+                asyncio.get_running_loop()
+                asyncio.create_task(
+                    self._register_tool_definitions_with_cloud(tool_definitions)
+                )
+            except RuntimeError:
+                asyncio.run(self._register_tool_definitions_with_cloud(tool_definitions))
+
+        async def call_tool(args: MCPToolCallArgs | dict[str, Any]) -> Any:
+            if isinstance(args, dict):
+                tool_name_raw = args.get("name")
+                call_args_raw = args.get("arguments")
+            else:
+                tool_name_raw = args.name
+                call_args_raw = args.arguments
+
+            if not isinstance(tool_name_raw, str) or not tool_name_raw:
+                raise ValueError("MCP tool call requires a non-empty name")
+            call_args = call_args_raw if isinstance(call_args_raw, dict) else {}
+
+            result = await self.validate_tool_call(
+                ToolCall(
+                    id=generate_tool_call_id(),
+                    name=tool_name_raw,
+                    arguments=call_args,
+                )
+            )
+
+            if not result.allowed:
+                raise ToolCallDeniedError(
+                    tool_name_raw,
+                    result.original_call.id or "",
+                    result.validation_result,
+                    self._extract_denial(result),
+                )
+
+            final_args = result.final_arguments or call_args
+            mcp_call = MCPToolCallArgs(name=tool_name_raw, arguments=final_args)
+
+            if hasattr(server_client, "call_tool") and callable(
+                getattr(server_client, "call_tool")
+            ):
+                execution_result = server_client.call_tool(mcp_call)
+            elif hasattr(server_client, "callTool") and callable(
+                getattr(server_client, "callTool")
+            ):
+                execution_result = server_client.callTool(
+                    {"name": tool_name_raw, "arguments": final_args}
+                )
+            else:
+                raise ValueError("MCP server client must expose call_tool or callTool")
+
+            if inspect.isawaitable(execution_result):
+                execution_result = await execution_result
+
+            return self._validate_output_or_throw(tool_name_raw, execution_result)
+
+        self._logger.debug("MCP tools wrapped", {"count": len(tools)})
+        return WrappedMCPTools(tools=tools, call_tool=call_tool)
+
     async def validate_tool_call(self, call: ToolCall) -> InterceptionResult:
         """Validate a tool call through the interceptor pipeline.
 
@@ -2280,6 +2809,52 @@ class Veto:
             input=getattr(raw, "input", None),
         )
 
+    @staticmethod
+    def _economic_metadata(
+        denial: Optional[EconomicDenialDetails],
+    ) -> dict[str, Any]:
+        if denial is None:
+            return {"source": "economic"}
+
+        metadata: dict[str, Any] = {
+            "source": "economic",
+            "economic_denial": denial.to_dict(),
+            "economicDenial": denial.to_dict(),
+            "economic_denial_reason": denial.reason,
+            "severity": "high" if denial.reason == "budget_exceeded" else "medium",
+        }
+        if denial.reason == "budget_exceeded":
+            metadata["budget_exceeded"] = True
+            metadata["event_type"] = "budget_exceeded"
+        return metadata
+
+    @staticmethod
+    def _normalize_economic_context(
+        economic: EconomicContext | Mapping[str, Any],
+    ) -> EconomicContext:
+        if isinstance(economic, EconomicContext):
+            return economic
+        return EconomicContext.from_mapping(economic)
+
+    def _economic_result_to_guard_result(
+        self,
+        econ_result: Any,
+    ) -> GuardResult:
+        decision: Literal["allow", "deny", "require_approval"] = (
+            "allow" if self._mode == "shadow" else econ_result.decision
+        )
+        return GuardResult(
+            decision=decision,
+            reason=(
+                f"Economic: {econ_result.denial.reason}"
+                if econ_result.denial is not None
+                else "Economic authorization denied"
+            ),
+            shadow=True if self._mode == "shadow" else None,
+            shadow_decision=econ_result.decision if self._mode == "shadow" else None,
+            economic_denial=econ_result.denial,
+        )
+
     def _to_guard_result(self, result: ValidationResult) -> GuardResult:
         decision: Literal["allow", "deny", "require_approval"] = "allow"
         if result.decision == "deny":
@@ -2288,6 +2863,39 @@ class Veto:
             decision = "require_approval"
 
         metadata = result.metadata
+        economic_denial = None
+        if metadata:
+            raw_denial = metadata.get("economic_denial") or metadata.get("economicDenial")
+            if isinstance(raw_denial, EconomicDenialDetails):
+                economic_denial = raw_denial
+            elif isinstance(raw_denial, dict) and isinstance(raw_denial.get("reason"), str):
+                economic_denial = EconomicDenialDetails(
+                    reason=raw_denial["reason"],
+                    cost=float(raw_denial.get("cost", 0)),
+                    currency=str(raw_denial.get("currency", "USD")),
+                    budget_scope=str(raw_denial.get("budget_scope", "session")),
+                    budget_limit=float(raw_denial.get("budget_limit", 0)),
+                    budget_spent=float(raw_denial.get("budget_spent", 0)),
+                    budget_remaining=float(raw_denial.get("budget_remaining", 0)),
+                    approval_threshold=raw_denial.get("approval_threshold")
+                    if isinstance(raw_denial.get("approval_threshold"), (int, float))
+                    else None,
+                    payer=raw_denial.get("payer")
+                    if isinstance(raw_denial.get("payer"), str)
+                    else None,
+                    protocol=raw_denial.get("protocol")
+                    if isinstance(raw_denial.get("protocol"), str)
+                    else None,
+                    message=raw_denial.get("message")
+                    if isinstance(raw_denial.get("message"), str)
+                    else None,
+                    connector_name=raw_denial.get("connector_name")
+                    if isinstance(raw_denial.get("connector_name"), str)
+                    else None,
+                    raw_error=raw_denial.get("raw_error")
+                    if isinstance(raw_denial.get("raw_error"), str)
+                    else None,
+                )
         return GuardResult(
             decision=decision,
             reason=result.reason,
@@ -2298,6 +2906,7 @@ class Veto:
             ),
             shadow=True if self._mode == "shadow" else None,
             shadow_decision=decision if self._mode == "shadow" and decision != "allow" else None,
+            economic_denial=economic_denial,
         )
 
     async def guard(
@@ -2309,8 +2918,66 @@ class Veto:
         agent_id: Optional[str] = None,
         user_id: Optional[str] = None,
         role: Optional[str] = None,
+        custom: Optional[dict[str, Any]] = None,
+        market: Optional[dict[str, Any]] = None,
+        budget: Optional[dict[str, Any]] = None,
+        portfolio: Optional[dict[str, Any]] = None,
+        economic: Optional[EconomicContext | Mapping[str, Any]] = None,
     ) -> GuardResult:
         """Run a standalone guard check without wrapping or executing a tool."""
+        explicit_economic_context: Optional[EconomicContext] = None
+        implicit_economic_context: Optional[EconomicContext] = None
+
+        if self._economic_evaluator is not None and economic is not None:
+            explicit_economic_context = self._normalize_economic_context(economic)
+            econ_result = self._economic_evaluator.evaluate(explicit_economic_context)
+            if econ_result.decision != "allow":
+                guard_result = self._economic_result_to_guard_result(econ_result)
+                self._history_tracker.record(
+                    tool_name,
+                    args,
+                    ValidationResult(
+                        decision=guard_result.decision,
+                        reason=guard_result.reason,
+                        metadata=self._economic_metadata(econ_result.denial),
+                    ),
+                    None,
+                )
+                return guard_result
+
+        if self._economic_evaluator is not None and explicit_economic_context is None:
+            resolved_cost = self._economic_evaluator.resolve_cost(tool_name, args)
+            if resolved_cost is not None and resolved_cost > 0:
+                implicit_economic_context = EconomicContext(
+                    cost=resolved_cost,
+                    currency="USD",
+                    protocol="custom",
+                )
+                econ_result = self._economic_evaluator.evaluate(
+                    implicit_economic_context
+                )
+                if econ_result.decision != "allow":
+                    guard_result = self._economic_result_to_guard_result(econ_result)
+                    self._history_tracker.record(
+                        tool_name,
+                        args,
+                        ValidationResult(
+                            decision=guard_result.decision,
+                            reason=guard_result.reason,
+                            metadata=self._economic_metadata(econ_result.denial),
+                        ),
+                        None,
+                    )
+                    return guard_result
+
+        custom_context: dict[str, Any] = dict(custom or {})
+        if market is not None:
+            custom_context["market"] = market
+        if budget is not None:
+            custom_context["budget"] = budget
+        if portfolio is not None:
+            custom_context["portfolio"] = portfolio
+
         context = ValidationContext(
             tool_name=tool_name,
             arguments=args,
@@ -2322,10 +2989,47 @@ class Veto:
             user_id=user_id if user_id is not None else self._user_id,
             role=role if role is not None else self._role,
             source="guard",
+            custom=custom_context if custom_context else None,
         )
 
         aggregated_result = await self._validation_engine.validate(context)
         validation_result = aggregated_result.final_result
+        behavioral_result = self._to_guard_result(validation_result)
+
+        effective_economic_context = explicit_economic_context or implicit_economic_context
+        if (
+            behavioral_result.decision == "allow"
+            and self._economic_evaluator is not None
+            and effective_economic_context is not None
+            and effective_economic_context.cost > 0
+            and self._mode != "shadow"
+        ):
+            reserve_result = self._economic_evaluator.reserve_budget(
+                effective_economic_context.cost,
+                effective_economic_context.currency,
+            )
+            if reserve_result.decision != "allow":
+                validation_result = ValidationResult(
+                    decision=reserve_result.decision,
+                    reason=(
+                        f"Economic: {reserve_result.denial.reason}"
+                        if reserve_result.denial is not None
+                        else "Budget reservation failed"
+                    ),
+                    metadata=self._economic_metadata(reserve_result.denial),
+                )
+                self._history_tracker.record(
+                    tool_name,
+                    args,
+                    validation_result,
+                    aggregated_result.total_duration_ms,
+                )
+                self._emit_decision_event(
+                    context,
+                    validation_result,
+                    aggregated_result.total_duration_ms,
+                )
+                return self._to_guard_result(validation_result)
 
         self._history_tracker.record(
             tool_name,
@@ -2340,7 +3044,7 @@ class Veto:
             aggregated_result.total_duration_ms,
         )
 
-        return self._to_guard_result(validation_result)
+        return behavioral_result
 
     def set_approval_preference(self, tool_name: str, preference: str) -> None:
         """
@@ -2391,6 +3095,31 @@ class Veto:
         """Clear call history."""
         self._history_tracker.clear()
 
+    def get_economic_budget_status(
+        self,
+        scope: BudgetScope = "session",
+    ) -> Optional[EconomicBudgetStatus]:
+        """Return current economic budget status for a scope, if configured."""
+        if self._economic_budget_engine is None:
+            return None
+        return self._economic_budget_engine.get_status(scope)
+
+    def getEconomicBudgetStatus(
+        self,
+        scope: BudgetScope = "session",
+    ) -> Optional[EconomicBudgetStatus]:
+        """TypeScript-style alias."""
+        return self.get_economic_budget_status(scope)
+
+    def reset_economic_budget(self, scope: BudgetScope = "session") -> None:
+        """Reset economic budget state for a scope."""
+        if self._economic_budget_engine is not None:
+            self._economic_budget_engine.reset(scope)
+
+    def resetEconomicBudget(self, scope: BudgetScope = "session") -> None:
+        """TypeScript-style alias."""
+        self.reset_economic_budget(scope)
+
 
 # Re-export error class
 __all__ = [
@@ -2401,5 +3130,6 @@ __all__ = [
     "VetoMode",
     "ValidationMode",
     "WrappedTools",
+    "WrappedMCPTools",
     "WrappedHandler",
 ]

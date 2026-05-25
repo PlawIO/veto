@@ -175,6 +175,78 @@ class TestValidDocuments:
             }
         )
 
+    def test_accepts_ts_parity_operators_and_not_exists(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "rules": [
+                    {
+                        "id": "advanced-operators",
+                        "name": "Advanced operators",
+                        "action": "block",
+                        "conditions": [
+                            {
+                                "field": "arguments.amount",
+                                "operator": "greater_than_or_equal",
+                                "value": 100,
+                            },
+                            {
+                                "field": "arguments.amount",
+                                "operator": "less_than_or_equal",
+                                "value": 1000,
+                            },
+                            {
+                                "field": "arguments.slippage",
+                                "operator": "percent_of",
+                                "value": 5,
+                                "reference": "arguments.total",
+                            },
+                            {
+                                "field": "arguments.approval_id",
+                                "operator": "not_exists",
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+
+    def test_accepts_economic_and_session_constraint_documents(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "economic": {
+                    "budgets": [
+                        {
+                            "scope": "session",
+                            "limit": 100,
+                            "currency": "USD",
+                            "window": "session",
+                            "approval_threshold": 50,
+                        }
+                    ],
+                    "cost_extraction": {"default": "arguments.cost"},
+                    "payer": {"required": True, "approved": ["cus_123"]},
+                },
+                "sessionConstraints": {
+                    "maxCalls": 10,
+                    "budget": 1000,
+                    "spendArgument": "amount",
+                    "cumulativeLimits": [
+                        {"argumentName": "amount", "maxValue": 5000}
+                    ],
+                    "counters": {
+                        "open_positions": {
+                            "increment": ["buy"],
+                            "decrement": ["sell"],
+                            "max": 3,
+                            "maxAction": "deny",
+                        }
+                    },
+                },
+            }
+        )
+
 
 class TestInvalidDocuments:
     def test_missing_version(self) -> None:
@@ -267,7 +339,28 @@ class TestInvalidDocuments:
                 }
             )
 
-    def test_non_object_time_value_rejected(self) -> None:
+    def test_simple_time_window_string_is_accepted_for_ts_parity(self) -> None:
+        validate_policy_ir(
+            {
+                "version": "1.0",
+                "rules": [
+                    {
+                        "id": "simple-time",
+                        "name": "Simple time operator value",
+                        "action": "block",
+                        "conditions": [
+                            {
+                                "field": "context.time",
+                                "operator": "within_hours",
+                                "value": "09:00-17:00",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+    def test_invalid_time_window_string_rejected(self) -> None:
         with pytest.raises(PolicySchemaError):
             validate_policy_ir(
                 {
@@ -281,7 +374,7 @@ class TestInvalidDocuments:
                                 {
                                     "field": "context.time",
                                     "operator": "within_hours",
-                                    "value": "09:00-17:00",
+                                    "value": "9-5",
                                 }
                             ],
                         }

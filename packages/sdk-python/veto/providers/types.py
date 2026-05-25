@@ -5,7 +5,7 @@ This module defines the tool schema formats used by different AI providers,
 allowing Veto to work transparently with each provider's format.
 """
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Protocol, Union
 from dataclasses import dataclass
 
 from veto.types.tool import ToolInputSchema
@@ -116,14 +116,75 @@ class GoogleFunctionCall:
 
 
 # ============================================================================
+# MCP (Model Context Protocol) Format
+# ============================================================================
+
+
+@dataclass
+class MCPInputSchema:
+    """MCP input schema shape used by server tools."""
+
+    type: Literal["object"]
+    properties: Optional[dict[str, Any]] = None
+    required: Optional[list[str]] = None
+
+
+@dataclass
+class MCPTool:
+    """MCP tool definition format."""
+
+    name: str
+    input_schema: MCPInputSchema
+    description: Optional[str] = None
+
+
+@dataclass
+class MCPToolCallArgs:
+    """MCP tool call arguments passed to server.call_tool/callTool."""
+
+    name: str
+    arguments: Optional[dict[str, Any]] = None
+
+
+@dataclass
+class MCPContentBlock:
+    """A content block in an MCP tool result."""
+
+    type: str
+    text: Optional[str] = None
+    data: Optional[str] = None
+    mime_type: Optional[str] = None
+
+
+@dataclass
+class MCPToolResult:
+    """MCP call_tool result shape."""
+
+    content: list[MCPContentBlock]
+    is_error: Optional[bool] = None
+
+
+class MCPServerClient(Protocol):
+    """Subset of an MCP client needed by Veto wrappers."""
+
+    async def call_tool(self, args: MCPToolCallArgs) -> MCPToolResult:
+        ...
+
+
+# ============================================================================
 # Provider Enum
 # ============================================================================
 
 # Supported AI providers
-Provider = Literal["openai", "anthropic", "google"]
+Provider = Literal["openai", "anthropic", "google", "mcp"]
 
 # Union type for all provider tool formats
-ProviderTool = Union[OpenAITool, AnthropicTool, GoogleTool]
+ProviderTool = Union[OpenAITool, AnthropicTool, GoogleTool, MCPTool]
 
 # Union type for all provider tool call formats
-ProviderToolCall = Union[OpenAIToolCall, AnthropicToolUse, GoogleFunctionCall]
+ProviderToolCall = Union[
+    OpenAIToolCall,
+    AnthropicToolUse,
+    GoogleFunctionCall,
+    MCPToolCallArgs,
+]

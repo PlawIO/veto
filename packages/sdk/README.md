@@ -134,6 +134,14 @@ import { protect } from "veto-sdk";
 const safeTools = await protect(tools);
 ```
 
+Python equivalent:
+
+```python
+from veto import protect
+
+safe_tools = await protect(tools)
+```
+
 Options mirror the advanced runtime configuration when you need explicit policy sources:
 
 ```ts
@@ -159,6 +167,32 @@ const safeTools = await protect(tools, {
 });
 ```
 
+Python equivalent:
+
+```python
+safe_tools = await protect(
+    tools,
+    rules=[
+        {
+            "id": "no-prod-deploy",
+            "name": "Block direct production deploys",
+            "enabled": True,
+            "severity": "critical",
+            "action": "block",
+            "tools": ["deploy"],
+            "conditions": [
+                {
+                    "field": "arguments.environment",
+                    "operator": "equals",
+                    "value": "production",
+                }
+            ],
+        }
+    ],
+    mode="strict",
+)
+```
+
 Supported policy sources:
 
 - `rules`: inline deterministic rules
@@ -178,11 +212,28 @@ const safeTools = veto.wrap(tools);
 const decision = await veto.guard("transfer_funds", { amount: 1500 });
 ```
 
+Python equivalent:
+
+```python
+from veto import Veto, VetoOptions
+
+veto = await Veto.init(VetoOptions(config_dir="./veto", mode="strict"))
+safe_tools = veto.wrap(tools)
+decision = await veto.guard("transfer_funds", {"amount": 1500})
+```
+
 ### `veto.guard(toolName, args, context?)`
 
 ```ts
 const result = await veto.guard("transfer_funds", { amount: 5000 });
 // { decision: 'deny', reason: 'Amount exceeds limit', ruleId: 'block-large-transfers' }
+```
+
+Python equivalent:
+
+```python
+result = await veto.guard("transfer_funds", {"amount": 5000})
+# ValidationResult(decision="deny", reason="Amount exceeds limit", rule_id="block-large-transfers")
 ```
 
 ### Decision history
@@ -191,6 +242,14 @@ const result = await veto.guard("transfer_funds", { amount: 5000 });
 const stats = veto.getHistoryStats();
 const json = veto.exportDecisions("json");
 const csv = veto.exportDecisions("csv");
+```
+
+Python equivalent:
+
+```python
+stats = veto.get_history_stats()
+json_audit = veto.export_decisions("json")
+csv_audit = veto.export_decisions("csv")
 ```
 
 Decision export is local to your process unless you explicitly configure a remote endpoint.

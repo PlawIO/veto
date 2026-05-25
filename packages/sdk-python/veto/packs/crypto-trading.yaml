@@ -1,0 +1,320 @@
+version: "1.0"
+name: "@veto/crypto-trading"
+description: >
+  Production-grade guardrails for AI trading agents. Covers crypto exchanges
+  (Binance, Bybit, OKX), prediction markets (Polymarket, Manifold), and
+  general financial instruments. Conservative defaults safe for first-timers.
+  One line to safe trading: extends: "@veto/crypto-trading"
+
+rules:
+  # --- Layer 1: Read-only (always allow) ---
+  - id: crypto-allow-reads
+    name: Allow all read operations
+    description: Market data, portfolio, prices, positions, history — always safe
+    enabled: true
+    action: allow
+    tools:
+      - get_price
+      - get_portfolio
+      - get_balance
+      - get_orderbook
+      - get_funding_rate
+      - get_positions
+      - get_open_orders
+      - get_trade_history
+      - get_ticker
+      - get_klines
+      - get_market_info
+      - get_account_info
+      - get_markets
+      - get_market_details
+      - get_market_odds
+      - get_bets
+      - get_bet_history
+      - get_portfolio_positions
+      - get_market_activity
+      - get_leaderboard
+      - web_search
+      - web_fetch
+      - get_news
+      - get_sentiment
+      - get_on_chain_data
+
+  # --- Layer 2: Hard blocks (non-negotiable) ---
+  - id: crypto-max-leverage
+    name: Maximum leverage limit
+    description: >
+      Hard cap on leverage. Even if the agent or user begs, this won't budge
+      without manually editing the config. Prevents liquidation cascades.
+    enabled: true
+    severity: critical
+    action: block
+    tools: [change_leverage, set_leverage, update_leverage]
+    conditions:
+      - field: arguments.leverage
+        operator: greater_than
+        value: 5 # Adjust: your absolute max leverage (conservative: 2, moderate: 5, aggressive: 10)
+
+  - id: crypto-max-position
+    name: Maximum single position size
+    description: No single trade can exceed this USD value
+    enabled: true
+    severity: critical
+    action: block
+    tools: [place_order, create_order, submit_order, open_position]
+    conditions:
+      - field: arguments.quote_quantity
+        operator: greater_than
+        value: 2000 # Adjust: your max single trade in USD (conservative: 500, moderate: 2000, aggressive: 10000)
+
+  - id: crypto-max-bet
+    name: Maximum prediction market bet
+    description: No single prediction market bet can exceed this USD value
+    enabled: true
+    severity: critical
+    action: block
+    tools: [place_bet, create_bet, buy_shares, buy_outcome]
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 500 # Adjust: your max single bet in USD (conservative: 100, moderate: 500, aggressive: 2000)
+
+  - id: crypto-block-withdrawals
+    name: Block all withdrawals
+    description: Agent can never move funds off-exchange. Period.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - withdraw
+      - withdraw_funds
+      - create_withdrawal
+      - transfer_out
+      - bridge_funds
+
+  - id: crypto-block-margin-borrow
+    name: Block margin borrowing
+    description: Agent cannot borrow margin or take loans
+    enabled: true
+    severity: critical
+    action: block
+    tools: [borrow_margin, margin_borrow, cross_margin_borrow, take_loan]
+
+  - id: crypto-block-remove-stop-loss
+    name: Block stop-loss removal
+    description: Never allow removing a stop-loss without replacing it
+    enabled: true
+    severity: critical
+    action: block
+    tools: [cancel_order, cancel_stop_loss, remove_stop_loss]
+    conditions:
+      - field: arguments.order_type
+        operator: equals
+        value: "STOP_LOSS"
+
+  # --- Layer 3: Auto-allow small trades ---
+  - id: crypto-allow-small-trades
+    name: Auto-allow small trades
+    description: Trades under $200 go through without approval — learning money
+    enabled: true
+    action: allow
+    tools: [place_order, create_order, submit_order, open_position]
+    conditions:
+      - field: arguments.quote_quantity
+        operator: less_than_or_equal
+        value: 200 # Adjust: your no-approval-needed trade threshold in USD (conservative: 50, moderate: 200, aggressive: 1000)
+
+  - id: crypto-allow-small-bets
+    name: Auto-allow small bets
+    description: Prediction market bets under $50 go through without approval
+    enabled: true
+    action: allow
+    tools: [place_bet, create_bet, buy_shares, buy_outcome]
+    conditions:
+      - field: arguments.amount
+        operator: less_than_or_equal
+        value: 50 # Adjust: your no-approval-needed bet threshold in USD (conservative: 25, moderate: 50, aggressive: 250)
+
+  # --- Layer 4: Approval gates ---
+  - id: crypto-approve-trades
+    name: Approve trades above threshold
+    description: >
+      Medium-sized trades need your OK. Your phone pings, you see the details,
+      you tap approve or deny. Takes 5 seconds, saves you from impulse trades.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools: [place_order, create_order, submit_order, open_position]
+    conditions:
+      - field: arguments.quote_quantity
+        operator: greater_than
+        value: 200 # Adjust: matches your no-approval-needed trade threshold in USD (conservative: 50, moderate: 200, aggressive: 1000)
+    message: "🔔 Trade approval: {arguments.side} {arguments.symbol} — ${arguments.quote_quantity}"
+
+  - id: crypto-approve-bets
+    name: Approve prediction market bets
+    description: Bets above the small threshold need approval
+    enabled: true
+    severity: high
+    action: require_approval
+    tools: [place_bet, create_bet, buy_shares, buy_outcome]
+    conditions:
+      - field: arguments.amount
+        operator: greater_than
+        value: 50 # Adjust: matches your no-approval-needed bet threshold in USD (conservative: 25, moderate: 50, aggressive: 250)
+    message: "🔔 Bet approval: {arguments.market} — ${arguments.amount} on {arguments.outcome}"
+
+  - id: crypto-approve-leverage-change
+    name: Approve all leverage changes
+    description: Any leverage change pings you — no exceptions
+    enabled: true
+    severity: high
+    action: require_approval
+    tools: [change_leverage, set_leverage, update_leverage]
+    message: "⚠️ Leverage change: {arguments.symbol} → {arguments.leverage}x"
+
+  - id: crypto-approve-close-position
+    name: Approve position closure
+    description: Closing positions pings you — prevents premature panic exits
+    enabled: true
+    severity: medium
+    action: require_approval
+    tools: [close_position, close_all_positions, sell_all]
+    message: "📤 Close position: {arguments.symbol}"
+
+  - id: crypto-approve-cancel-all
+    name: Approve mass cancellation
+    description: Canceling all orders needs explicit OK
+    enabled: true
+    severity: medium
+    action: require_approval
+    tools: [cancel_all_orders]
+    message: "🗑️ Cancel ALL open orders — confirm?"
+
+  - id: crypto-approve-transfers
+    name: Approve internal transfers
+    description: Moving funds between accounts needs approval
+    enabled: true
+    severity: high
+    action: require_approval
+    tools: [transfer_between_accounts, internal_transfer, universal_transfer]
+    message: "💸 Transfer ${arguments.amount} from {arguments.from_account} → {arguments.to_account}"
+
+  - id: crypto-approve-redeem
+    name: Approve prediction market redemptions
+    description: Redeeming winning positions needs approval
+    enabled: true
+    severity: medium
+    action: require_approval
+    tools: [redeem_shares, claim_winnings, redeem_position]
+    message: "💰 Redeem {arguments.market} — {arguments.shares} shares"
+
+  # --- Layer 5: Risk management ---
+  - id: crypto-warn-no-stop-loss
+    name: Warn on trades without stop-loss
+    description: Log a warning when opening leveraged positions without protection
+    enabled: true
+    severity: medium
+    action: warn
+    tools: [place_order, create_order, open_position]
+    conditions:
+      - field: arguments.stop_loss
+        operator: not_exists
+    message: "⚠️ No stop-loss set on {arguments.symbol} — high risk"
+
+  # --- Layer 6: Research before action ---
+  - id: crypto-research-before-trade
+    name: Must research before trading
+    description: >
+      Agent must check price and portfolio before placing any order.
+      This is the "10 seconds of friction" that prevents impulse trades.
+    enabled: true
+    severity: high
+    action: block
+    tools: [place_order, create_order, submit_order, open_position]
+    requires:
+      - tool: get_price
+      - tool: get_portfolio
+    message: "Check price and portfolio first — no blind trades"
+
+  - id: crypto-research-before-bet
+    name: Must research before betting
+    description: Agent must look at market details before placing a bet
+    enabled: true
+    severity: high
+    action: block
+    tools: [place_bet, create_bet, buy_shares, buy_outcome]
+    requires:
+      - tool: get_market_details
+    message: "Check market details first — no blind bets"
+
+  # --- Layer 7: Time restrictions ---
+  - id: crypto-block-night-leverage
+    name: No leveraged trades at night
+    description: >
+      Between midnight and 6am UTC, block leveraged trades.
+      Most bad decisions happen when you're tired.
+    enabled: true
+    severity: high
+    action: block
+    tools: [place_order, create_order, open_position]
+    conditions:
+      - field: arguments.leverage
+        operator: greater_than
+        value: 1
+      - field: timestamp
+        operator: outside_hours
+        value: "06:00-23:59"
+    message: "No leveraged trades between midnight and 6am. Sleep on it."
+
+settings:
+  default_action: allow
+  fail_mode: closed
+
+economic:
+  budgets:
+    - scope: session
+      limit: 1000.00 # Adjust: your session trading budget in USD (conservative: 500, moderate: 1000, aggressive: 5000)
+      currency: USD
+      approval_threshold: 500.00 # Adjust: the per-trade cost that always needs approval in USD (conservative: 250, moderate: 500, aggressive: 2500)
+      window: session
+
+  cost_extraction:
+    default: "arguments.quote_quantity"
+    overrides:
+      place_order: "arguments.quote_quantity"
+      create_order: "arguments.quote_quantity"
+      open_position: "arguments.quote_quantity"
+      place_bet: "arguments.amount"
+      create_bet: "arguments.amount"
+      buy_shares: "arguments.amount"
+      buy_outcome: "arguments.amount"
+      transfer_between_accounts: "arguments.amount"
+
+  payer:
+    required: false
+
+  denial_reasons:
+    budget_exceeded: "Daily budget hit: ${spent}/${limit} USD. Done for today — no more trades until next session."
+    approval_required: "This ${cost} trade pushes you past the ${threshold} approval threshold. Confirm?"
+
+sessionConstraints:
+  maxCalls: 100 # Adjust: max tool calls per session (conservative: 50, moderate: 100, aggressive: 250)
+  budget: 1000 # Adjust: session spend budget in USD for deterministic tracking (conservative: 500, moderate: 1000, aggressive: 5000)
+  spendArgument: "quote_quantity"
+  counters:
+    open_positions:
+      increment: [place_order, create_order, open_position]
+      decrement: [close_position]
+      max: 3 # Adjust: max simultaneous open positions (conservative: 2, moderate: 3, aggressive: 5)
+      maxAction: require_approval
+    active_bets:
+      increment: [place_bet, create_bet, buy_shares, buy_outcome]
+      decrement: [redeem_shares, claim_winnings]
+      max: 5 # Adjust: max simultaneous prediction market positions (conservative: 3, moderate: 5, aggressive: 10)
+      maxAction: require_approval
+  cumulativeLimits:
+    - argumentName: quote_quantity
+      maxValue: 5000 # Adjust: max cumulative trading volume per session in USD (conservative: 1000, moderate: 5000, aggressive: 25000)
+    - argumentName: amount
+      maxValue: 2000 # Adjust: max cumulative prediction market volume per session in USD (conservative: 500, moderate: 2000, aggressive: 10000)

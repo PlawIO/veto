@@ -5,10 +5,11 @@ import re
 import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from veto.deterministic.regex_safety import is_safe_pattern
+from veto.rules.feed_provider import FeedProvider, is_condition_value_ref, resolve_feed_ref
 
 # One-time log per pattern so a misconfigured rule emits a single
 # error line instead of spamming stderr on every evaluation.
@@ -40,6 +41,7 @@ def _report_unsafe_pattern(pattern: str) -> None:
 DAY_ORDER: tuple[str, ...] = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
 DAY_SET = set(DAY_ORDER)
 TIME_24H_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_MISSING = object()
 
 def _build_builtin_context(now: Optional[datetime] = None) -> dict[str, Any]:
     current = now or datetime.now()
@@ -50,7 +52,7 @@ def _build_builtin_context(now: Optional[datetime] = None) -> dict[str, Any]:
     }
 
 
-def _resolve_dot_path(field: str, context: Mapping[str, Any]) -> Any:
+def _resolve_dot_path_raw(field: str, context: Mapping[str, Any]) -> Any:
     """Resolve a dot-notation field path from an evaluation context."""
     if not field:
         return context
@@ -58,14 +60,21 @@ def _resolve_dot_path(field: str, context: Mapping[str, Any]) -> Any:
     current: Any = context
     for segment in field.split("."):
         if current is None:
-            return None
+            return _MISSING
         if not isinstance(current, Mapping):
-            return None
-        current = current.get(segment)
+            return _MISSING
+        if segment not in current:
+            return _MISSING
+        current = current[segment]
     return current
 
 
-def resolve_field_path(
+def _resolve_dot_path(field: str, context: Mapping[str, Any]) -> Any:
+    value = _resolve_dot_path_raw(field, context)
+    return None if value is _MISSING else value
+
+
+def _resolve_field_path_raw(
     field: str,
     context: Mapping[str, Any],
     built_in_context: Optional[Mapping[str, Any]] = None,
@@ -78,9 +87,18 @@ def resolve_field_path(
         return active_context
 
     if field.startswith("context."):
-        return _resolve_dot_path(field[len("context.") :], active_context)
+        return _resolve_dot_path_raw(field[len("context.") :], active_context)
 
-    return _resolve_dot_path(field, context)
+    return _resolve_dot_path_raw(field, context)
+
+
+def resolve_field_path(
+    field: str,
+    context: Mapping[str, Any],
+    built_in_context: Optional[Mapping[str, Any]] = None,
+) -> Any:
+    value = _resolve_field_path_raw(field, context, built_in_context)
+    return None if value is _MISSING else value
 
 
 def create_safe_regex(pattern: str, flags: int = 0) -> Optional[re.Pattern[str]]:
@@ -242,20 +260,35 @@ def _length_comparable_size(value: Any) -> Optional[int]:
         return len(value)
 
     if isinstance(value, str):
-        trimmed = value.strip()
-        if trimmed == "":
-            return 0
-
-        if "," in value or ";" in value:
-            return len([item.strip() for item in re.split(r"[;,]", value) if item.strip() != ""])
-
-        return 1
+        return len(value)
 
     return None
 
 
+def _is_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and float("-inf") < float(value) < float("inf")
+    )
+
+
+def _list_contains(value: list[Any], expected: Any) -> bool:
+    if isinstance(expected, str):
+        expected_lower = expected.lower()
+        return any(
+            item.lower() == expected_lower if isinstance(item, str) else item == expected
+            for item in value
+        )
+    return expected in value
+
+
 def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) -> bool:
     """Evaluate a single legacy field/operator/value condition."""
+    if operator == "not_exists":
+        return field_value is _MISSING
+    if field_value is _MISSING:
+        return False
     if operator == "equals":
         if isinstance(field_value, str) and isinstance(expected, str):
             return field_value.lower() == expected.lower()
@@ -268,13 +301,13 @@ def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) ->
         if isinstance(field_value, str) and isinstance(expected, str):
             return expected.lower() in field_value.lower()
         if isinstance(field_value, list):
-            return expected in field_value
+            return _list_contains(field_value, expected)
         return False
     if operator == "not_contains":
         if isinstance(field_value, str) and isinstance(expected, str):
             return expected.lower() not in field_value.lower()
         if isinstance(field_value, list):
-            return expected not in field_value
+            return not _list_contains(field_value, expected)
         return False
     if operator == "starts_with":
         return (
@@ -302,15 +335,13 @@ def evaluate_legacy_condition(field_value: Any, operator: str, expected: Any) ->
             return False
         return regex.search(field_value) is not None
     if operator == "greater_than":
-        try:
-            return float(field_value) > float(expected)
-        except (TypeError, ValueError):
-            return False
+        return _is_finite_number(field_value) and _is_finite_number(expected) and field_value > expected
+    if operator == "greater_than_or_equal":
+        return _is_finite_number(field_value) and _is_finite_number(expected) and field_value >= expected
     if operator == "less_than":
-        try:
-            return float(field_value) < float(expected)
-        except (TypeError, ValueError):
-            return False
+        return _is_finite_number(field_value) and _is_finite_number(expected) and field_value < expected
+    if operator == "less_than_or_equal":
+        return _is_finite_number(field_value) and _is_finite_number(expected) and field_value <= expected
     if operator == "length_greater_than":
         size = _length_comparable_size(field_value)
         if size is None:
@@ -350,6 +381,7 @@ def evaluate_condition(
     context: Mapping[str, Any],
     evaluate_expression: Optional[Callable[[str, Mapping[str, Any]], bool]] = None,
     now: Optional[datetime] = None,
+    feed_provider: Optional[FeedProvider] = None,
 ) -> bool:
     """Evaluate a condition supporting expression-based and legacy forms."""
     expression = condition.get("expression")
@@ -363,9 +395,34 @@ def evaluate_condition(
 
     if isinstance(field, str) and isinstance(operator, str):
         built_in_context = _build_builtin_context(now)
-        field_value = resolve_field_path(field, context, built_in_context)
+        field_value = _resolve_field_path_raw(field, context, built_in_context)
         expected = condition.get("value")
-        return evaluate_legacy_condition(field_value, operator, expected)
+        if is_condition_value_ref(expected):
+            outcome = resolve_feed_ref(
+                cast(dict[str, Any], expected),
+                feed_provider,
+                now.timestamp() * 1000 if now is not None else None,
+            )
+            if "fallback" in outcome:
+                return bool(outcome["fallback"] == "fail_closed")
+            expected = outcome["resolved"]
+
+        if operator == "percent_of":
+            reference = condition.get("reference")
+            if not isinstance(reference, str):
+                return False
+            reference_value = _resolve_field_path_raw(
+                reference,
+                context,
+                built_in_context,
+            )
+            if not _is_finite_number(field_value) or not _is_finite_number(expected):
+                return False
+            if not _is_finite_number(reference_value) or reference_value == 0:
+                return False
+            return bool((field_value / reference_value) * 100 > expected)
+
+        return bool(evaluate_legacy_condition(field_value, operator, expected))
 
     return False
 
@@ -376,6 +433,7 @@ def evaluate_condition_collections(
     context: Mapping[str, Any],
     evaluate_expression: Optional[Callable[[str, Mapping[str, Any]], bool]] = None,
     now: Optional[datetime] = None,
+    feed_provider: Optional[FeedProvider] = None,
 ) -> bool:
     """
     Evaluate a rule-like condition collection.
@@ -392,6 +450,7 @@ def evaluate_condition_collections(
                 context=context,
                 evaluate_expression=evaluate_expression,
                 now=evaluation_time,
+                feed_provider=feed_provider,
             )
             for condition in conditions
         )
@@ -404,6 +463,7 @@ def evaluate_condition_collections(
                     context=context,
                     evaluate_expression=evaluate_expression,
                     now=evaluation_time,
+                    feed_provider=feed_provider,
                 )
                 for condition in group
             )

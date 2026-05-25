@@ -117,3 +117,41 @@ extends: "@veto/does-not-exist"
     result = await veto.guard("run_shell", {"command": "rm -rf /tmp"})
 
     assert result.decision == "allow"
+
+
+async def test_extends_crypto_trading_pack_matches_typescript_bundle(tmp_path: Path) -> None:
+    veto_dir = tmp_path / "veto"
+    rules_dir = _write_local_config(veto_dir)
+    (rules_dir / "crypto.yaml").write_text(
+        """
+version: "1.0"
+extends: "@veto/crypto-trading"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    veto = await Veto.init(VetoOptions(config_dir=str(veto_dir), log_level="silent"))
+    result = await veto.guard("place_order", {"side": "buy", "quote_quantity": 2500})
+
+    assert result.decision == "deny"
+    assert result.rule_id == "crypto-max-position"
+
+
+async def test_extends_compliance_pack_is_available_in_python(tmp_path: Path) -> None:
+    veto_dir = tmp_path / "veto"
+    rules_dir = _write_local_config(veto_dir)
+    (rules_dir / "soc2.yaml").write_text(
+        """
+version: "1.0"
+extends: "@veto/soc2-lite"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    veto = await Veto.init(VetoOptions(config_dir=str(veto_dir), log_level="silent"))
+    result = await veto.guard("deploy", {"environment": "production"})
+
+    assert result.decision == "require_approval"
+    assert result.rule_id == "soc2-require-approval-production-release"

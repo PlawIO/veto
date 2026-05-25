@@ -94,6 +94,31 @@ safe = await protect(
 )
 ```
 
+TypeScript equivalent:
+
+```ts
+const safeTools = await protect(tools, {
+  rules: [
+    {
+      id: "no-prod-deploy",
+      name: "Block direct production deploys",
+      enabled: true,
+      severity: "critical",
+      action: "block",
+      tools: ["deploy"],
+      conditions: [
+        {
+          field: "arguments.environment",
+          operator: "equals",
+          value: "production",
+        },
+      ],
+    },
+  ],
+  mode: "strict",
+});
+```
+
 ### Advanced: `Veto.init()` + `.wrap()`
 
 `Veto.init()` remains supported for advanced/internal-facing integrations that need a reusable instance, direct `guard()` calls, event hooks, audit export, or explicit self-host/cloud configuration.
@@ -106,6 +131,16 @@ safe = veto.wrap(tools)
 result = await veto.guard("transfer_funds", {"amount": 1500})
 ```
 
+TypeScript equivalent:
+
+```ts
+import { Veto } from "veto-sdk";
+
+const veto = await Veto.init({ configDir: "./veto", mode: "strict" });
+const safeTools = veto.wrap(tools);
+const result = await veto.guard("transfer_funds", { amount: 1500 });
+```
+
 ### Decision history
 
 ```python
@@ -114,11 +149,132 @@ json_audit = veto.export_decisions("json")
 csv_audit = veto.export_decisions("csv")
 ```
 
+TypeScript equivalent:
+
+```ts
+const stats = veto.getHistoryStats();
+const jsonAudit = veto.exportDecisions("json");
+const csvAudit = veto.exportDecisions("csv");
+```
+
 Decision export is local to your process unless you explicitly configure a remote endpoint.
 
 ## Policy packs
 
-Built-in packs include `@veto/safe-defaults`, `@veto/coding-agent`, `@veto/financial`, `@veto/browser-automation`, `@veto/data-access`, `@veto/communication`, and `@veto/deployment`.
+Built-in packs match the TypeScript SDK: `@veto/safe-defaults`, `@veto/coding-agent`, `@veto/crypto-trading`, `@veto/financial`, `@veto/browser-automation`, `@veto/data-access`, `@veto/communication`, `@veto/deployment`, `@veto/economic-agent`, `@veto/soc2-lite`, `@veto/hipaa-lite`, and `@veto/eu-ai-act-starter`.
+
+## MCP and pipeline-backed rules
+
+Python now exposes the same MCP adapter and feed-backed rule helpers as TypeScript:
+
+```python
+from veto import InMemoryFeedProvider, FeedSnapshot, Veto
+
+feed = InMemoryFeedProvider()
+feed.put("gambling-sites", FeedSnapshot(data=["casino.example"], refreshed_at_ms=0))
+
+veto = Veto.from_rules(
+    rules=[{
+        "id": "block-feed-url",
+        "name": "Block feed URLs",
+        "action": "block",
+        "tools": ["browser_go_to_url"],
+        "conditions": [{
+            "field": "arguments.url",
+            "operator": "in",
+            "value": {
+                "kind": "feed",
+                "feed_id": "gambling-sites",
+                "version": "latest",
+                "max_staleness_sec": 3600,
+                "fallback": "fail_open",
+            },
+        }],
+    }],
+    feed_provider=feed,
+)
+```
+
+TypeScript equivalent:
+
+```ts
+import { evaluateRulesLocally } from "veto-sdk";
+import { InMemoryFeedProvider } from "veto-sdk/rules";
+
+const feed = new InMemoryFeedProvider();
+feed.put("gambling-sites", { data: ["casino.example"], refreshed_at_ms: 0 });
+
+const result = evaluateRulesLocally(
+  [
+    {
+      id: "block-feed-url",
+      name: "Block feed URLs",
+      enabled: true,
+      severity: "high",
+      action: "block",
+      tools: ["browser_go_to_url"],
+      conditions: [
+        {
+          field: "arguments.url",
+          operator: "in",
+          value: {
+            kind: "feed",
+            feed_id: "gambling-sites",
+            version: "latest",
+            max_staleness_sec: 3600,
+            fallback: "fail_open",
+          },
+        },
+      ],
+    },
+  ],
+  "browser_go_to_url",
+  { arguments: { url: "casino.example" } },
+  { feedProvider: feed }
+);
+```
+
+## Economic, model, and extractor parity
+
+Python also exposes the TypeScript SDK's economic authorization helpers, kernel/custom validation modes, and deterministic content extractor:
+
+```python
+from veto import Veto, extract_entities, create_x402_connector
+
+entities = extract_entities("Salary: $150,000. Card: 4111 1111 1111 1111")
+assert entities.has_sensitive_pii
+
+veto = Veto.from_rules(
+    rules=[],
+    economic_policy={
+        "budgets": [{"scope": "session", "limit": 50, "currency": "USD", "window": "session"}],
+        "cost_extraction": {"default": "arguments.cost"},
+    },
+)
+decision = await veto.guard("paid_tool", {"cost": 60})
+assert decision.economic_denial.reason == "budget_exceeded"
+```
+
+TypeScript equivalent:
+
+```ts
+import { Veto, extractEntities } from "veto-sdk";
+
+const entities = extractEntities("Salary: $150,000. Card: 4111 1111 1111 1111");
+console.assert(entities.has_sensitive_pii);
+
+const veto = Veto.fromRules({
+  rules: [],
+  economic: {
+    budgets: [
+      { scope: "session", limit: 50, currency: "USD", window: "session" },
+    ],
+    cost_extraction: { default: "arguments.cost" },
+  },
+});
+const decision = await veto.guard("paid_tool", { cost: 60 });
+console.assert(decision.economicDenial?.reason === "budget_exceeded");
+```
 
 ## Self-host / BYOC boundary
 
