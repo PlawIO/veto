@@ -1,5 +1,11 @@
 # @veto/python-release
 
+## 0.7.0
+
+### Minor Changes
+
+- [#232](https://github.com/PlawIO/veto/pull/232) [`d3630ca`](https://github.com/PlawIO/veto/commit/d3630ca3af337a2b00d386a9f926763e61012601) Thanks [@anirudhp26](https://github.com/anirudhp26)! - Sync the Python SDK with the TypeScript SDK's provider adapters, feed-backed rule helpers, economic authorization, model validation, extractors, CLI, and parity docs.
+
 ## 0.6.2
 
 ### Patch Changes
