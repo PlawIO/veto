@@ -660,6 +660,90 @@ describe('evaluateRulesLocally', () => {
     const result = evaluateRulesLocally(rules, 'any_tool', {});
     expect(result.decision).toBe('deny');
   });
+
+  it('enforces requires constraints against provided history', () => {
+    const rules: Rule[] = [
+      {
+        id: 'require-carrier-confirmation',
+        name: 'Require carrier confirmation',
+        enabled: true,
+        severity: 'critical',
+        action: 'block',
+        tools: ['update_tms_eta'],
+        requires: [{ tool: 'carrier_confirmation', within: 3600 }],
+      },
+    ];
+
+    expect(evaluateRulesLocally(rules, 'update_tms_eta', { arguments: {} }, {
+      now_ms: Date.parse('2026-05-30T12:00:00Z'),
+      history: [],
+    })).toMatchObject({
+      decision: 'deny',
+      ruleId: 'require-carrier-confirmation',
+    });
+
+    expect(evaluateRulesLocally(rules, 'update_tms_eta', { arguments: {} }, {
+      now_ms: Date.parse('2026-05-30T12:00:00Z'),
+      history: [
+        {
+          toolName: 'carrier_confirmation',
+          arguments: { shipment_id: 'S-1' },
+          decision: 'allow',
+          timestamp: '2026-05-30T11:55:00Z',
+        },
+      ],
+    })).toMatchObject({ decision: null });
+  });
+
+  it('enforces blocked_by constraints against historical arguments', () => {
+    const rules: Rule[] = [
+      {
+        id: 'block-after-sensitive-export',
+        name: 'Block after sensitive export',
+        enabled: true,
+        severity: 'high',
+        action: 'block',
+        tools: ['send_customer_email'],
+        blocked_by: [
+          {
+            tool: 'export_records',
+            conditions: [
+              {
+                field: 'arguments.dataset',
+                operator: 'matches',
+                value: '(?i)customs|vendor',
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(evaluateRulesLocally(rules, 'send_customer_email', { arguments: {} }, {
+      history: [
+        {
+          toolName: 'export_records',
+          arguments: { dataset: 'customs invoices' },
+          decision: 'allow',
+          timestamp: '2026-05-30T11:55:00Z',
+        },
+      ],
+    })).toMatchObject({
+      decision: 'deny',
+      ruleId: 'block-after-sensitive-export',
+    });
+
+    expect(evaluateRulesLocally(rules, 'send_customer_email', { arguments: {} }, {
+      history: [
+        {
+          toolName: 'export_records',
+          arguments: { dataset: 'public timetable' },
+          decision: 'allow',
+          timestamp: '2026-05-30T11:55:00Z',
+        },
+      ],
+    })).toMatchObject({ decision: null });
+  });
 });
 
 describe('malformed condition handling', () => {

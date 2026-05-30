@@ -18,7 +18,7 @@
  * @module rules/local-evaluator
  */
 
-import type { FeedProvider, Rule, RuleCondition } from './types.js';
+import type { FeedProvider, Rule, RuleCondition, RuleSequenceConstraint } from './types.js';
 import { isConditionValueRef } from './types.js';
 import { createSafeRegex, evaluateTimeWindow } from './condition-evaluator.js';
 import { resolveFeedRef } from './feed-provider.js';
@@ -27,6 +27,15 @@ export interface LocalEvalResult {
   decision: 'allow' | 'deny' | 'require_approval' | null;
   reason?: string;
   ruleId?: string;
+  matchedCondition?: string;
+}
+
+export interface LocalEvalHistoryEntry {
+  toolName: string;
+  arguments?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  decision?: 'allow' | 'deny' | 'require_approval';
+  timestamp?: Date | number | string;
 }
 
 /**
@@ -39,6 +48,7 @@ export interface LocalEvalResult {
 export interface LocalEvalOptions {
   feedProvider?: FeedProvider;
   now_ms?: number;
+  history?: readonly LocalEvalHistoryEntry[];
 }
 
 /**
@@ -250,6 +260,96 @@ export function evaluateCondition(
   }
 }
 
+function evaluateConditionCollections(
+  conditions: RuleCondition[] | undefined,
+  conditionGroups: RuleCondition[][] | undefined,
+  context: Record<string, unknown>,
+  options: LocalEvalOptions,
+): boolean {
+  if (conditions && conditions.length > 0) {
+    return conditions.every(c => evaluateCondition(c, context, options));
+  }
+
+  if (conditionGroups && conditionGroups.length > 0) {
+    return conditionGroups.some(group =>
+      group.every(c => evaluateCondition(c, context, options)),
+    );
+  }
+
+  return true;
+}
+
+function historyTimestampMs(entry: LocalEvalHistoryEntry): number | null {
+  if (entry.timestamp instanceof Date) return entry.timestamp.getTime();
+  if (typeof entry.timestamp === 'number' && Number.isFinite(entry.timestamp)) return entry.timestamp;
+  if (typeof entry.timestamp === 'string') {
+    const parsed = Date.parse(entry.timestamp);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function buildHistoricalContext(entry: LocalEvalHistoryEntry): Record<string, unknown> {
+  const entryArguments = entry.arguments ?? {};
+  const timestampMs = historyTimestampMs(entry);
+  return {
+    ...entryArguments,
+    tool_name: entry.toolName,
+    arguments: entryArguments,
+    context: entry.context ?? {},
+    decision: entry.decision,
+    timestamp: timestampMs === null ? undefined : new Date(timestampMs).toISOString(),
+  };
+}
+
+function hasMatchingHistoryEntry(
+  constraint: RuleSequenceConstraint,
+  history: readonly LocalEvalHistoryEntry[],
+  nowMs: number,
+  options: LocalEvalOptions,
+): boolean {
+  const withinMs = typeof constraint.within === 'number'
+    ? Math.max(0, constraint.within) * 1000
+    : null;
+
+  return history.some((entry) => {
+    if (entry.toolName !== constraint.tool) return false;
+    if (entry.decision === 'deny') return false;
+
+    if (withinMs !== null) {
+      const entryMs = historyTimestampMs(entry);
+      if (entryMs === null) return false;
+      const ageMs = nowMs - entryMs;
+      if (ageMs < 0 || ageMs > withinMs) return false;
+    }
+
+    return evaluateConditionCollections(
+      constraint.conditions,
+      constraint.condition_groups,
+      buildHistoricalContext(entry),
+      options,
+    );
+  });
+}
+
+function sequenceConstraintsTrigger(rule: Rule, options: LocalEvalOptions): boolean {
+  const blockedBy = rule.blocked_by ?? [];
+  const requires = rule.requires ?? [];
+
+  if (blockedBy.length === 0 && requires.length === 0) return true;
+
+  const history = options.history ?? [];
+  const nowMs = options.now_ms ?? Date.now();
+  const blockedByMatched = blockedBy.some((constraint) =>
+    hasMatchingHistoryEntry(constraint, history, nowMs, options),
+  );
+  const missingRequirement = requires.some((constraint) =>
+    !hasMatchingHistoryEntry(constraint, history, nowMs, options),
+  );
+
+  return blockedByMatched || missingRequirement;
+}
+
 /**
  * Evaluate an array of rules against a tool call.
  *
@@ -271,18 +371,8 @@ export function evaluateRulesLocally(
 
     if (rule.tools && rule.tools.length > 0 && !rule.tools.includes(toolName)) continue;
 
-    // Conditions-first fallthrough: matches canonical evaluateConditionCollections.
-    // If `conditions` is present and non-empty, evaluate only those.
-    // Otherwise fall through to `condition_groups`.
-    if (rule.conditions && rule.conditions.length > 0) {
-      const allMatch = rule.conditions.every(c => evaluateCondition(c, args, options));
-      if (!allMatch) continue;
-    } else if (rule.condition_groups && rule.condition_groups.length > 0) {
-      const anyGroupMatch = rule.condition_groups.some(group =>
-        group.every(c => evaluateCondition(c, args, options)),
-      );
-      if (!anyGroupMatch) continue;
-    }
+    if (!evaluateConditionCollections(rule.conditions, rule.condition_groups, args, options)) continue;
+    if (!sequenceConstraintsTrigger(rule, options)) continue;
 
     const action = rule.action;
     if (action === 'block') {

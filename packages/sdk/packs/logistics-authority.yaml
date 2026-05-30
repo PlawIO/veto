@@ -1,0 +1,215 @@
+version: "1.0"
+name: "@veto/logistics-authority"
+description: >
+  Path-aware authority pack for logistics agents. Built for TMS writes, carrier
+  ETA updates, customs duty commitments, freight quotes, temperature alerts,
+  and vendor-master changes where the agent's current authority depends on the
+  path already taken in the same session.
+
+rules:
+  - id: logistics-allow-operational-reads
+    name: Allow logistics read operations
+    description: Read-only shipment, carrier, temperature, rate, and vendor lookups are safe authority-building steps.
+    enabled: true
+    severity: info
+    action: allow
+    tools:
+      - get_tms_record
+      - read_tms_record
+      - lookup_shipment
+      - get_carrier_status
+      - read_carrier_portal
+      - read_temperature_sensor
+      - get_rate_card
+      - read_vendor_master
+      - classify_hs_code
+      - validate_customs_documents
+
+  - id: logistics-tms-eta-write-requires-carrier-confirmation
+    name: TMS ETA write requires carrier confirmation
+    description: Dedicated ETA write tools may run only after carrier confirmation occurred earlier in the same session.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - tms_update_eta
+      - update_tms_eta
+    requires:
+      - tool: get_carrier_status
+        within: 3600
+      - tool: carrier_confirmation
+        within: 3600
+    message: "Carrier confirmation must be in-session before writing ETA to the TMS."
+
+  - id: logistics-tms-record-eta-field-requires-carrier-confirmation
+    name: TMS ETA field write requires carrier confirmation
+    description: Generic TMS record writes may update ETA fields only after carrier confirmation occurred earlier in the same session.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - write_tms_record
+    condition_groups:
+      - - field: arguments.field
+          operator: matches
+          value: "(?i)eta|arrival|delivery_window"
+      - - field: arguments.update_type
+          operator: matches
+          value: "(?i)eta|arrival|delivery_window"
+    requires:
+      - tool: get_carrier_status
+        within: 3600
+      - tool: carrier_confirmation
+        within: 3600
+    message: "Carrier confirmation must be in-session before writing ETA to the TMS."
+
+  - id: logistics-block-unverified-eta-downgrade
+    name: Block unverified ETA downgrades
+    description: ETA downgrades above thirty minutes need a recent internal shipment read and a recent carrier confirmation.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - tms_update_eta
+      - update_tms_eta
+      - write_tms_record
+    conditions:
+      - field: arguments.eta_delta_minutes
+        operator: greater_than
+        value: 30
+    requires:
+      - tool: get_tms_record
+        within: 3600
+      - tool: carrier_confirmation
+        within: 3600
+    message: "Large ETA downgrades require internal shipment state plus carrier confirmation."
+
+  - id: logistics-customs-duty-requires-document-check
+    name: Customs duty commitment requires document check
+    description: Customs duty cannot be committed until HS classification and customs document validation are in the path.
+    enabled: true
+    severity: critical
+    action: block
+    tools:
+      - customs_duty_commit
+      - commit_customs_duty
+      - authorize_duty_payment
+    requires:
+      - tool: classify_hs_code
+        within: 86400
+      - tool: validate_customs_documents
+        within: 86400
+    message: "HS classification and document validation must happen before duty commitment."
+
+  - id: logistics-customs-duty-approval-threshold
+    name: Customs duty approval threshold
+    description: Customs duty commitments above the threshold require human approval before the agent can commit spend.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - customs_duty_commit
+      - commit_customs_duty
+      - authorize_duty_payment
+    condition_groups:
+      - - field: arguments.amount_eur
+          operator: greater_than
+          value: 5000
+      - - field: arguments.amount_usd
+          operator: greater_than
+          value: 5500
+      - - field: arguments.money_committed
+          operator: greater_than
+          value: 5000
+    message: "Customs duty commitment above threshold requires human approval."
+
+  - id: logistics-freight-quote-rate-band
+    name: Freight quote rate-band approval
+    description: Freight quotes outside the allowed rate band require approval before being sent to a customer.
+    enabled: true
+    severity: high
+    action: require_approval
+    tools:
+      - send_freight_quote
+      - create_freight_quote
+      - quote_freight_rate
+    condition_groups:
+      - - field: arguments.rate_delta_percent
+          operator: greater_than
+          value: 8
+      - - field: arguments.margin_percent
+          operator: less_than
+          value: 4
+      - - field: arguments.price_override
+          operator: equals
+          value: true
+    message: "Freight quote is outside the rate band; human approval is required."
+
+  - id: logistics-temperature-alert-requires-sensor-read
+    name: Temperature alert requires sensor read
+    description: Customer or carrier temperature alerts must be grounded in a recent sensor read.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - send_temperature_alert
+      - notify_consignee
+      - call_customer
+      - send_customer_email
+    condition_groups:
+      - - field: arguments.reason
+          operator: matches
+          value: "(?i)temperature|reefer|cold chain|excursion"
+      - - field: arguments.alert_type
+          operator: matches
+          value: "(?i)temperature|reefer|cold chain|excursion"
+    requires:
+      - tool: read_temperature_sensor
+        within: 900
+    message: "Temperature alerts require a fresh sensor read in the same session."
+
+  - id: logistics-vendor-master-bank-change-approval
+    name: Vendor master bank-change approval
+    description: Vendor creation and bank-detail edits require approval before records are written.
+    enabled: true
+    severity: critical
+    action: require_approval
+    tools:
+      - create_vendor
+      - update_vendor
+      - update_vendor_master
+      - update_vendor_bank_details
+    condition_groups:
+      - - field: arguments.bank_account_changed
+          operator: equals
+          value: true
+      - - field: arguments.change_type
+          operator: matches
+          value: "(?i)bank|iban|routing|beneficiary|payment"
+      - - field: arguments.new_vendor
+          operator: equals
+          value: true
+    message: "Vendor master or payment-detail changes require human approval."
+
+  - id: logistics-block-customer-contact-after-sensitive-export
+    name: Block customer contact after sensitive export
+    description: Prevent external contact after sensitive shipment, customs, or vendor data was exported in the same session.
+    enabled: true
+    severity: high
+    action: block
+    tools:
+      - send_customer_email
+      - call_customer
+      - notify_consignee
+      - send_freight_quote
+    blocked_by:
+      - tool: export_records
+        within: 3600
+        condition_groups:
+          - - field: arguments.dataset
+              operator: matches
+              value: "(?i)customs|vendor|invoice|bank|contract|restricted"
+          - - field: arguments.contains_sensitive_data
+              operator: equals
+              value: true
+    message: "External contact is blocked after sensitive data export in the same session."

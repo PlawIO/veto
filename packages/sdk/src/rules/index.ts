@@ -23,6 +23,7 @@ export {
   evaluateCondition as evaluateConditionLocally,
   resolveFieldPath as resolveLocalFieldPath,
   type LocalEvalResult,
+  type LocalEvalHistoryEntry,
   type LocalEvalOptions,
 } from './local-evaluator.js';
 export {

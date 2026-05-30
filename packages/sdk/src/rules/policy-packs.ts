@@ -16,6 +16,7 @@ const BUILT_IN_POLICY_PACK_FILE_NAMES = {
   '@veto/soc2-lite': 'soc2-lite.yaml',
   '@veto/hipaa-lite': 'hipaa-lite.yaml',
   '@veto/eu-ai-act-starter': 'eu-ai-act-starter.yaml',
+  '@veto/logistics-authority': 'logistics-authority.yaml',
 } as const;
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
