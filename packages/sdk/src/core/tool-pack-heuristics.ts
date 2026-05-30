@@ -6,6 +6,27 @@ interface ToolPackHeuristic {
 const TOOL_PACK_HEURISTICS: readonly ToolPackHeuristic[] = [
   {
     patterns: [
+      'tms',
+      'eta',
+      'carrier',
+      'freight',
+      'shipment',
+      'customs',
+      'duty',
+      'hs_code',
+      'tariff',
+      'temperature',
+      'reefer',
+      'vendor_master',
+      'vendor',
+      'consignee',
+      'warehouse',
+      'logistics',
+    ],
+    pack: '@veto/logistics-authority',
+  },
+  {
+    patterns: [
       'place_order',
       'create_order',
       'cancel_order',
