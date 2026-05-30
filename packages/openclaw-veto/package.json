@@ -1,6 +1,6 @@
 {
   "name": "openclaw-veto",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "Veto policy runtime plugin for OpenClaw — intercept, validate, and control every agent tool call",
   "type": "module",
   "main": "./dist/index.js",
