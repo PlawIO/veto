@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.10.0
+
+### Minor Changes
+
+- [#234](https://github.com/PlawIO/veto/pull/234) [`3807c5a`](https://github.com/PlawIO/veto/commit/3807c5a2b27087ce5fdb6d2b24b239a8519ed590) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add path-aware local rule evaluation and the built-in logistics authority policy pack.
+
 ## 2.9.3
 
 ### Patch Changes
