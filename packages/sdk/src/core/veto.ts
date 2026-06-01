@@ -1615,23 +1615,15 @@ export class Veto {
   private validateSignedAgentIdentity(context: ValidationContext): ValidationResult {
     const trustBundle = this.identityTrustBundle;
     if (!trustBundle) {
-      return {
-        decision: 'deny',
-        reason: 'missing_identity_trust_bundle',
-        metadata: { source: 'identity' },
-      };
+      return this.applyIdentityDeny(context, 'missing_identity_trust_bundle', { source: 'identity' });
     }
 
     const token = Veto.extractAgentSvid(context);
     if (!token) {
-      return {
-        decision: 'deny',
-        reason: 'missing_signed_identity',
-        metadata: {
-          source: 'identity',
-          header: 'x-agent-svid',
-        },
-      };
+      return this.applyIdentityDeny(context, 'missing_signed_identity', {
+        source: 'identity',
+        header: 'x-agent-svid',
+      });
     }
 
     try {
@@ -1651,16 +1643,44 @@ export class Veto {
         },
       };
     } catch (error) {
+      return this.applyIdentityDeny(context, 'invalid_signed_identity', {
+        source: 'identity',
+        header: 'x-agent-svid',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private applyIdentityDeny(
+    context: ValidationContext,
+    reason: string,
+    metadata: Record<string, unknown>
+  ): ValidationResult {
+    if (this.shouldApplyLogModeOverride(context)) {
+      if (this.mode === 'shadow') {
+        return this.applyShadowModeOverride(context, 'deny', reason, metadata);
+      }
+
+      this.logger.warn('Tool call missing verified signed identity (log mode)', {
+        tool: context.toolName,
+        reason,
+      });
+
       return {
-        decision: 'deny',
-        reason: 'invalid_signed_identity',
+        decision: 'allow',
+        reason: `[LOG MODE] Would block: ${reason}`,
         metadata: {
-          source: 'identity',
-          header: 'x-agent-svid',
-          error: error instanceof Error ? error.message : String(error),
+          ...metadata,
+          blocked_in_strict_mode: true,
         },
       };
     }
+
+    return {
+      decision: 'deny',
+      reason,
+      metadata,
+    };
   }
 
   private static toAgentIdentityMetadata(identity: AgentIdentity): Record<string, unknown> {

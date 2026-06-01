@@ -64,4 +64,16 @@ describe('verifyAgentJWT', () => {
 
     expect(() => verifyAgentJWT(token, trustBundle)).toThrow(AgentIdentityVerificationError);
   });
+
+  it('falls back to default skew when configured skew is not finite', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { token, trustBundle } = createSignedJwt({
+      exp: now - 120,
+    });
+
+    expect(() => verifyAgentJWT(token, {
+      ...trustBundle,
+      clockSkewSeconds: Number.POSITIVE_INFINITY,
+    })).toThrow('SPIFFE JWT-SVID has expired');
+  });
 });

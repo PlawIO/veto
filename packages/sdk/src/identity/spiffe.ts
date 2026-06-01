@@ -264,12 +264,19 @@ function verifyJwtSignature(
   return verify(hashAlgorithm, Buffer.from(signingInput), publicKey, signature);
 }
 
+function resolveClockSkewSeconds(trustBundle: TrustBundle): number {
+  const configured = trustBundle.clockSkewSeconds;
+  return typeof configured === 'number' && Number.isFinite(configured)
+    ? Math.max(0, configured)
+    : DEFAULT_CLOCK_SKEW_SECONDS;
+}
+
 function validateJwtTiming(payload: Record<string, unknown>, trustBundle: TrustBundle): {
   issuedAt?: Date;
   expiresAt: Date;
 } {
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const clockSkewSeconds = Math.max(0, trustBundle.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS);
+  const clockSkewSeconds = resolveClockSkewSeconds(trustBundle);
   const exp = getNumberClaim(payload, 'exp');
   const iat = getNumberClaim(payload, 'iat');
   const nbf = getNumberClaim(payload, 'nbf');

@@ -478,6 +478,44 @@ describe('protect', () => {
     expect(tool.handler).not.toHaveBeenCalled();
   });
 
+  it('observes missing signed identity in log mode without blocking execution', async () => {
+    const tool = createTool('status_check', 'executed');
+    const { trustBundle } = createTestSvid();
+
+    const wrapped = await protect([tool], {
+      rules: [],
+      mode: 'log',
+      logLevel: 'silent',
+      policy: {
+        identity: {
+          require_signed: true,
+          trustBundle,
+        },
+      },
+    });
+
+    await expect(wrapped[0].handler({})).resolves.toBe('executed');
+  });
+
+  it('observes missing signed identity in shadow mode without blocking execution', async () => {
+    const tool = createTool('status_check', 'executed');
+    const { trustBundle } = createTestSvid();
+
+    const wrapped = await protect([tool], {
+      rules: [],
+      mode: 'shadow',
+      logLevel: 'silent',
+      policy: {
+        identity: {
+          require_signed: true,
+          trustBundle,
+        },
+      },
+    });
+
+    await expect(wrapped[0].handler({})).resolves.toBe('executed');
+  });
+
   it('verifies a SPIFFE JWT-SVID before running rule evaluation', async () => {
     const subject = 'spiffe://example.test/agent/caleb';
     const tool = createTool('transfer_funds', 'executed');
