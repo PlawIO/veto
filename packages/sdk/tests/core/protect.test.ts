@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { protect, __resetProtectCacheForTests } from '../../src/core/protect.js';
 import { ToolCallDeniedError, Veto } from '../../src/core/veto.js';
+import type { JsonWebKey, TrustBundle } from '../../src/identity/spiffe.js';
 import type { Rule } from '../../src/rules/types.js';
 
 interface TestTool {
@@ -33,6 +35,43 @@ function createAmountBlockRule(toolName: string): Rule {
         value: 1000,
       },
     ],
+  };
+}
+
+function base64UrlJson(value: unknown): string {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+
+function createTestSvid(subject = 'spiffe://example.test/agent/caleb'): {
+  token: string;
+  trustBundle: TrustBundle;
+} {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: 'jwk' }) as JsonWebKey;
+  jwk.kid = 'test-agent-key';
+  jwk.alg = 'RS256';
+  jwk.use = 'sig';
+
+  const now = Math.floor(Date.now() / 1000);
+  const encodedHeader = base64UrlJson({ alg: 'RS256', typ: 'JWT', kid: jwk.kid });
+  const encodedPayload = base64UrlJson({
+    iss: 'https://issuer.example.test',
+    sub: subject,
+    aud: ['veto-sdk'],
+    iat: now,
+    exp: now + 300,
+  });
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const encodedSignature = sign('RSA-SHA256', Buffer.from(signingInput), privateKey).toString('base64url');
+
+  return {
+    token: `${signingInput}.${encodedSignature}`,
+    trustBundle: {
+      jwks: { keys: [jwk] },
+      issuer: 'https://issuer.example.test',
+      audience: 'veto-sdk',
+      trustDomain: 'example.test',
+    },
   };
 }
 
@@ -415,5 +454,61 @@ describe('protect', () => {
 
     await expect(wrapped[0].handler({ amount: 5000 })).rejects.toBeInstanceOf(ToolCallDeniedError);
     expect(tool.handler).not.toHaveBeenCalled();
+  });
+
+  it('denies unsigned calls when signed identity is required', async () => {
+    const tool = createTool('status_check', 'should-not-run');
+    const { trustBundle } = createTestSvid();
+
+    const wrapped = await protect([tool], {
+      rules: [],
+      mode: 'strict',
+      logLevel: 'silent',
+      policy: {
+        identity: {
+          require_signed: true,
+          trustBundle,
+        },
+      },
+    });
+
+    await expect(wrapped[0].handler({})).rejects.toMatchObject({
+      reason: 'missing_signed_identity',
+    });
+    expect(tool.handler).not.toHaveBeenCalled();
+  });
+
+  it('verifies a SPIFFE JWT-SVID before running rule evaluation', async () => {
+    const subject = 'spiffe://example.test/agent/caleb';
+    const tool = createTool('transfer_funds', 'executed');
+    const { token, trustBundle } = createTestSvid(subject);
+    const scopedRule: Rule = {
+      ...createAmountBlockRule('transfer_funds'),
+      agents: [subject],
+    };
+
+    const wrapped = await protect([tool], {
+      rules: [scopedRule],
+      mode: 'strict',
+      logLevel: 'silent',
+      policy: {
+        identity: {
+          require_signed: true,
+          trustBundle,
+        },
+      },
+    });
+
+    await expect(wrapped[0].handler(
+      { amount: 500 },
+      { headers: { 'x-agent-svid': token } }
+    )).resolves.toBe('executed');
+
+    await expect(wrapped[0].handler(
+      { amount: 5000 },
+      { headers: { 'x-agent-svid': token } }
+    )).rejects.toMatchObject({
+      reason: 'Matched rule: Block transfer_funds',
+    });
   });
 });

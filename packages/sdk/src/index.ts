@@ -63,6 +63,17 @@ export type {
   DecisionExportFormat,
   DecisionExportRecord,
 } from './types/config.js';
+export {
+  verifyAgentJWT,
+  AgentIdentityVerificationError,
+} from './identity/spiffe.js';
+export type {
+  AgentIdentity,
+  IdentityPolicyConfig,
+  JsonWebKey,
+  JsonWebKeySet,
+  TrustBundle,
+} from './identity/spiffe.js';
 
 // Rule types
 export type {

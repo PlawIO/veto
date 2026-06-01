@@ -73,6 +73,12 @@ import {
   type VetoWebhookEventType,
 } from './events.js';
 import { tryLoadOtel, type VetoTracer } from '../observability/otel.js';
+import {
+  verifyAgentJWT,
+  type AgentIdentity,
+  type IdentityPolicyConfig,
+  type TrustBundle,
+} from '../identity/spiffe.js';
 
 /**
  * Veto operating mode.
@@ -237,6 +243,10 @@ interface VetoConfigFile {
       format?: 'slack' | 'pagerduty' | 'generic' | 'cef';
     };
   };
+  policy?: {
+    identity?: IdentityPolicyConfig;
+  };
+  identity?: IdentityPolicyConfig;
   /** Economic authorization policy (x402, MPP, AP2 support) */
   economic?: EconomicPolicyConfig;
   /** Tamper-evident append-only audit log configuration */
@@ -354,6 +364,12 @@ export interface VetoOptions {
    */
   role?: string;
 
+  policy?: {
+    identity?: IdentityPolicyConfig;
+  };
+
+  identity?: IdentityPolicyConfig;
+
   /**
    * Additional validators to run alongside rule-based validation.
    */
@@ -428,6 +444,10 @@ export type VetoBrowserOptions = SharedVetoBrowserOptions<VetoCloudClient> & {
   costs?: VetoConfigFile['costs'];
   approval?: VetoConfigFile['approval'];
   events?: VetoConfigFile['events'];
+  policy?: {
+    identity?: IdentityPolicyConfig;
+  };
+  identity?: IdentityPolicyConfig;
 };
 
 export type VetoCloudInitOptions = SharedVetoFromCloudOptions;
@@ -481,6 +501,8 @@ export class Veto {
   private readonly agentId?: string;
   private readonly userId?: string;
   private readonly role?: string;
+  private readonly identityPolicy: IdentityPolicyConfig | null;
+  private readonly identityTrustBundle: TrustBundle | null;
 
   // Kernel client (lazy initialized or injected)
   private kernelClient: KernelClientType | null = null;
@@ -712,6 +734,14 @@ export class Veto {
     this.agentId = options.agentId ?? envAgentId;
     this.userId = options.userId ?? envUserId;
     this.role = options.role ?? envRole;
+    this.identityPolicy = Veto.resolveIdentityPolicy(options, config);
+    this.identityTrustBundle = this.identityPolicy?.require_signed === true
+      ? Veto.resolveIdentityTrustBundle(this.identityPolicy)
+      : null;
+
+    if (this.identityPolicy?.require_signed === true && !this.identityTrustBundle) {
+      throw new Error('policy.identity.require_signed requires a configured JWKS trust bundle');
+    }
 
     this.logger.info('Veto configuration loaded', {
       configDir: this.configDir,
@@ -742,6 +772,15 @@ export class Veto {
       defaultDecision,
       otelTracer: this.otelTracer,
     });
+
+    if (this.identityPolicy?.require_signed === true && this.identityTrustBundle) {
+      this.validationEngine.addValidator({
+        name: 'spiffe-agent-identity',
+        description: 'Requires a verified SPIFFE JWT-SVID agent identity',
+        priority: 10,
+        validate: (ctx) => this.validateSignedAgentIdentity(ctx),
+      });
+    }
 
     // Add the rule validator based on validation mode
     this.validationEngine.addValidator({
@@ -1002,6 +1041,8 @@ export class Veto {
       costs: options.costs,
       approval: options.approval,
       events: options.events,
+      policy: options.policy,
+      identity: options.identity,
     };
 
     const rules = Veto.indexRules(
@@ -1017,6 +1058,8 @@ export class Veto {
       agentId: options.agentId,
       userId: options.userId,
       role: options.role,
+      policy: options.policy,
+      identity: options.identity,
       validators: options.validators,
       apiKey: undefined,
       endpoint: undefined,
@@ -1148,6 +1191,40 @@ export class Veto {
     if (!value) return undefined;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  private static resolveIdentityPolicy(
+    options: VetoOptions,
+    config: VetoConfigFile
+  ): IdentityPolicyConfig | null {
+    return options.policy?.identity
+      ?? options.identity
+      ?? config.policy?.identity
+      ?? config.identity
+      ?? null;
+  }
+
+  private static resolveIdentityTrustBundle(policy: IdentityPolicyConfig): TrustBundle | null {
+    const configuredBundle = policy.trustBundle ?? policy.trust_bundle;
+    const jwks = configuredBundle?.jwks ?? policy.jwks;
+
+    if (!jwks || !Array.isArray(jwks.keys) || jwks.keys.length === 0) {
+      return null;
+    }
+
+    return {
+      ...configuredBundle,
+      jwks,
+      issuer: policy.issuer ?? configuredBundle?.issuer,
+      audience: policy.audience ?? configuredBundle?.audience,
+      trustDomain: policy.trustDomain ?? policy.trust_domain ?? configuredBundle?.trustDomain,
+      trust_domain: policy.trust_domain ?? configuredBundle?.trust_domain,
+      allowedSpiffeIds: policy.allowedSpiffeIds
+        ?? policy.allowed_spiffe_ids
+        ?? configuredBundle?.allowedSpiffeIds,
+      allowed_spiffe_ids: policy.allowed_spiffe_ids ?? configuredBundle?.allowed_spiffe_ids,
+      clockSkewSeconds: policy.clockSkewSeconds ?? configuredBundle?.clockSkewSeconds,
+    };
   }
 
   private static parseEnvLogSetting(value: string | undefined): {
@@ -1533,6 +1610,152 @@ export class Veto {
 
   private resolveRole(context: ValidationContext): string | undefined {
     return context.role ?? this.role;
+  }
+
+  private validateSignedAgentIdentity(context: ValidationContext): ValidationResult {
+    const trustBundle = this.identityTrustBundle;
+    if (!trustBundle) {
+      return {
+        decision: 'deny',
+        reason: 'missing_identity_trust_bundle',
+        metadata: { source: 'identity' },
+      };
+    }
+
+    const token = Veto.extractAgentSvid(context);
+    if (!token) {
+      return {
+        decision: 'deny',
+        reason: 'missing_signed_identity',
+        metadata: {
+          source: 'identity',
+          header: 'x-agent-svid',
+        },
+      };
+    }
+
+    try {
+      const identity = verifyAgentJWT(token, trustBundle);
+      context.agentId = identity.spiffeId;
+      context.signedIdentity = identity;
+      context.custom = {
+        ...(context.custom ?? {}),
+        agent_identity: Veto.toAgentIdentityMetadata(identity),
+      };
+
+      return {
+        decision: 'allow',
+        metadata: {
+          source: 'identity',
+          spiffeId: identity.spiffeId,
+        },
+      };
+    } catch (error) {
+      return {
+        decision: 'deny',
+        reason: 'invalid_signed_identity',
+        metadata: {
+          source: 'identity',
+          header: 'x-agent-svid',
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  private static toAgentIdentityMetadata(identity: AgentIdentity): Record<string, unknown> {
+    return {
+      spiffe_id: identity.spiffeId,
+      trust_domain: identity.trustDomain,
+      path: identity.path,
+      subject: identity.subject,
+      issuer: identity.issuer,
+      audience: identity.audience,
+      issued_at: identity.issuedAt?.toISOString(),
+      expires_at: identity.expiresAt.toISOString(),
+    };
+  }
+
+  private static extractAgentSvid(context: ValidationContext): string | undefined {
+    const candidates: unknown[] = [
+      context.custom?.headers,
+      context.custom?.requestHeaders,
+      Veto.readNestedValue(context.custom, ['request', 'headers']),
+      context.arguments.headers,
+      context.arguments.requestHeaders,
+      Veto.readNestedValue(context.arguments, ['request', 'headers']),
+      context.arguments['x-agent-svid'],
+      context.custom?.['x-agent-svid'],
+    ];
+
+    for (const candidate of candidates) {
+      const token = Veto.readAgentSvidCandidate(candidate);
+      if (token) {
+        return token;
+      }
+    }
+
+    return undefined;
+  }
+
+  private static readNestedValue(value: unknown, path: readonly string[]): unknown {
+    let current = value;
+    for (const segment of path) {
+      if (current === null || typeof current !== 'object') {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[segment];
+    }
+    return current;
+  }
+
+  private static readAgentSvidCandidate(candidate: unknown): string | undefined {
+    if (typeof candidate === 'string') {
+      return Veto.normalizeSvidHeader(candidate);
+    }
+
+    if (Array.isArray(candidate)) {
+      for (const value of candidate) {
+        const token = Veto.readAgentSvidCandidate(value);
+        if (token) {
+          return token;
+        }
+      }
+      return undefined;
+    }
+
+    if (candidate === null || typeof candidate !== 'object') {
+      return undefined;
+    }
+
+    const getHeader = (candidate as { get?: unknown }).get;
+    if (typeof getHeader === 'function') {
+      const headerValue = getHeader.call(candidate, 'x-agent-svid');
+      const token = Veto.readAgentSvidCandidate(headerValue);
+      if (token) {
+        return token;
+      }
+    }
+
+    for (const [key, value] of Object.entries(candidate as Record<string, unknown>)) {
+      if (key.toLowerCase() === 'x-agent-svid') {
+        const token = Veto.readAgentSvidCandidate(value);
+        if (token) {
+          return token;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private static normalizeSvidHeader(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      return undefined;
+    }
+
+    return trimmed.replace(/^Bearer\s+/i, '').trim() || undefined;
   }
 
   private toLocalRuleMetadata(rule: Rule): Record<string, unknown> {
@@ -3583,6 +3806,16 @@ export class Veto {
     return tools.map((tool) => this.wrapTool(tool));
   }
 
+  private static extractInvocationHeaders(...values: unknown[]): unknown {
+    for (const value of values) {
+      const headers = Veto.readNestedValue(value, ['headers']);
+      if (headers !== undefined) {
+        return headers;
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Wrap a single tool with Veto validation (provider-agnostic).
    *
@@ -3611,6 +3844,7 @@ export class Veto {
           id: generateToolCallId(),
           name: toolName,
           arguments: input,
+          headers: Veto.extractInvocationHeaders(input),
         });
 
         if (!result.allowed) {
@@ -3641,6 +3875,7 @@ export class Veto {
             id: generateToolCallId(),
             name: toolName,
             arguments: input,
+            headers: Veto.extractInvocationHeaders(input, ...rest),
           });
 
           if (!result.allowed) {
@@ -3676,7 +3911,8 @@ export class Veto {
 
         const wrappedFunc = async (...args: unknown[]): Promise<unknown> => {
           let callArgs: Record<string, unknown>;
-          if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+          const firstArgIsObject = args.length >= 1 && typeof args[0] === 'object' && args[0] !== null;
+          if (firstArgIsObject) {
             callArgs = args[0] as Record<string, unknown>;
           } else {
             callArgs = { args };
@@ -3686,6 +3922,7 @@ export class Veto {
             id: generateToolCallId(),
             name: toolName,
             arguments: callArgs,
+            headers: Veto.extractInvocationHeaders(...args),
           });
 
           if (!result.allowed) {
@@ -3699,8 +3936,8 @@ export class Veto {
           }
 
           const finalArgs = result.finalArguments ?? callArgs;
-          if (args.length === 1 && typeof args[0] === 'object') {
-            const executionResult = await originalFunc.call(tool, finalArgs);
+          if (firstArgIsObject) {
+            const executionResult = await originalFunc.call(tool, finalArgs, ...args.slice(1));
             return await veto.validateOutputOrThrow(toolName, finalArgs, executionResult);
           }
           const executionResult = await originalFunc.apply(tool, args);
@@ -3754,7 +3991,7 @@ export class Veto {
     serverClient: MCPServerClient
   ): {
     tools: MCPTool[];
-    callTool: (args: { name: string; arguments?: Record<string, unknown> }) => Promise<MCPToolResult>;
+    callTool: (args: { name: string; arguments?: Record<string, unknown>; headers?: unknown }) => Promise<MCPToolResult>;
   } {
     const toolDefs = tools.map((tool) => this.fromMcpTool(tool));
 
@@ -3782,6 +4019,7 @@ export class Veto {
     const callTool = async (args: {
       name: string;
       arguments?: Record<string, unknown>;
+      headers?: unknown;
     }): Promise<MCPToolResult> => {
       const callArgs = args.arguments ?? {};
 
@@ -3789,6 +4027,7 @@ export class Veto {
         id: generateToolCallId(),
         name: args.name,
         arguments: callArgs,
+        headers: args.headers ?? Veto.extractInvocationHeaders(callArgs),
       });
 
       if (!result.allowed) {

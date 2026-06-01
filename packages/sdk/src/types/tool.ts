@@ -123,6 +123,8 @@ export interface ToolCall {
   name: string;
   /** Arguments passed to the tool, parsed from JSON */
   arguments: Record<string, unknown>;
+  /** Invocation headers associated with the tool call, when available */
+  headers?: unknown;
   /** Raw JSON string of arguments (for providers that need it) */
   rawArguments?: string;
 }

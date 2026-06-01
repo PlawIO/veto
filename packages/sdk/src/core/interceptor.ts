@@ -219,6 +219,17 @@ export class Interceptor {
     this.outputValidator = options.outputValidator;
   }
 
+  private buildCustomContext(call: ToolCall): Record<string, unknown> | undefined {
+    if (call.headers === undefined) {
+      return this.customContext;
+    }
+
+    return {
+      ...(this.customContext ?? {}),
+      headers: call.headers,
+    };
+  }
+
   /**
    * Intercept and validate a tool call.
    *
@@ -245,7 +256,7 @@ export class Interceptor {
       userId: this.userId,
       role: this.role,
       source: 'interceptor',
-      custom: this.customContext,
+      custom: this.buildCustomContext(call),
     };
 
     // Reserve budget. Returns a token (or null when cost is 0) that we

@@ -5,6 +5,7 @@
  */
 
 import type { Logger } from '../utils/logger.js';
+import type { AgentIdentity } from '../identity/spiffe.js';
 
 export type StreamLogMode = 'compact' | 'verbose';
 
@@ -55,6 +56,8 @@ export interface ValidationContext {
   userId?: string;
   /** Role for this call (falls back to instance-level role when omitted) */
   role?: string;
+  /** Verified cryptographic identity from a signed agent JWT-SVID, when configured */
+  signedIdentity?: AgentIdentity;
   /** Indicates whether validation is being run for interception or standalone guard checks */
   source?: 'interceptor' | 'guard';
   /** Custom context data passed by the user */
