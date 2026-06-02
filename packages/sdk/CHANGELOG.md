@@ -1,5 +1,11 @@
 # veto-sdk
 
+## 2.11.0
+
+### Minor Changes
+
+- [#236](https://github.com/PlawIO/veto/pull/236) [`77d832e`](https://github.com/PlawIO/veto/commit/77d832e1e844840e076cd2e5378cc27eb388874f) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add SPIFFE JWT-SVID agent identity verification and signed-identity enforcement for protected tool calls.
+
 ## 2.10.0
 
 ### Minor Changes
