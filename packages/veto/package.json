@@ -1,6 +1,6 @@
 {
   "name": "veto",
-  "version": "1.16.25",
+  "version": "1.16.26",
   "private": true,
   "description": "Local unpublished Veto CLI wrapper reserved for the future canonical npm package once npm ownership transfers",
   "type": "module",

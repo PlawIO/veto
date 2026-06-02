@@ -1,5 +1,12 @@
 # openclaw-veto
 
+## 0.2.17
+
+### Patch Changes
+
+- Updated dependencies [[`77d832e`](https://github.com/PlawIO/veto/commit/77d832e1e844840e076cd2e5378cc27eb388874f)]:
+  - veto-sdk@2.11.0
+
 ## 0.2.16
 
 ### Patch Changes
