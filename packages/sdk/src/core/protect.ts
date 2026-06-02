@@ -7,6 +7,7 @@ import type { LogLevel, StreamLogMode, ValidationContext } from '../types/config
 import type { BudgetConfig, ToolCostMap } from './budget.js';
 import { collectHeuristicPacksForToolNames } from './tool-pack-heuristics.js';
 import { Veto, type VetoMode } from './veto.js';
+import type { IdentityPolicyConfig } from '../identity/spiffe.js';
 
 export type ProtectMode = VetoMode;
 
@@ -34,6 +35,10 @@ export interface ProtectOptions {
   agentId?: string;
   userId?: string;
   role?: string;
+  policy?: {
+    identity?: IdentityPolicyConfig;
+  };
+  identity?: IdentityPolicyConfig;
 
   // Callbacks
   onApprovalRequired?: (context: ValidationContext, approvalId: string) => void | Promise<void>;
@@ -293,6 +298,8 @@ function createCacheKey(options: ProtectOptions, decision: ProtectInitDecision):
     agentId: options.agentId,
     userId: options.userId,
     role: options.role,
+    policy: options.policy,
+    identity: options.identity,
     onApprovalRequiredId: getReferenceId(options.onApprovalRequired),
     packs: decision.inlineRules?.packs ?? [],
     rulesFingerprint: decision.inlineRules
@@ -318,6 +325,8 @@ function createAllowAllInstance(options: ProtectOptions): Veto {
     agentId: options.agentId,
     userId: options.userId,
     role: options.role,
+    policy: options.policy,
+    identity: options.identity,
     apiKey: options.apiKey,
     endpoint: options.endpoint,
     onApprovalRequired: options.onApprovalRequired,
@@ -412,6 +421,8 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
           agentId: options.agentId,
           userId: options.userId,
           role: options.role,
+          policy: options.policy,
+          identity: options.identity,
           apiKey: options.apiKey,
           endpoint: options.endpoint,
           onApprovalRequired: options.onApprovalRequired,
@@ -433,6 +444,8 @@ async function initializeVeto<T extends { name: string }>(tools: readonly T[], o
           agentId: options.agentId,
           userId: options.userId,
           role: options.role,
+          policy: options.policy,
+          identity: options.identity,
           apiKey: options.apiKey,
           endpoint: options.endpoint,
           onApprovalRequired: options.onApprovalRequired,
