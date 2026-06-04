@@ -79,6 +79,7 @@ import {
   type IdentityPolicyConfig,
   type TrustBundle,
 } from '../identity/spiffe.js';
+import type { ReceiptSummary } from 'veto-receipt-protocol';
 
 /**
  * Veto operating mode.
@@ -144,6 +145,8 @@ export interface GuardResult {
   shadowDecision?: string;
   /** Structured economic denial details (present when economic policy denies) */
   economicDenial?: EconomicDenialDetails;
+  /** Compact canonical decision receipt summary returned by Veto Cloud. */
+  receipt?: ReceiptSummary;
 }
 
 export interface VetoRuntimeInfo {
@@ -2872,6 +2875,9 @@ export class Veto {
       if (response.metadata) {
         Object.assign(metadata, response.metadata);
       }
+      if (response.receipt) {
+        metadata.receipt = response.receipt;
+      }
 
       // Handle require_approval decision
       if (response.decision === 'require_approval') {
@@ -3591,6 +3597,7 @@ export class Veto {
     const ruleId = this.extractMetadataString(metadata, ['ruleId', 'rule_id']);
     const approvalId = this.extractMetadataString(metadata, ['approvalId', 'approval_id']);
     const severity = this.extractMetadataSeverity(metadata);
+    const receipt = this.extractReceiptSummary(metadata?.receipt);
 
     const decision: GuardResult['decision'] =
       result.decision === 'deny' || result.decision === 'require_approval'
@@ -3607,7 +3614,29 @@ export class Veto {
       shadowDecision: (this.mode === 'shadow' && decision !== 'allow')
         ? decision
         : undefined,
+      receipt,
     };
+  }
+
+  private extractReceiptSummary(value: unknown): ReceiptSummary | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    const receipt = value as Record<string, unknown>;
+    if (
+      typeof receipt.receipt_id === 'string' &&
+      typeof receipt.receipt_hash === 'string' &&
+      typeof receipt.previous_receipt_hash === 'string' &&
+      typeof receipt.merkle_root === 'string'
+    ) {
+      return {
+        receipt_id: receipt.receipt_id,
+        receipt_hash: receipt.receipt_hash,
+        previous_receipt_hash: receipt.previous_receipt_hash,
+        merkle_root: receipt.merkle_root,
+      };
+    }
+    return undefined;
   }
 
   /**

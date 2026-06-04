@@ -371,6 +371,7 @@ def _create_cache_key(
         "output_rules_fingerprint": _stable_serialize(output_rules),
         "budget": options.get("budget"),
         "costs": options.get("costs"),
+        "receipt_store": options.get("receipt_store"),
     }
     return _stable_serialize(payload)
 
@@ -389,6 +390,7 @@ def _create_allow_all_instance(options: dict[str, Any]) -> Veto:
         api_key=options.get("api_key"),
         endpoint=options.get("endpoint"),
         on_approval_required=options.get("on_approval_required"),
+        receipt_store=options.get("receipt_store"),
     )
 
 
@@ -448,6 +450,7 @@ async def _initialize_veto(
                 api_key=options.get("api_key"),
                 endpoint=options.get("endpoint"),
                 on_approval_required=options.get("on_approval_required"),
+                receipt_store=options.get("receipt_store"),
             )
         else:
             instance = await Veto.init(
@@ -463,6 +466,7 @@ async def _initialize_veto(
                     api_key=options.get("api_key"),
                     base_url=options.get("endpoint"),
                     on_approval_required=options.get("on_approval_required"),
+                    receipt_store=options.get("receipt_store"),
                 )
             )
     except Exception as init_error:

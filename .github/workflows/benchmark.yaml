@@ -32,7 +32,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build SDK
-        run: pnpm --filter veto-sdk build
+        run: pnpm --filter veto-sdk... build
 
       - name: Run PR benchmarks and gate p99 regressions
         run: node benchmark/run.mjs --mode=pr --gate --baseline-dir=benchmark/baselines --output=benchmark/results/pr.json

@@ -70,6 +70,15 @@ from veto.core.events import (
 from veto.cloud.client import VetoCloudClient, VetoCloudConfig, ApprovalTimeoutError
 from veto.cloud.types import ToolRegistration, ToolParameter, ApprovalPollOptions
 from veto.cloud.policy_cache import PolicyCache
+from veto.receipts import (
+    DecisionOutcome,
+    ReceiptSummary,
+    append_receipt,
+    build_decision_receipt,
+    hash_canonical,
+    load_last_receipt,
+    receipt_summary,
+)
 from veto.deterministic.validator import validate_deterministic
 from veto.deterministic.types import LocalValidationResult
 from veto.custom import CustomClient
@@ -135,6 +144,7 @@ class GuardResult:
     shadow: Optional[bool] = None
     shadow_decision: Optional[str] = None
     economic_denial: Optional[EconomicDenialDetails] = None
+    receipt: Optional[ReceiptSummary] = None
 
     @property
     def economicDenial(self) -> Optional[EconomicDenialDetails]:
@@ -204,6 +214,8 @@ class VetoOptions:
     custom_client: Optional[Any] = None
     kernel_config: Optional[dict[str, Any]] = None
     custom_config: Optional[dict[str, Any]] = None
+    # Optional NDJSON receipt store for local SDK decisions.
+    receipt_store: Optional[str] = None
 
 
 @runtime_checkable
@@ -291,6 +303,11 @@ class Veto:
         self._custom_client = options.custom_client
         self._kernel_config = options.kernel_config
         self._custom_config = options.custom_config
+        self._receipt_store = (
+            Path(options.receipt_store).resolve()
+            if options.receipt_store
+            else None
+        )
         self._custom_config_error: Optional[str] = None
         if self._validation_mode == "custom":
             if not isinstance(self._custom_config, dict) or not self._custom_config.get("provider"):
@@ -619,6 +636,7 @@ class Veto:
         custom_client: Optional[Any] = None,
         kernel_config: Optional[dict[str, Any]] = None,
         custom_config: Optional[dict[str, Any]] = None,
+        receipt_store: Optional[str] = None,
     ) -> "Veto":
         # Honor VETO_LOG (e.g. ``stream``, ``stream:verbose``) when no explicit
         # log_level is passed, so the env-var contract holds for from_rules too.
@@ -667,6 +685,7 @@ class Veto:
             custom_client=custom_client,
             kernel_config=kernel_config,
             custom_config=custom_config,
+            receipt_store=receipt_store,
         )
 
         indexed_rules = cls._index_inline_rules(rules)
@@ -2048,6 +2067,8 @@ class Veto:
             ]
         if response.metadata:
             metadata.update(response.metadata)
+        if response.receipt:
+            metadata["receipt"] = response.receipt
 
         if response.decision == "require_approval":
             approval_reason = response.reason or "Approval required"
@@ -2896,6 +2917,7 @@ class Veto:
                     if isinstance(raw_denial.get("raw_error"), str)
                     else None,
                 )
+        receipt = self._receipt_summary_from_metadata(metadata)
         return GuardResult(
             decision=decision,
             reason=result.reason,
@@ -2907,7 +2929,82 @@ class Veto:
             shadow=True if self._mode == "shadow" else None,
             shadow_decision=decision if self._mode == "shadow" and decision != "allow" else None,
             economic_denial=economic_denial,
+            receipt=receipt,
         )
+
+    def _receipt_summary_from_metadata(
+        self,
+        metadata: Optional[dict[str, Any]],
+    ) -> Optional[ReceiptSummary]:
+        if not metadata:
+            return None
+        raw = metadata.get("receipt")
+        if isinstance(raw, ReceiptSummary):
+            return raw
+        if isinstance(raw, dict):
+            try:
+                return ReceiptSummary(
+                    receipt_id=str(raw["receipt_id"]),
+                    receipt_hash=str(raw["receipt_hash"]),
+                    previous_receipt_hash=str(raw["previous_receipt_hash"]),
+                    merkle_root=str(raw["merkle_root"]),
+                )
+            except Exception:
+                return None
+        return None
+
+    def _build_receipt_policy_hash(
+        self,
+        context: ValidationContext,
+        metadata: Optional[dict[str, Any]],
+        policy_version: str,
+    ) -> str:
+        raw = self._extract_metadata_string(metadata, ["policyHash", "policy_hash"])
+        if raw and raw.startswith("sha256:"):
+            return raw
+        return hash_canonical(
+            {
+                "policy_hash": raw,
+                "policy_version": policy_version,
+                "rules": self._get_rules_for_tool(context.tool_name),
+            }
+        )
+
+    def _append_receipt_for_context(
+        self,
+        context: ValidationContext,
+        result: ValidationResult,
+    ) -> Optional[ReceiptSummary]:
+        if self._receipt_store is None:
+            return None
+
+        decision: Literal["allow", "deny", "require_approval"]
+        if result.decision == "deny":
+            decision = "deny"
+        elif result.decision == "require_approval":
+            decision = "require_approval"
+        else:
+            decision = "allow"
+
+        metadata = result.metadata or {}
+        policy_version = (
+            self._extract_metadata_string(metadata, ["policyVersion", "policy_version"])
+            or "1.0"
+        )
+        receipt = build_decision_receipt(
+            tool_name=context.tool_name,
+            arguments=context.arguments,
+            decision=decision,
+            reason=result.reason,
+            approval_id=self._extract_metadata_string(metadata, ["approvalId", "approval_id"]),
+            session_id=self._resolve_session_id(context),
+            agent_id=self._resolve_agent_id(context),
+            policy_version=policy_version,
+            policy_hash=self._build_receipt_policy_hash(context, metadata, policy_version),
+            previous_receipt=load_last_receipt(self._receipt_store),
+        )
+        append_receipt(self._receipt_store, receipt)
+        return receipt_summary(receipt)
 
     async def guard(
         self,
@@ -3029,8 +3126,17 @@ class Veto:
                     validation_result,
                     aggregated_result.total_duration_ms,
                 )
-                return self._to_guard_result(validation_result)
+                guard_result = self._to_guard_result(validation_result)
+                guard_result.receipt = (
+                    guard_result.receipt
+                    or self._append_receipt_for_context(context, validation_result)
+                )
+                return guard_result
 
+        behavioral_result.receipt = (
+            behavioral_result.receipt
+            or self._append_receipt_for_context(context, validation_result)
+        )
         self._history_tracker.record(
             tool_name,
             args,
@@ -3045,6 +3151,73 @@ class Veto:
         )
 
         return behavioral_result
+
+    async def validate(
+        self,
+        tool_name: str | Mapping[str, Any],
+        arguments: Optional[dict[str, Any]] = None,
+        **context: Any,
+    ) -> DecisionOutcome:
+        """Validate one tool call and return the CLI/SDK decision envelope."""
+        if isinstance(tool_name, Mapping):
+            payload = dict(tool_name)
+            raw_tool_name = payload.get("toolName") or payload.get("tool_name")
+            raw_arguments = payload.get("arguments")
+            if raw_arguments is None:
+                raw_arguments = payload.get("args")
+            raw_context = payload.get("context")
+            if isinstance(raw_context, Mapping):
+                context = {**dict(raw_context), **context}
+            if not isinstance(raw_tool_name, str) or raw_tool_name == "":
+                raise ValueError("validate() requires toolName/tool_name")
+            if not isinstance(raw_arguments, dict):
+                raise ValueError("validate() requires arguments")
+            resolved_tool_name = raw_tool_name
+            resolved_arguments = raw_arguments
+        else:
+            if arguments is None:
+                raise ValueError("validate() requires arguments")
+            resolved_tool_name = tool_name
+            resolved_arguments = arguments
+
+        custom_context = context.get("custom")
+        if custom_context is not None and not isinstance(custom_context, dict):
+            raise ValueError("custom context must be a dict")
+
+        result = await self.guard(
+            resolved_tool_name,
+            resolved_arguments,
+            session_id=context.get("session_id") or context.get("sessionId"),
+            agent_id=context.get("agent_id") or context.get("agentId"),
+            user_id=context.get("user_id") or context.get("userId"),
+            role=context.get("role"),
+            custom=custom_context,
+        )
+        return DecisionOutcome(
+            decision=result.decision,
+            mode=self._validation_mode,
+            reason=result.reason,
+            approval_id=result.approval_id,
+            receipt=result.receipt,
+        )
+
+    async def export_receipts(
+        self,
+        *,
+        project_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        cursor: Optional[str | int] = None,
+        limit: Optional[int] = None,
+    ) -> str:
+        """Export cloud receipts as canonical NDJSON."""
+        return await self._cloud_client.export_receipts(
+            project_id=project_id,
+            start_date=start_date,
+            end_date=end_date,
+            cursor=cursor,
+            limit=limit,
+        )
 
     def set_approval_preference(self, tool_name: str, preference: str) -> None:
         """

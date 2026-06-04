@@ -7,6 +7,7 @@
 import type { ArgumentConstraint, SessionConstraints } from '../deterministic/types.js';
 import type { RedactionTrace } from '../core/output-validator.js';
 import type { Rule, OutputRule } from '../rules/types.js';
+import type { ReceiptSummary } from 'veto-receipt-protocol';
 
 /**
  * Configuration for the Veto Cloud client.
@@ -100,6 +101,7 @@ export interface CloudValidationResponse {
   failed_constraints?: FailedConstraint[];
   metadata?: Record<string, unknown>;
   approval_id?: string;
+  receipt?: ReceiptSummary;
   denial?: CloudDenialDetails;
   outputRules?: OutputRule[];
   /** Session state returned when sessionId is provided in context */

@@ -108,6 +108,20 @@ export {
   type McpDoctorReport,
 } from './mcp.js';
 export {
+  runMcpImportCommand,
+  type McpImportOptions,
+  type McpImportResult,
+} from './mcp-import.js';
+export {
+  DEFAULT_RECEIPTS_PATH,
+  runReceiptsExportCommand,
+  runReceiptsVerifyCommand,
+  type ReceiptsExportOptions,
+  type ReceiptsExportResult,
+  type ReceiptsVerifyOptions,
+  type ReceiptsVerifyResult,
+} from './receipts.js';
+export {
   createInitialStudioState,
   discoverWorkspaceCandidates,
   loadStudioPreferences,

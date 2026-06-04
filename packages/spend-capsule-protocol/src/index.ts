@@ -72,3 +72,26 @@ export {
   validateCapsulePayload,
   validateReceiptPayload,
 } from "./validate.js";
+
+export {
+  buildDecisionReceipt,
+  computeMerkleRoot as computeDecisionReceiptMerkleRoot,
+  createReceiptId as createDecisionReceiptId,
+  formatReceiptNdjson,
+  GENESIS_MERKLE_ROOT as DECISION_RECEIPT_GENESIS_MERKLE_ROOT,
+  GENESIS_PREVIOUS_RECEIPT_HASH as DECISION_RECEIPT_GENESIS_PREVIOUS_RECEIPT_HASH,
+  hashCanonical as hashDecisionReceiptCanonical,
+  hashDecisionReceipt,
+  parseReceiptNdjson,
+  RECEIPT_VERSION as DECISION_RECEIPT_VERSION,
+  summarizeReceipt as summarizeDecisionReceipt,
+  validateDecisionReceiptPayload,
+  verifyDecisionReceiptChain,
+} from "veto-receipt-protocol";
+export type {
+  BuildDecisionReceiptInput,
+  DecisionReceiptDraft,
+  DecisionReceiptPayload,
+  ReceiptDecision,
+  ReceiptSummary as DecisionReceiptSummary,
+} from "veto-receipt-protocol";
