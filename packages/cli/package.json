@@ -1,6 +1,6 @@
 {
   "name": "veto-cli",
-  "version": "1.16.26",
+  "version": "1.17.0",
   "description": "Compatibility Veto CLI package for Studio and headless workflows",
   "type": "module",
   "bin": {

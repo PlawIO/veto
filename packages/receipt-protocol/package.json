@@ -1,6 +1,6 @@
 {
   "name": "veto-receipt-protocol",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Canonical decision receipt payloads, hashing, and chain verification for Veto policy outcomes.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

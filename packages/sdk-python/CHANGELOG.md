@@ -1,5 +1,11 @@
 # veto (Python SDK)
 
+## 0.17.0
+
+### Minor Changes
+
+- Add universal decision receipt export, verification, and local MCP gateway receipt flows across the SDKs.
+
 ## 0.16.0
 
 ### Minor Changes
