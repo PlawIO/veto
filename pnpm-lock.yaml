@@ -123,6 +123,28 @@ importers:
 
   packages/python-release: {}
 
+  packages/receipt-protocol:
+    dependencies:
+      '@noble/hashes':
+        specifier: ^1.5.0
+        version: 1.8.0
+      canonicalize:
+        specifier: ^2.1.0
+        version: 2.1.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.39
+      '@vitest/coverage-v8':
+        specifier: ^4.0.16
+        version: 4.1.4(vitest@4.1.4)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.16
+        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.4)(vite@7.3.2(@types/node@20.19.39)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+
   packages/sdk:
     dependencies:
       '@anthropic-ai/sdk':
@@ -152,6 +174,9 @@ importers:
       redis:
         specifier: ^4.0.0
         version: 4.7.1
+      veto-receipt-protocol:
+        specifier: workspace:*
+        version: link:../receipt-protocol
       yaml:
         specifier: 2.8.3
         version: 2.8.3
@@ -204,6 +229,9 @@ importers:
       jose:
         specifier: ^5.9.6
         version: 5.10.0
+      veto-receipt-protocol:
+        specifier: workspace:*
+        version: link:../receipt-protocol
     devDependencies:
       '@types/node':
         specifier: ^20.10.0
@@ -1247,7 +1275,6 @@ packages:
   '@lancedb/lancedb@0.27.2':
     resolution: {integrity: sha512-JQpZHV5KzUzDI3flYCjtZcfHlEbL8lM54E0NT+jrRYe29aKYegfavvPsAsuZp0VdcMwFMZcpMkaBhjQMo/fwvg==}
     engines: {node: '>= 18'}
-    cpu: [x64, arm64]
     os: [darwin, linux, win32]
     peerDependencies:
       apache-arrow: '>=15.0.0 <=18.1.0'

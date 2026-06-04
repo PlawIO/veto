@@ -32,6 +32,16 @@ if TYPE_CHECKING:
 DEFAULT_BASE_URL = "https://api.veto.so"
 
 
+def _bounded_int(value: str | int, name: str, minimum: int, maximum: int) -> str:
+    raw = str(value).strip()
+    if not raw.isdigit():
+        raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
+    parsed = int(raw)
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
+    return str(parsed)
+
+
 @dataclass
 class VetoCloudConfig:
     """Configuration for the Veto Cloud client."""
@@ -325,6 +335,7 @@ class VetoCloudClient:
                         metadata=data.get("metadata"),
                         approval_id=data.get("approval_id"),
                         denial=denial,
+                        receipt=data.get("receipt") if isinstance(data.get("receipt"), dict) else None,
                     )
 
             except Exception as error:
@@ -351,6 +362,51 @@ class VetoCloudClient:
             failed_constraints=[],
             metadata={"api_error": True},
         )
+
+    async def export_receipts(
+        self,
+        *,
+        project_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        cursor: Optional[str | int] = None,
+        limit: Optional[int] = None,
+    ) -> str:
+        """Export canonical receipt NDJSON from Veto Cloud."""
+        if not self._api_key:
+            raise ValueError("VETO_API_KEY or api_key is required for cloud receipt export")
+
+        params: dict[str, str] = {"format": "ndjson"}
+        if project_id:
+            params["projectId"] = project_id
+        if start_date:
+            params["startDate"] = start_date
+        if end_date:
+            params["endDate"] = end_date
+        if cursor is not None:
+            params["cursor"] = _bounded_int(cursor, "cursor", 0, 2**53 - 1)
+        if limit is not None:
+            params["limit"] = _bounded_int(limit, "limit", 1, 10_000)
+
+        session = self._get_session()
+        chunks: list[str] = []
+        next_cursor: Optional[str] = params.get("cursor")
+        while True:
+            if next_cursor is not None:
+                params["cursor"] = next_cursor
+            async with session.get(f"{self._base_url}/v1/receipts/export", params=params) as response:
+                body = await response.text()
+                if not response.ok:
+                    raise RuntimeError(
+                        f"receipt export returned HTTP {response.status}: {body}"
+                    )
+                chunks.append(body)
+                header_cursor = response.headers.get("X-Veto-Next-Cursor")
+                if not header_cursor:
+                    break
+                next_cursor = _bounded_int(header_cursor, "cursor", 0, 2**53 - 1)
+
+        return "".join(chunks)
 
     async def poll_approval(
         self,

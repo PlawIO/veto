@@ -90,6 +90,7 @@ class ValidationResponse:
     metadata: Optional[dict[str, Any]] = None
     approval_id: Optional[str] = None
     denial: Optional[CloudDenialDetails] = None
+    receipt: Optional[dict[str, str]] = None
 
 
 @dataclass
@@ -128,7 +129,7 @@ class LogDecisionRequest:
 
     tool_name: str
     arguments: dict[str, Any]
-    decision: Literal["allow", "deny"]
+    decision: Literal["allow", "deny", "require_approval"]
     mode: Literal["deterministic"] = "deterministic"
     latency_ms: float = 0.0
     source: Literal["client"] = "client"

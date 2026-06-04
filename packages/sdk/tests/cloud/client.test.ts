@@ -5,6 +5,13 @@ import type { Logger } from '../../src/utils/logger.js';
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+const receiptSummary = {
+  receipt_id: 'rcp_000000000000000000000001',
+  receipt_hash: `sha256:${'1'.repeat(64)}`,
+  previous_receipt_hash: `sha256:${'0'.repeat(64)}`,
+  merkle_root: `sha256:${'2'.repeat(64)}`,
+};
+
 function createLogger(): Logger {
   return {
     debug: vi.fn(),
@@ -26,7 +33,7 @@ describe('VetoCloudClient', () => {
     it('should return allow decision', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ decision: 'allow', reason: 'Allowed' }),
+        json: async () => ({ decision: 'allow', reason: 'Allowed', receipt: receiptSummary }),
         text: async () => '',
       });
 
@@ -39,6 +46,7 @@ describe('VetoCloudClient', () => {
 
       expect(result.decision).toBe('allow');
       expect(result.reason).toBe('Allowed');
+      expect(result.receipt).toEqual(receiptSummary);
     });
 
     it('should parse outputRules from validation responses', async () => {

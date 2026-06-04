@@ -31,6 +31,27 @@ export interface VetoCloudClientOptions {
 
 const DEFAULT_BASE_URL = 'https://api.veto.so';
 
+function extractReceiptSummary(value: unknown): CloudValidationResponse['receipt'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const receipt = value as Record<string, unknown>;
+  if (
+    typeof receipt.receipt_id === 'string' &&
+    typeof receipt.receipt_hash === 'string' &&
+    typeof receipt.previous_receipt_hash === 'string' &&
+    typeof receipt.merkle_root === 'string'
+  ) {
+    return {
+      receipt_id: receipt.receipt_id,
+      receipt_hash: receipt.receipt_hash,
+      previous_receipt_hash: receipt.previous_receipt_hash,
+      merkle_root: receipt.merkle_root,
+    };
+  }
+  return undefined;
+}
+
 export class VetoCloudClient {
   private readonly config: ResolvedCloudConfig;
   private readonly logger: Logger;
@@ -218,6 +239,7 @@ export class VetoCloudClient {
           failed_constraints: failedConstraints,
           metadata: data.metadata as Record<string, unknown> | undefined,
           approval_id: data.approval_id as string | undefined,
+          receipt: extractReceiptSummary(data.receipt),
           denial,
           outputRules: this.extractArray<OutputRule>(
             data.outputRules,

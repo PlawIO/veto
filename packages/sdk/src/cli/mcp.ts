@@ -1,9 +1,21 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import {
+  buildDecisionReceipt,
+  createReceiptId,
+  formatReceiptNdjson,
+  hashCanonical,
+  parseReceiptNdjson,
+  summarizeReceipt,
+  type DecisionReceiptPayload,
+  type ReceiptSummary,
+} from 'veto-receipt-protocol';
 import type { HeadlessResult } from './headless.js';
+import { DEFAULT_RECEIPTS_PATH } from './receipts.js';
 
 const DEFAULT_CONFIG_PATH = 'veto/mcp.config.yaml';
 const DEFAULT_CONNECT_CONFIG_PATH = 'mcp.json';
@@ -53,12 +65,14 @@ interface GatewayDecisionEvent {
   timestamp: string;
   requestId?: string;
   transport: McpTransport;
+  receipt?: ReceiptSummary;
 }
 
 interface PolicyValidationResult {
   decision: 'allow' | 'deny' | 'require_approval';
   reason?: string;
   latencyMs: number;
+  receipt?: ReceiptSummary;
 }
 
 interface McpUpstreamConfig {
@@ -338,6 +352,120 @@ function optionalPositiveNumber(value: unknown, fallback: number, fieldName: str
   return Math.floor(parsed);
 }
 
+function randomDecisionId(): string {
+  return `dec_${randomBytes(12).toString('hex')}`;
+}
+
+function redactValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) {
+    return '[redacted]';
+  }
+  if (typeof value === 'string') {
+    return value.length > 0 ? '[redacted]' : '';
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactValue(entry, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = redactValue(entry, depth + 1);
+    }
+    return out;
+  }
+  return null;
+}
+
+function extractReceiptSummary(value: unknown): ReceiptSummary | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const receipt = record.receipt;
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    return undefined;
+  }
+  const summary = receipt as Record<string, unknown>;
+  if (
+    typeof summary.receipt_id === 'string' &&
+    typeof summary.receipt_hash === 'string' &&
+    typeof summary.previous_receipt_hash === 'string' &&
+    typeof summary.merkle_root === 'string'
+  ) {
+    return {
+      receipt_id: summary.receipt_id,
+      receipt_hash: summary.receipt_hash,
+      previous_receipt_hash: summary.previous_receipt_hash,
+      merkle_root: summary.merkle_root,
+    };
+  }
+  return undefined;
+}
+
+let localPreviousReceipt: DecisionReceiptPayload | null | undefined;
+
+function loadLocalPreviousReceipt(): DecisionReceiptPayload | null {
+  if (localPreviousReceipt !== undefined) {
+    return localPreviousReceipt;
+  }
+  const path = resolve(DEFAULT_RECEIPTS_PATH);
+  if (!existsSync(path)) {
+    localPreviousReceipt = null;
+    return localPreviousReceipt;
+  }
+  try {
+    const receipts = parseReceiptNdjson(readFileSync(path, 'utf-8'));
+    localPreviousReceipt = receipts.at(-1) ?? null;
+  } catch {
+    localPreviousReceipt = null;
+  }
+  return localPreviousReceipt;
+}
+
+function appendLocalReceipt(receipt: DecisionReceiptPayload): void {
+  const path = resolve(DEFAULT_RECEIPTS_PATH);
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, formatReceiptNdjson([receipt]), 'utf-8');
+  localPreviousReceipt = receipt;
+}
+
+function attachReceiptToResponse(
+  response: JsonRpcResponse,
+  receipt: DecisionReceiptPayload,
+): JsonRpcResponse {
+  const receiptSummary = summarizeReceipt(receipt);
+  const meta = {
+    veto_receipt: receiptSummary,
+    veto_receipt_payload: receipt,
+  };
+  if (response.result && typeof response.result === 'object' && !Array.isArray(response.result)) {
+    const result = response.result as Record<string, unknown>;
+    const existingMeta = result._meta && typeof result._meta === 'object' && !Array.isArray(result._meta)
+      ? result._meta as Record<string, unknown>
+      : {};
+    return {
+      ...response,
+      result: {
+        ...result,
+        _meta: {
+          ...existingMeta,
+          ...meta,
+        },
+      },
+    };
+  }
+  return {
+    ...response,
+    result: {
+      value: response.result ?? null,
+      _meta: meta,
+    },
+  };
+}
+
 function parseTransport(value: unknown): McpTransport {
   if (value === 'mcp-sse' || value === 'mcp-stdio') {
     return value;
@@ -346,7 +474,7 @@ function parseTransport(value: unknown): McpTransport {
   throw new Error("Invalid upstream.transport: expected 'mcp-sse' or 'mcp-stdio'");
 }
 
-function parsePolicyDecisionBody(body: unknown): { decision: PolicyValidationResult['decision']; reason?: string } | null {
+function parsePolicyDecisionBody(body: unknown): { decision: PolicyValidationResult['decision']; reason?: string; receipt?: ReceiptSummary } | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return null;
   }
@@ -360,6 +488,7 @@ function parsePolicyDecisionBody(body: unknown): { decision: PolicyValidationRes
   return {
     decision,
     reason: typeof record.reason === 'string' ? record.reason : undefined,
+    receipt: extractReceiptSummary(body),
   };
 }
 
@@ -606,6 +735,13 @@ class PolicyClient {
     private apiKey: string,
   ) {}
 
+  policyHashForReceipt(): string {
+    return hashCanonical({
+      kind: 'remote-policy-server',
+      serverUrl: this.serverUrl,
+    });
+  }
+
   async validate(toolName: string, args: Record<string, unknown>): Promise<PolicyValidationResult> {
     const startedAt = Date.now();
 
@@ -644,6 +780,7 @@ class PolicyClient {
         decision: parsed.decision,
         reason: parsed.reason,
         latencyMs: Date.now() - startedAt,
+        receipt: parsed.receipt,
       };
     } catch (error) {
       return {
@@ -739,6 +876,7 @@ class UpstreamRuntime {
     if (message.method === 'tools/call') {
       const params = (message.params ?? {}) as unknown as McpToolCallParams;
       const toolName = typeof params.name === 'string' ? params.name.trim() : '';
+      const args = asRecord(params.arguments);
       if (!toolName) {
         return {
           jsonrpc: '2.0',
@@ -750,40 +888,50 @@ class UpstreamRuntime {
         };
       }
 
-      const result = await this.policyClient.validate(toolName, asRecord(params.arguments));
-      this.emitDecision({
-        type: 'decision',
-        upstream: this.upstream.name,
-        toolName,
-        decision: result.decision,
-        reason: result.reason,
-        latencyMs: result.latencyMs,
-        timestamp: new Date().toISOString(),
-        requestId: message.id !== undefined ? String(message.id) : undefined,
-        transport: this.upstream.transport,
-      });
+      const result = await this.policyClient.validate(toolName, args);
 
       if (result.decision === 'deny') {
+        const receipt = this.recordReceipt(toolName, args, result, null);
+        this.emitToolDecision(toolName, result, message.id, receipt);
         return {
           jsonrpc: '2.0',
           id: message.id,
           error: {
             code: -32001,
             message: `Tool call denied: ${result.reason ?? 'policy violation'}`,
+            data: {
+              receipt: summarizeReceipt(receipt),
+              receipt_payload: receipt,
+              upstream_receipt: result.receipt,
+            },
           },
         };
       }
 
       if (result.decision === 'require_approval') {
+        const receipt = this.recordReceipt(toolName, args, result, null);
+        this.emitToolDecision(toolName, result, message.id, receipt);
         return {
           jsonrpc: '2.0',
           id: message.id,
           error: {
             code: -32002,
             message: `Tool call requires approval: ${result.reason ?? 'pending review'}`,
+            data: {
+              receipt: summarizeReceipt(receipt),
+              receipt_payload: receipt,
+              upstream_receipt: result.receipt,
+            },
           },
         };
       }
+
+      const upstreamResponse = this.upstream.transport === 'mcp-sse'
+        ? await this.forwardViaHttp(message)
+        : await this.forwardViaStdio(message);
+      const receipt = this.recordReceipt(toolName, args, result, hashCanonical(upstreamResponse));
+      this.emitToolDecision(toolName, result, message.id, receipt);
+      return attachReceiptToResponse(upstreamResponse, receipt);
     }
 
     if (this.upstream.transport === 'mcp-sse') {
@@ -791,6 +939,65 @@ class UpstreamRuntime {
     }
 
     return this.forwardViaStdio(message);
+  }
+
+  private recordReceipt(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: PolicyValidationResult,
+    resultHash: string | null,
+  ): DecisionReceiptPayload {
+    const receipt = buildDecisionReceipt({
+      previous: loadLocalPreviousReceipt(),
+      draft: {
+        receipt_id: createReceiptId(),
+        organization_id: 'local',
+        project_id: null,
+        decision_id: randomDecisionId(),
+        approval_id: null,
+        session_id: null,
+        agent_id: null,
+        client_id: 'local-mcp',
+        connection_id: null,
+        upstream_id: this.upstream.name,
+        tool_name: toolName,
+        tool_schema_hash: null,
+        policy_id: null,
+        policy_version: 'local-mcp/1',
+        policy_hash: this.policyClient.policyHashForReceipt(),
+        decision: result.decision,
+        reason_code: result.decision,
+        reason_detail: result.reason ?? null,
+        redacted_arguments: redactValue(args),
+        argument_hash: hashCanonical(args),
+        result_hash: resultHash,
+        approval_hash: null,
+        timestamp: new Date().toISOString(),
+        trace_id: null,
+      },
+    });
+    appendLocalReceipt(receipt);
+    return receipt;
+  }
+
+  private emitToolDecision(
+    toolName: string,
+    result: PolicyValidationResult,
+    requestId: string | number | undefined,
+    receipt: DecisionReceiptPayload,
+  ): void {
+    this.emitDecision({
+      type: 'decision',
+      upstream: this.upstream.name,
+      toolName,
+      decision: result.decision,
+      reason: result.reason,
+      latencyMs: result.latencyMs,
+      timestamp: new Date().toISOString(),
+      requestId: requestId !== undefined ? String(requestId) : undefined,
+      transport: this.upstream.transport,
+      receipt: summarizeReceipt(receipt),
+    });
   }
 
   private async forwardViaHttp(message: JsonRpcRequest): Promise<JsonRpcResponse> {

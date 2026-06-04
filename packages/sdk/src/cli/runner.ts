@@ -31,6 +31,8 @@ import {
 import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } from './agent.js';
 import { formatInstallResult, runInstallCommand } from './install.js';
 import { runMcpConnectCommand, runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
+import { runMcpImportCommand } from './mcp-import.js';
+import { runReceiptsExportCommand, runReceiptsVerifyCommand } from './receipts.js';
 import { startProxyServer } from '../proxy/server.js';
 
 const VERSION = getCliVersion();
@@ -67,6 +69,10 @@ Canonical Commands:
   mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
   mcp doctor [--config <path>] [--json]
   mcp init [--output <path>] [--json]
+  import mcp [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]
+  mcp import [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]
+  receipts export [--input <path>] [--output <path>] [--format ndjson] [--base-url <url>] [--api-key <key>] [--project <id>] [--start-date <date>] [--end-date <date>]
+  receipts verify [file]
   install <claude-code|cursor|codex> [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json] [--force]
   doctor
 
@@ -118,6 +124,9 @@ Examples:
   veto mcp connect --cloud
   veto mcp doctor --json
   veto mcp serve --config ./veto/mcp.config.yaml
+  veto import mcp --dry-run
+  veto receipts export --output receipts.ndjson
+  veto receipts verify receipts.ndjson
   veto install claude-code
   veto install cursor
   veto install codex
@@ -181,6 +190,8 @@ export function parseArgs(args: string[]): ParsedArgs {
     'server-name',
     'port',
     'max-buffer',
+    'start-date',
+    'end-date',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -658,16 +669,151 @@ async function runMcpCommand(
     return result.ok ? 0 : 1;
   }
 
+  if (subCommand === 'import') {
+    const result = runMcpImportCommand({
+      directory: values.directory,
+      inputPath: values.input,
+      configPath: values.config,
+      serverName: values['server-name'],
+      dryRun: flags['dry-run'] ?? false,
+      restore: flags.restore ?? false,
+    });
+    printHeadlessResult(result, asJson);
+    if (!asJson && result.ok) {
+      const data = result.data!;
+      console.log(`Imported MCP configs into ${data.gatewayConfigPath}`);
+      for (const client of data.clients) {
+        const imported = client.importedServers.length > 0
+          ? client.importedServers.join(', ')
+          : 'none';
+        const skipped = client.skippedServers.length > 0
+          ? `; skipped ${client.skippedServers.join(', ')}`
+          : '';
+        const action = client.restored ? 'restored' : client.updated ? 'updated' : 'unchanged';
+        console.log(`  ${client.kind}: ${action} ${client.path} (imported ${imported}${skipped})`);
+      }
+    }
+    return result.ok ? 0 : 1;
+  }
+
   if (subCommand === 'help') {
     console.log('Usage:');
     console.log('  veto mcp connect [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]');
     console.log('  veto mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
     console.log('  veto mcp doctor [--config <path>] [--json]');
     console.log('  veto mcp init [--output <path>] [--json]');
+    console.log('  veto mcp import [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]');
     return 0;
   }
 
   throw new Error(`Unknown mcp command: ${subCommand}`);
+}
+
+async function runImportCommand(
+  positionals: string[],
+  flags: Record<string, boolean>,
+  values: Record<string, string>,
+): Promise<number> {
+  const target = positionals[0] ?? 'help';
+  const asJson = flags.json ?? false;
+
+  if (target === 'mcp') {
+    const result = runMcpImportCommand({
+      directory: values.directory,
+      inputPath: values.input,
+      configPath: values.config,
+      serverName: values['server-name'],
+      dryRun: flags['dry-run'] ?? false,
+      restore: flags.restore ?? false,
+    });
+    printHeadlessResult(result, asJson);
+    if (!asJson && result.ok) {
+      const data = result.data!;
+      console.log(`Imported MCP configs into ${data.gatewayConfigPath}`);
+      for (const client of data.clients) {
+        const imported = client.importedServers.length > 0
+          ? client.importedServers.join(', ')
+          : 'none';
+        const skipped = client.skippedServers.length > 0
+          ? `; skipped ${client.skippedServers.join(', ')}`
+          : '';
+        const action = client.restored ? 'restored' : client.updated ? 'updated' : 'unchanged';
+        console.log(`  ${client.kind}: ${action} ${client.path} (imported ${imported}${skipped})`);
+      }
+    }
+    return result.ok ? 0 : 1;
+  }
+
+  if (target === 'help') {
+    console.log('Usage:');
+    console.log('  veto import mcp [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]');
+    return 0;
+  }
+
+  throw new Error(`Unknown import target: ${target}`);
+}
+
+async function runReceiptsCommand(
+  positionals: string[],
+  flags: Record<string, boolean>,
+  values: Record<string, string>,
+): Promise<number> {
+  const subCommand = positionals[0] ?? 'help';
+  const asJson = flags.json ?? false;
+
+  if (subCommand === 'export') {
+    const result = await runReceiptsExportCommand({
+      inputPath: values.input ?? positionals[1],
+      outputPath: values.output,
+      format: values.format,
+      baseUrl: values['base-url'],
+      apiKey: values['api-key'],
+      projectId: values.project,
+      startDate: values['start-date'],
+      endDate: values['end-date'],
+      cursor: values.cursor,
+      limit: values.limit,
+    });
+
+    if (asJson) {
+      printHeadlessResult(result, true);
+    } else if (result.ok) {
+      if (result.data?.ndjson !== undefined) {
+        process.stdout.write(result.data.ndjson);
+      } else {
+        console.log(colors.success(`Exported ${result.data?.count ?? 0} receipts to ${result.data?.outputPath}`));
+      }
+    } else {
+      printHeadlessResult(result, false);
+    }
+    return result.ok ? 0 : 1;
+  }
+
+  if (subCommand === 'verify') {
+    const result = runReceiptsVerifyCommand({
+      inputPath: values.input ?? positionals[1],
+    });
+    if (asJson) {
+      printHeadlessResult(result, true);
+    } else if (result.ok) {
+      console.log(colors.success(
+        `Receipt log verified: ${result.data?.count ?? 0} records, final hash ${result.data?.finalReceiptHash ?? 'n/a'}`,
+      ));
+    } else {
+      printHeadlessResult(result, false);
+    }
+    return result.ok ? 0 : 1;
+  }
+
+  if (subCommand === 'help') {
+    console.log('Usage:');
+    console.log('  veto receipts export [--input <path>] [--output <path>] [--format ndjson]');
+    console.log('  veto receipts export --base-url <url> [--api-key <key>] [--project <id>] [--start-date <date>] [--end-date <date>] [--cursor <n>] [--limit <n>]');
+    console.log('  veto receipts verify [file]');
+    return 0;
+  }
+
+  throw new Error(`Unknown receipts command: ${subCommand}`);
 }
 
 async function runInstall(
@@ -954,6 +1100,10 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return await runDoctor(flags, values);
     case 'mcp':
       return await runMcpCommand(positionals, flags, values);
+    case 'import':
+      return await runImportCommand(positionals, flags, values);
+    case 'receipts':
+      return await runReceiptsCommand(positionals, flags, values);
     case 'install':
       return await runInstall(positionals, flags, values);
     case 'init': {
