@@ -1,6 +1,6 @@
 {
   "name": "veto-spend-capsule-protocol",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Signed, short-lived, single-use authority objects for agentic money movement. Protocol spec + reference verifier.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

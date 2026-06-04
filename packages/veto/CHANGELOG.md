@@ -1,5 +1,12 @@
 # veto
 
+## 1.16.28
+
+### Patch Changes
+
+- Updated dependencies []:
+  - veto-sdk@2.12.1
+
 ## 1.16.27
 
 ### Patch Changes

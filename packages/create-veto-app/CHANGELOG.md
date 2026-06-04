@@ -1,5 +1,12 @@
 # create-veto-app
 
+## 0.2.15
+
+### Patch Changes
+
+- Updated dependencies []:
+  - veto-sdk@2.12.1
+
 ## 0.2.14
 
 ### Patch Changes

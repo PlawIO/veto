@@ -1,5 +1,12 @@
 # openclaw-veto
 
+## 0.2.19
+
+### Patch Changes
+
+- Updated dependencies []:
+  - veto-sdk@2.12.1
+
 ## 0.2.18
 
 ### Patch Changes
