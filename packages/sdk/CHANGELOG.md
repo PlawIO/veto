@@ -1,5 +1,12 @@
 # veto-sdk
 
+## 2.12.1
+
+### Patch Changes
+
+- Updated dependencies [[`379213b`](https://github.com/PlawIO/veto/commit/379213bdca091b0c302e82f430952011a288d31c)]:
+  - veto-receipt-protocol@0.2.1
+
 ## 2.12.0
 
 ### Minor Changes

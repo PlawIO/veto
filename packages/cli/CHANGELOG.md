@@ -1,5 +1,12 @@
 # veto-cli
 
+## 1.17.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - veto-sdk@2.12.1
+
 ## 1.17.0
 
 ### Minor Changes
