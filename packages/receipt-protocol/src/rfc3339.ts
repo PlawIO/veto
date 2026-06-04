@@ -40,6 +40,20 @@ export class Rfc3339ParseError extends Error {
   }
 }
 
+function utcEpochMs(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): number {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+  return date.getTime();
+}
+
 export function parseRfc3339Strict(value: string): ParsedRfc3339 {
   if (typeof value !== "string") {
     throw new Rfc3339ParseError(`timestamp must be a string; got ${typeof value}`);
@@ -95,7 +109,7 @@ export function parseRfc3339Strict(value: string): ParsedRfc3339 {
     offsetMinutes = sign * (oHour * 60 + oMin);
   }
 
-  const utcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const utcMs = utcEpochMs(year, month, day, hour, minute, second);
   const fracMs = fracStr ? Math.floor(Number("0." + fracStr) * 1000) : 0;
   const epochMs = utcMs + fracMs - offsetMinutes * 60 * 1000;
   const d = new Date(epochMs);

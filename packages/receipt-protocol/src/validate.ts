@@ -87,7 +87,7 @@ function requireStringOrNull(
   maxLen?: number,
   minLen?: number,
 ): string | null {
-  if (value === null || value === undefined) return null;
+  if (value === null) return null;
   return requireString(value, path, pattern, maxLen, minLen);
 }
 
