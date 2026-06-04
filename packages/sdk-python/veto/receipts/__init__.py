@@ -125,7 +125,7 @@ DecisionReceiptPayload: TypeAlias = dict[str, Any]
 
 def canonicalize(value: Any) -> str:
     try:
-        import jcs  # type: ignore[import-not-found]
+        import jcs
 
         result = jcs.canonicalize(value)
         return result.decode("utf-8") if isinstance(result, bytes) else str(result)
