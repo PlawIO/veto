@@ -5,7 +5,10 @@ import {
   formatReceiptNdjson,
   hashCanonical,
   hashDecisionReceipt,
+  parseRfc3339Strict,
   parseReceiptNdjson,
+  validateDecisionReceiptPayload,
+  ValidationError,
   verifyDecisionReceiptChain,
   type DecisionReceiptDraft,
 } from "../src/index.js";
@@ -119,6 +122,24 @@ describe("decision receipt protocol", () => {
     expect(receipt.result_hash).toBeNull();
     expect(receipt.approval_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(verifyDecisionReceiptChain([receipt])).toEqual({ ok: true });
+  });
+
+  it("rejects undefined for required nullable hash fields", () => {
+    const receipt = buildDecisionReceipt({ draft: draft(), previous: null });
+
+    expect(() =>
+      validateDecisionReceiptPayload({
+        ...receipt,
+        result_hash: undefined,
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it("preserves RFC 3339 years below 100 when computing canonical UTC time", () => {
+    const parsed = parseRfc3339Strict("0099-12-31T23:59:59.123Z");
+
+    expect(parsed.canonical).toBe("0099-12-31T23:59:59.123Z");
+    expect(new Date(parsed.epochMs).getUTCFullYear()).toBe(99);
   });
 
   it("round-trips canonical NDJSON exports", () => {
