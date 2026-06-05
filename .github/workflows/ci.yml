@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check release supply chain
+        run: pnpm check:release-supply-chain
+
       - name: Turbo Cache
         uses: actions/cache@v4
         with:

@@ -34,6 +34,10 @@
     "url": "https://github.com/PlawIO/veto",
     "directory": "packages/receipt-protocol"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "homepage": "https://docs.veto.so",
   "dependencies": {
     "@noble/hashes": "^1.5.0",

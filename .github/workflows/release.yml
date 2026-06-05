@@ -21,7 +21,8 @@ env:
 jobs:
   release:
     name: Release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
@@ -36,13 +37,30 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Check release toolchain
+        run: |
+          node --version
+          npm_version="$(npm --version)"
+          echo "npm $npm_version"
+          node -e '
+            const version = process.argv[1].split(".").map(Number);
+            const [major, minor, patch] = version;
+            if (
+              major < 11 ||
+              (major === 11 && minor < 5) ||
+              (major === 11 && minor === 5 && patch < 1)
+            ) {
+              throw new Error(`npm ${process.argv[1]} is too old for trusted publishing; require >=11.5.1`);
+            }
+          ' "$npm_version"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -69,9 +87,8 @@ jobs:
           commit: "chore: release packages"
           title: "chore: release packages"
         env:
-          GITHUB_TOKEN: ${{ secrets.VETO_PAT }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NPM_CONFIG_PROVENANCE: "true"
 
       - name: Auto-approve and enable auto-merge for release PR
         if: steps.changesets.outputs.published != 'true'
@@ -98,16 +115,19 @@ jobs:
             --squash \
             --delete-branch
 
-      - name: Publish Python SDK to PyPI
+      - name: Build Python SDK distribution
         if: steps.changesets.outputs.published == 'true'
         working-directory: packages/sdk-python
         run: |
-          python -m pip install --upgrade pip build twine
+          python -m pip install --upgrade pip build
           python -m build
-          python -m twine upload dist/* --non-interactive --skip-existing
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      - name: Publish Python SDK to PyPI
+        if: steps.changesets.outputs.published == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/sdk-python/dist
+          skip-existing: true
 
       - name: Create GitHub Release for Python
         if: steps.changesets.outputs.published == 'true'
@@ -124,14 +144,14 @@ jobs:
               --target master
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.VETO_PAT }}
+          GH_TOKEN: ${{ github.token }}
 
   # Manual release option
   release-manual:
     name: Manual Release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true' && github.ref == 'refs/heads/master'
     permissions:
       contents: write
       id-token: write
@@ -144,13 +164,30 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Check release toolchain
+        run: |
+          node --version
+          npm_version="$(npm --version)"
+          echo "npm $npm_version"
+          node -e '
+            const version = process.argv[1].split(".").map(Number);
+            const [major, minor, patch] = version;
+            if (
+              major < 11 ||
+              (major === 11 && minor < 5) ||
+              (major === 11 && minor === 5 && patch < 1)
+            ) {
+              throw new Error(`npm ${process.argv[1]} is too old for trusted publishing; require >=11.5.1`);
+            }
+          ' "$npm_version"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -160,18 +197,33 @@ jobs:
 
       - name: Publish npm packages
         run: |
-          pnpm --filter veto-sdk publish --no-git-checks --access public || true
-          pnpm --filter veto publish --no-git-checks --access public || true
-          pnpm --filter veto-cli publish --no-git-checks --access public || true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          publish_if_missing() {
+            filter="$1"
+            manifest="$2"
+            name="$(node -p "require('./${manifest}').name")"
+            version="$(node -p "require('./${manifest}').version")"
 
-      - name: Publish Python SDK
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "Skipping ${name}@${version}; already published."
+              return 0
+            fi
+
+            pnpm --filter "$filter" publish --no-git-checks --access public --provenance
+          }
+
+          publish_if_missing veto-sdk packages/sdk/package.json
+          publish_if_missing veto-cli packages/cli/package.json
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Build Python SDK distribution
         working-directory: packages/sdk-python
         run: |
-          python -m pip install --upgrade pip build twine
+          python -m pip install --upgrade pip build
           python -m build
-          python -m twine upload dist/* --non-interactive --skip-existing
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      - name: Publish Python SDK to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/sdk-python/dist
+          skip-existing: true
