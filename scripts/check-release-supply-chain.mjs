@@ -58,6 +58,7 @@ function checkReleaseWorkflow() {
     [/NPM_CONFIG_PROVENANCE:\s*"true"/g, "npm provenance config"],
     [/pypa\/gh-action-pypi-publish@release\/v1/g, "PyPI trusted publishing action"],
     [/github\.ref == 'refs\/heads\/master'/g, "protected master ref guard"],
+    [/smoke:release-artifacts/g, "package smoke installs before release publish"],
   ];
 
   for (const [pattern, label] of requiredPatterns) {
@@ -104,6 +105,11 @@ function checkPackageManifest(path) {
 }
 
 function main() {
+  const rootManifest = readJson("package.json");
+  if (rootManifest.scripts?.["smoke:release-artifacts"] !== "node scripts/smoke-release-artifacts.mjs") {
+    fail("package.json: missing smoke:release-artifacts script.");
+  }
+
   checkReleaseWorkflow();
 
   for (const path of listWorkspacePackageJsons()) {

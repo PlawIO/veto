@@ -31,4 +31,12 @@ Run the release hardening check with:
 pnpm check:release-supply-chain
 ```
 
-The check fails if release publish tokens, `twine upload`, non-GitHub-hosted release runners, missing package provenance metadata, or install-time npm lifecycle hooks are introduced.
+Package install smoke tests run in CI and immediately before release publishing:
+
+```sh
+pnpm smoke:release-artifacts
+```
+
+The smoke test packs the public npm packages, installs the resulting tarballs into a clean project with lifecycle scripts disabled, imports the expected runtime surfaces, builds the Python wheel, installs it into a clean virtual environment, and imports the expected Python SDK surfaces.
+
+The hardening check fails if release publish tokens, `twine upload`, non-GitHub-hosted release runners, missing package provenance metadata, missing package smoke tests, or install-time npm lifecycle hooks are introduced.

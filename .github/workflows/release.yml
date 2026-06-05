@@ -76,6 +76,9 @@ jobs:
       - name: Build packages
         run: pnpm turbo build --filter='./packages/*'
 
+      - name: Smoke release artifacts
+        run: pnpm smoke:release-artifacts
+
       - name: Create Release PR or Publish
         id: changesets
         uses: changesets/action@v1
@@ -194,6 +197,9 @@ jobs:
 
       - name: Build packages
         run: pnpm turbo build --filter='./packages/*'
+
+      - name: Smoke release artifacts
+        run: pnpm smoke:release-artifacts
 
       - name: Publish npm packages
         run: |
