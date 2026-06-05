@@ -56,11 +56,11 @@ const zones = [
   },
   {
     id: "python-sdk-base",
-    description: "Python base dependencies are frozen until cloud/CLI/proxy/integration extras are split out.",
+    description: "Python base local enforcement must stay dependency-free; cloud/CLI/proxy/integration dependencies live in extras.",
     file: "packages/sdk-python/pyproject.toml",
     type: "pyproject",
     field: "project.dependencies",
-    allowed: ["aiohttp", "jcs", "jsonschema", "pydantic", "pyyaml", "sse-starlette"],
+    allowed: [],
   },
 ];
 

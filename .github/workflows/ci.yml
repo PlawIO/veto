@@ -73,6 +73,9 @@ jobs:
           cache: "pip"
           cache-dependency-path: packages/sdk-python/pyproject.toml
 
+      - name: Smoke base wheel without runtime dependencies
+        run: python scripts/smoke-python-base-no-deps.py
+
       - name: Install dependencies
         working-directory: packages/sdk-python
         run: |
