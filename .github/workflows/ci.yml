@@ -40,6 +40,9 @@ jobs:
       - name: Check dependency zones
         run: pnpm check:dependency-zones
 
+      - name: Test Rust trust kernel
+        run: cargo test --manifest-path crates/veto-core/Cargo.toml
+
       - name: Turbo Cache
         uses: actions/cache@v4
         with:

@@ -25,15 +25,15 @@ Public category copy stays simple: "rules for AI agents" and "prove machine acti
 
 Local enforcement is the trusted computing base.
 
-| Zone                   | Packages                                                  | Rule                                                                                                                                                 | Current status |
-| ---------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| Local trust kernel     | future `crates/veto-core`, future thin TS/Python bindings | No third-party npm/PyPI runtime code on the decision path. Rust crypto/canonicalization dependencies require explicit audited budget.                | Planned        |
-| Protocol helpers       | `packages/receipt-protocol`, `packages/map-core`          | Small audited dependency budget only. No cloud/CLI/provider imports.                                                                                 | Bridge         |
-| TS SDK app surface     | `packages/sdk`                                            | Current runtime dependencies are frozen until zero-dep split lands. CLI/UI/cloud/integration dependencies must not move into base dependencies.      | Gate added     |
-| Python SDK app surface | `packages/sdk-python`                                     | Current base dependencies are frozen until extras split lands. Rich/Typer/server/proxy/cloud deps must not be required for simple local enforcement. | Gate added     |
-| CLI/UI                 | `packages/cli`, SDK `src/cli/*`                           | May depend on UI/terminal libraries. Must not become the local trust kernel.                                                                         | Bridge         |
-| Hosted platform        | `veto-platform`                                           | May use platform dependencies. Receipt append and audit export invariants must be enforced by storage, not by docs claims.                           | In progress    |
-| Hosted docs            | `veto-platform/apps/docs`                                 | High-stakes claims require a claims manifest entry with code/test/release evidence.                                                                  | In progress    |
+| Zone                   | Packages                                           | Rule                                                                                                                                                 | Current status |
+| ---------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| Local trust kernel     | `crates/veto-core`, future thin TS/Python bindings | No third-party npm/PyPI runtime code on the decision path. Rust crypto/canonicalization dependencies require explicit audited budget.                | In progress    |
+| Protocol helpers       | `packages/receipt-protocol`, `packages/map-core`   | Small audited dependency budget only. No cloud/CLI/provider imports.                                                                                 | Bridge         |
+| TS SDK app surface     | `packages/sdk`                                     | Current runtime dependencies are frozen until zero-dep split lands. CLI/UI/cloud/integration dependencies must not move into base dependencies.      | Gate added     |
+| Python SDK app surface | `packages/sdk-python`                              | Current base dependencies are frozen until extras split lands. Rich/Typer/server/proxy/cloud deps must not be required for simple local enforcement. | Gate added     |
+| CLI/UI                 | `packages/cli`, SDK `src/cli/*`                    | May depend on UI/terminal libraries. Must not become the local trust kernel.                                                                         | Bridge         |
+| Hosted platform        | `veto-platform`                                    | May use platform dependencies. Receipt append and audit export invariants must be enforced by storage, not by docs claims.                           | In progress    |
+| Hosted docs            | `veto-platform/apps/docs`                          | High-stakes claims require a claims manifest entry with code/test/release evidence.                                                                  | In progress    |
 
 Executable gate: `pnpm check:dependency-zones`.
 
@@ -95,6 +95,20 @@ Non-negotiables:
 - canonical JSON commitments
 - receipt hashing and chain verification shared with wrappers
 - Rust unit, property, fuzz, and benchmark tests
+
+Current evidence:
+
+- Initial kernel crate: `crates/veto-core`
+- MAP fixture enforcement and replay checks: `crates/veto-core/tests/map_fixtures.rs`
+- Receipt hashing and chain verification checks: `crates/veto-core/tests/receipt_chain.rs`
+- Explicit Rust dependency budget: `scripts/check-dependency-zones.mjs`
+
+Remaining kernel gaps:
+
+- signed bundle verification
+- full policy expression language
+- property/fuzz/benchmark jobs
+- TS/Python bindings over the Rust kernel
 
 ## SDK Requirements
 
@@ -189,7 +203,7 @@ Current gap:
 | 4   | Docs claims manifest              | In progress               | docs build, manifest evidence review                                    |
 | 5   | SDK dependency-zone gate          | In progress               | `pnpm check:dependency-zones`, CI step                                  |
 | 6   | Protocol/MAP-Core fixtures        | In progress               | `pnpm --filter veto-map-core build`, `pnpm --filter veto-map-core test` |
-| 7   | Rust `veto-core`                  | Not started               | Rust unit/property/fuzz/bench, TS/Python binding smoke                  |
+| 7   | Rust `veto-core`                  | In progress               | Rust unit/property/fuzz/bench, TS/Python binding smoke                  |
 | 8   | SDK zero-dep local wrappers       | Not started               | base package import/enforce without registry runtime deps               |
 | 9   | CLI elevation                     | Not started               | `npx`, `uvx`, `pipx` init/validate/receipt e2e                          |
 | 10  | Release supply-chain hardening    | Not started               | trusted publishing/provenance/package smoke                             |

@@ -1,0 +1,15 @@
+[package]
+name = "veto-core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Canonical local trust kernel for Veto MAP artifacts and receipt verification"
+
+[lib]
+name = "veto_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
