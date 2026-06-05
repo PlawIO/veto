@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { parse as parseYaml } from 'yaml';
 import type { Rule, OutputRule } from '../rules/types.js';
 import { normalizePolicyPackName, resolveBuiltInPolicyPackPath } from '../rules/policy-packs.js';
 import type { LogLevel, StreamLogMode, ValidationContext } from '../types/config.js';
@@ -10,6 +10,21 @@ import { Veto, type VetoMode } from './veto.js';
 import type { IdentityPolicyConfig } from '../identity/spiffe.js';
 
 export type ProtectMode = VetoMode;
+
+const require = createRequire(import.meta.url);
+
+function loadYamlParser(): (content: string) => unknown {
+  try {
+    const yaml = require('yaml') as { parse: (content: string) => unknown };
+    return yaml.parse;
+  } catch (error) {
+    const cause = error instanceof Error ? error : undefined;
+    throw new Error(
+      'The `yaml` package is required for protect() policy packs and YAML projects. Install it with `npm install yaml`, or pass inline rules to `protect(..., { rules })`.',
+      { cause }
+    );
+  }
+}
 
 export interface ProtectOptions {
   // Policy source (pick one, auto-detected if omitted)
@@ -172,6 +187,7 @@ function readPolicyPack(packName: string): { rules: Rule[]; outputRules: OutputR
   const normalizedPack = normalizePolicyPackName(packName);
   const path = resolveBuiltInPolicyPackPath(normalizedPack);
   const raw = readFileSync(path, 'utf-8');
+  const parseYaml = loadYamlParser();
   const parsed = parseYaml(raw);
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

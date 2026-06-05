@@ -21,6 +21,13 @@
  * @module veto
  */
 
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { InitOptions, InitResult } from './cli/init.js';
+import type { ProtectOptions } from './core/protect.js';
+import type { RunTestsOptions } from './testing/runner.js';
+import type { VetoTestRunResult } from './testing/types.js';
+
 // Main export
 export {
   Veto,
@@ -32,12 +39,28 @@ export {
   type WrappedHandler,
   type GuardContext,
   type GuardResult,
+  type VetoLocalBundle,
+  type VetoLocalOptions,
 } from './core/veto.js';
-export {
-  protect,
-  type ProtectOptions,
-  type ProtectMode,
-} from './core/protect.js';
+export type { ProtectOptions, ProtectMode } from './core/protect.js';
+
+export async function protect<T extends { name: string }>(
+  tools: T[],
+  options?: ProtectOptions
+): Promise<T[]>;
+export async function protect<T extends { name: string }>(
+  tool: T,
+  options?: ProtectOptions
+): Promise<T>;
+export async function protect<T extends { name: string }>(
+  input: T | T[],
+  options?: ProtectOptions
+): Promise<T | T[]> {
+  const { protect: protectImpl } = await import('./core/protect.js');
+  return Array.isArray(input)
+    ? protectImpl(input, options)
+    : protectImpl(input, options);
+}
 
 // Core types
 export type {
@@ -263,7 +286,6 @@ export { tryLoadOtel, SpanStatusCode } from './observability/otel.js';
 export type { VetoTracer, VetoSpan } from './observability/otel.js';
 
 // Testing
-export { runTests } from './testing/runner.js';
 export type { RunTestsOptions } from './testing/runner.js';
 export type {
   VetoTestCase,
@@ -272,8 +294,23 @@ export type {
   VetoTestRunResult,
 } from './testing/types.js';
 
+export async function runTests(options?: RunTestsOptions): Promise<VetoTestRunResult> {
+  const { runTests: runTestsImpl } = await import('./testing/runner.js');
+  return runTestsImpl(options);
+}
+
 // CLI init function (for programmatic use)
-export { init, isInitialized } from './cli/init.js';
+export type { InitOptions, InitResult } from './cli/init.js';
+
+export async function init(options?: InitOptions): Promise<InitResult> {
+  const { init: initImpl } = await import('./cli/init.js');
+  return initImpl(options);
+}
+
+export function isInitialized(directory: string = process.cwd()): boolean {
+  const vetoDir = join(resolve(directory), 'veto');
+  return existsSync(join(vetoDir, 'veto.config.yaml'));
+}
 
 // Admin management client
 export { VetoAdmin, VetoAdminError } from './admin/client.js';

@@ -174,24 +174,12 @@ importers:
       ai:
         specifier: '>=3.0.0'
         version: 6.0.156(zod@3.25.76)
-      ajv:
-        specifier: ^8.18.0
-        version: 8.18.0
-      picocolors:
-        specifier: ^1.1.1
-        version: 1.1.1
       react:
         specifier: ^18.0.0
         version: 18.3.1
       redis:
         specifier: ^4.0.0
         version: 4.7.1
-      veto-receipt-protocol:
-        specifier: workspace:*
-        version: link:../receipt-protocol
-      yaml:
-        specifier: 2.8.3
-        version: 2.8.3
     devDependencies:
       '@opentelemetry/api':
         specifier: ^1.9.1
@@ -205,21 +193,33 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.0.16
         version: 4.1.4(vitest@4.1.4)
+      ajv:
+        specifier: ^8.18.0
+        version: 8.18.0
       ink:
         specifier: ^5.0.0
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
       openai:
         specifier: ^4.77.0
         version: 4.104.0(ws@8.20.0)(zod@3.25.76)
+      picocolors:
+        specifier: ^1.1.1
+        version: 1.1.1
       tsx:
         specifier: ^4.7.0
         version: 4.21.0
       typescript:
         specifier: ^5.3.0
         version: 5.9.3
+      veto-receipt-protocol:
+        specifier: workspace:*
+        version: link:../receipt-protocol
       vitest:
         specifier: ^4.0.16
         version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/coverage-v8@4.1.4)(vite@7.3.2(@types/node@20.19.39)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+      yaml:
+        specifier: 2.8.3
+        version: 2.8.3
       zod:
         specifier: ^3.22.0
         version: 3.25.76
@@ -1287,6 +1287,7 @@ packages:
   '@lancedb/lancedb@0.27.2':
     resolution: {integrity: sha512-JQpZHV5KzUzDI3flYCjtZcfHlEbL8lM54E0NT+jrRYe29aKYegfavvPsAsuZp0VdcMwFMZcpMkaBhjQMo/fwvg==}
     engines: {node: '>= 18'}
+    cpu: [x64, arm64]
     os: [darwin, linux, win32]
     peerDependencies:
       apache-arrow: '>=15.0.0 <=18.1.0'
