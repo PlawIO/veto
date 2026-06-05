@@ -88,6 +88,29 @@ const sourceBoundaryRules = [
       /^import veto\.proxy/m,
     ],
   },
+  {
+    id: "ts-sdk-no-legacy-receipt-shape",
+    description: "TS SDK public surfaces must use veto.receipt/1 helpers, not legacy spend-capsule receipt chains.",
+    rootDir: "packages/sdk/src",
+    extensions: [".ts"],
+    forbidden: [
+      /(?:^|\s)from\s+['"]veto-spend-capsule-protocol['"]/m,
+      /(?:^|\s)from\s+['"]@veto\/spend-capsule-protocol['"]/m,
+      /\bverifyReceiptChain\b/,
+      /\bprev_receipt_hash\b/,
+    ],
+  },
+  {
+    id: "python-sdk-no-legacy-receipt-shape",
+    description: "Python SDK public surfaces must not expose legacy spend-capsule receipt chain fields.",
+    rootDir: "packages/sdk-python/veto",
+    extensions: [".py"],
+    ignoreDirs: ["packages/sdk-python/veto/capsule"],
+    forbidden: [
+      /\bverifyReceiptChain\b/,
+      /\bprev_receipt_hash\b/,
+    ],
+  },
 ];
 
 function readJson(path) {
@@ -130,18 +153,25 @@ function dependencyNames(zone) {
   throw new Error(`Unknown zone type: ${zone.type}`);
 }
 
-function listFiles(dir, extensions) {
+function ignoredByRule(path, rule) {
+  const relative = path.slice(root.length + 1);
+  return (rule.ignoreDirs ?? []).some((ignored) => relative === ignored || relative.startsWith(`${ignored}/`));
+}
+
+function listFiles(rule) {
   const out = [];
   function walk(current) {
+    if (ignoredByRule(current, rule)) return;
     for (const entry of readdirSync(current)) {
       if (entry === "__pycache__" || entry === "node_modules" || entry === "dist") continue;
       const path = join(current, entry);
+      if (ignoredByRule(path, rule)) continue;
       const stat = statSync(path);
       if (stat.isDirectory()) walk(path);
-      else if (extensions.some((extension) => path.endsWith(extension))) out.push(path);
+      else if (rule.extensions.some((extension) => path.endsWith(extension))) out.push(path);
     }
   }
-  walk(join(root, dir));
+  walk(join(root, rule.rootDir));
   return out;
 }
 
@@ -164,7 +194,7 @@ for (const zone of zones) {
 }
 
 for (const rule of sourceBoundaryRules) {
-  for (const file of listFiles(rule.rootDir, rule.extensions)) {
+  for (const file of listFiles(rule)) {
     const text = readFileSync(file, "utf8");
     for (const pattern of rule.forbidden) {
       if (pattern.test(text)) {
