@@ -32,7 +32,7 @@ import { agentConfig, agentInit, agentPolicyAdd, agentPolicyList, agentScan } fr
 import { formatInstallResult, runInstallCommand } from './install.js';
 import { runMcpConnectCommand, runMcpDoctorCommand, runMcpInitCommand, runMcpServeCommand } from './mcp.js';
 import { runMcpImportCommand } from './mcp-import.js';
-import { runReceiptsExportCommand, runReceiptsVerifyCommand } from './receipts.js';
+import { runReceiptsExportCommand, runReceiptsShowCommand, runReceiptsVerifyCommand } from './receipts.js';
 import { startProxyServer } from '../proxy/server.js';
 
 const VERSION = getCliVersion();
@@ -59,20 +59,22 @@ Canonical Commands:
   studio                               Start Veto Studio
   policy generate --tool <name> --prompt <text> [--mode-hint auto|deterministic|llm] [--target local|cloud] [--save <path>] [--no-template-fallback] [--json]
   policy apply --file <path> [--target local|cloud] [--project <id>] [--json]
-  guard check --tool <name> --args <json> [--context <json>] [--mode local|cloud|kernel|custom] [--json]
-  cloud login
-  cloud whoami
-  cloud org use <id>
-  cloud project use <id>
-  cloud logout
+  validate --tool <name> --args <json> [--context <json>] [--mode local|cloud|kernel|custom] [--json]
+  login
+  whoami
+  org use <id>
+  project use <id>
+  logout
   mcp connect [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]
-  mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
+  mcp start [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]
   mcp doctor [--config <path>] [--json]
   mcp init [--output <path>] [--json]
+  mcp restore [--input <path>] [--config <path>] [--json]
   import mcp [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]
   mcp import [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]
   receipts export [--input <path>] [--output <path>] [--format ndjson] [--base-url <url>] [--api-key <key>] [--project <id>] [--start-date <date>] [--end-date <date>]
   receipts verify [file]
+  receipts show <receipt-id> [--input <path>] [--json]
   install <claude-code|cursor|codex> [--directory <path>] [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json] [--force]
   doctor
 
@@ -117,16 +119,17 @@ Examples:
   veto repl --legacy
   veto policy generate --tool approve_invoice --prompt "do not approve invoices above 50" --save ./veto/rules/invoices.yaml
   veto policy apply --file ./veto/rules/invoices.yaml --target cloud --json
-  veto guard check --tool approve_invoice --args '{"amount":120}' --mode local --json
-  veto cloud login
-  veto cloud whoami --json
+  veto validate --tool approve_invoice --args '{"amount":120}' --mode local --json
+  veto login
+  veto whoami --json
   veto mcp init
   veto mcp connect --cloud
   veto mcp doctor --json
-  veto mcp serve --config ./veto/mcp.config.yaml
+  veto mcp start --config ./veto/mcp.config.yaml
   veto import mcp --dry-run
   veto receipts export --output receipts.ndjson
   veto receipts verify receipts.ndjson
+  veto receipts show rcp_000000000000000000000001 --input receipts.ndjson --json
   veto install claude-code
   veto install cursor
   veto install codex
@@ -142,7 +145,23 @@ Examples:
 `);
 }
 
-function printVersion(): void {
+function runtimeName(): 'node' | 'bun' {
+  return process.versions?.bun ? 'bun' : 'node';
+}
+
+function printVersion(asJson = false): void {
+  if (asJson) {
+    console.log(JSON.stringify({
+      ok: true,
+      data: {
+        name: 'veto',
+        version: VERSION,
+        runtime: runtimeName(),
+      },
+    }));
+    return;
+  }
+
   console.log(`veto v${VERSION}`);
 }
 
@@ -192,6 +211,8 @@ export function parseArgs(args: string[]): ParsedArgs {
     'max-buffer',
     'start-date',
     'end-date',
+    'cursor',
+    'receipt-id',
   ]);
 
   for (let i = 0; i < args.length; i++) {
@@ -620,7 +641,7 @@ async function runMcpCommand(
   const subCommand = positionals[0] ?? 'help';
   const asJson = flags.json ?? false;
 
-  if (subCommand === 'serve') {
+  if (subCommand === 'serve' || subCommand === 'start') {
     const timeoutMs = values['timeout-ms']
       ? Number.parseInt(values['timeout-ms'], 10)
       : undefined;
@@ -696,13 +717,27 @@ async function runMcpCommand(
     return result.ok ? 0 : 1;
   }
 
+  if (subCommand === 'restore') {
+    const result = runMcpImportCommand({
+      directory: values.directory,
+      inputPath: values.input,
+      configPath: values.config,
+      serverName: values['server-name'],
+      restore: true,
+    });
+    printHeadlessResult(result, asJson);
+    return result.ok ? 0 : 1;
+  }
+
   if (subCommand === 'help') {
     console.log('Usage:');
     console.log('  veto mcp connect [--output <path>] [--config <path>] [--server-name <name>] [--cloud] [--json]');
-    console.log('  veto mcp serve [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
+    console.log('  veto mcp start [--config <path>] [--listen <host:port>] [--upstream <url>] [--transport <mcp-sse|mcp-stdio>] [--api-key <key>] [--policy-server <url>] [--timeout-ms <n>] [--json]');
+    console.log('  veto mcp serve [compatibility alias for start]');
     console.log('  veto mcp doctor [--config <path>] [--json]');
     console.log('  veto mcp init [--output <path>] [--json]');
     console.log('  veto mcp import [--input <path>] [--config <path>] [--dry-run] [--json] [--restore]');
+    console.log('  veto mcp restore [--input <path>] [--config <path>] [--json]');
     return 0;
   }
 
@@ -805,11 +840,27 @@ async function runReceiptsCommand(
     return result.ok ? 0 : 1;
   }
 
+  if (subCommand === 'show') {
+    const result = runReceiptsShowCommand({
+      inputPath: values.input,
+      receiptId: values['receipt-id'] ?? positionals[1],
+    });
+    if (asJson) {
+      printHeadlessResult(result, true);
+    } else if (result.ok) {
+      console.log(JSON.stringify(result.data?.receipt, null, 2));
+    } else {
+      printHeadlessResult(result, false);
+    }
+    return result.ok ? 0 : 1;
+  }
+
   if (subCommand === 'help') {
     console.log('Usage:');
     console.log('  veto receipts export [--input <path>] [--output <path>] [--format ndjson]');
-    console.log('  veto receipts export --base-url <url> [--api-key <key>] [--project <id>] [--start-date <date>] [--end-date <date>] [--cursor <n>] [--limit <n>]');
+    console.log('  veto receipts export --base-url <url> [--api-key <key>] [--project <id>] [--start-date <date>] [--end-date <date>] [--cursor <token>] [--limit <n>]');
     console.log('  veto receipts verify [file]');
+    console.log('  veto receipts show <receipt-id> [--input <path>] [--json]');
     return 0;
   }
 
@@ -1068,7 +1119,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
   }
 
   if (flags.version || command === 'version') {
-    printVersion();
+    printVersion(flags.json ?? false);
     return 0;
   }
 
@@ -1092,8 +1143,17 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<nu
       return await runStudio(flags, values);
     case 'policy':
       return await runPolicyCommand(positionals, flags, values);
+    case 'validate':
+      return await runGuardCommand(['check', ...positionals], flags, values);
     case 'guard':
       return await runGuardCommand(positionals, flags, values);
+    case 'login':
+    case 'whoami':
+    case 'logout':
+      return await runCloudCommand([command, ...positionals], flags, values);
+    case 'org':
+    case 'project':
+      return await runCloudCommand([command, ...positionals], flags, values);
     case 'cloud':
       return await runCloudCommand(positionals, flags, values);
     case 'doctor':
