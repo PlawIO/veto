@@ -44,6 +44,7 @@ Current evidence:
 - Dependency budget script: `scripts/check-dependency-zones.mjs`
 - Local command: `pnpm check:dependency-zones`
 - CI wiring: `.github/workflows/ci.yml`
+- Legacy receipt-shape quarantine: SDK public surfaces are forbidden from importing `veto-spend-capsule-protocol` receipt-chain helpers or exposing `prev_receipt_hash` / `verifyReceiptChain`. The spend-capsule package remains bridge/prototype code; finance-grade SDK receipts must use `veto.receipt/1` through `veto-receipt-protocol`.
 
 ## Protocol Spine
 
