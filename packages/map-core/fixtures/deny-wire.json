@@ -1,0 +1,68 @@
+{
+  "name": "deny_wire",
+  "description": "Wire transfer without authority is denied.",
+  "artifacts": [
+    {
+      "version": "map.action_proposal/0.1",
+      "proposal_id": "prop_wire_5000",
+      "action": "wire_transfer",
+      "arguments": {
+        "amount_usd": 5000,
+        "recipient": "vendor_987"
+      },
+      "actor": {
+        "id": "agent_ap",
+        "kind": "agent"
+      },
+      "subject": {
+        "id": "org_acme",
+        "kind": "organization"
+      },
+      "audience": ["acct_payable"],
+      "created_at": "2026-06-04T13:00:00Z",
+      "expires_at": "2026-06-04T13:05:00Z",
+      "nonce": "nonce_deny_001"
+    },
+    {
+      "version": "map.policy_pack/0.1",
+      "bundle_id": "bundle_ap_v1",
+      "issuer": {
+        "id": "org_acme",
+        "kind": "organization"
+      },
+      "audience": ["acct_payable"],
+      "valid_from": "2026-06-01T00:00:00Z",
+      "valid_until": "2026-07-01T00:00:00Z",
+      "authorities": [],
+      "rules": [
+        {
+          "rule_id": "wire_requires_explicit_authority",
+          "action": "wire_transfer",
+          "effect": "deny",
+          "reason_code": "missing_wire_authority",
+          "conditions": {
+            "authority_required": true
+          },
+          "limits": null
+        }
+      ],
+      "default_decision": "deny",
+      "receipt_required": true
+    },
+    {
+      "version": "map.decision_outcome/0.1",
+      "outcome_id": "outcome_wire_5000",
+      "proposal_id": "prop_wire_5000",
+      "action_commitment": "sha256:7996b0582de5edfb707cb8ce3efd180725412cf5b23f69b0852e57d81594a883",
+      "policy_bundle_id": "bundle_ap_v1",
+      "decision": "deny",
+      "reason_code": "missing_wire_authority",
+      "reason_detail": "No authority artifact permits this agent to initiate wire transfers.",
+      "approval_id": null,
+      "receipt_required": true,
+      "evaluated_at": "2026-06-04T13:00:01Z"
+    }
+  ],
+  "expected_decision": "deny",
+  "expected_reason_code": "missing_wire_authority"
+}

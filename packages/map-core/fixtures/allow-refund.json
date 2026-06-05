@@ -1,0 +1,105 @@
+{
+  "name": "allow_refund",
+  "description": "Refund under the compiled policy limit is allowed.",
+  "artifacts": [
+    {
+      "version": "map.action_proposal/0.1",
+      "proposal_id": "prop_refund_100",
+      "action": "issue_refund",
+      "arguments": {
+        "amount_usd": 100,
+        "customer_id": "cus_123"
+      },
+      "actor": {
+        "id": "agent_refunds",
+        "kind": "agent"
+      },
+      "subject": {
+        "id": "org_acme",
+        "kind": "organization"
+      },
+      "audience": ["acct_payable"],
+      "created_at": "2026-06-04T12:00:00Z",
+      "expires_at": "2026-06-04T12:05:00Z",
+      "nonce": "nonce_allow_001"
+    },
+    {
+      "version": "map.policy_pack/0.1",
+      "bundle_id": "bundle_refunds_v1",
+      "issuer": {
+        "id": "org_acme",
+        "kind": "organization"
+      },
+      "audience": ["acct_payable"],
+      "valid_from": "2026-06-01T00:00:00Z",
+      "valid_until": "2026-07-01T00:00:00Z",
+      "authorities": [
+        {
+          "version": "map.authority/0.1",
+          "authority_id": "auth_refunds_agent",
+          "issuer": {
+            "id": "org_acme",
+            "kind": "organization"
+          },
+          "subject": {
+            "id": "agent_refunds",
+            "kind": "agent"
+          },
+          "audience": ["acct_payable"],
+          "actions": ["issue_refund"],
+          "scope": {
+            "project_id": "proj_finance"
+          },
+          "limits": {
+            "per_action_usd": 200
+          },
+          "conditions": null,
+          "valid_from": "2026-06-01T00:00:00Z",
+          "valid_until": "2026-07-01T00:00:00Z",
+          "evidence": {
+            "source": "finance_policy_pack"
+          },
+          "receipt_required": true
+        }
+      ],
+      "rules": [
+        {
+          "rule_id": "refund_under_limit",
+          "action": "issue_refund",
+          "effect": "allow",
+          "reason_code": "under_refund_limit",
+          "conditions": {
+            "amount_usd_lte": 200
+          },
+          "limits": {
+            "per_action_usd": 200
+          }
+        }
+      ],
+      "default_decision": "deny",
+      "receipt_required": true
+    },
+    {
+      "version": "map.decision_outcome/0.1",
+      "outcome_id": "outcome_refund_100",
+      "proposal_id": "prop_refund_100",
+      "action_commitment": "sha256:b1246d497cfee4ffb3193678532e6097e4d62e7fd6d71266867368b29f28d3db",
+      "policy_bundle_id": "bundle_refunds_v1",
+      "decision": "allow",
+      "reason_code": "under_refund_limit",
+      "reason_detail": "Refund is within the configured per-action limit.",
+      "approval_id": null,
+      "receipt_required": true,
+      "evaluated_at": "2026-06-04T12:00:01Z"
+    },
+    {
+      "version": "map.receipt/0.1",
+      "receipt_id": "rcp_allow_refund",
+      "receipt_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "outcome_id": "outcome_refund_100",
+      "decision_id": "decision_refund_100"
+    }
+  ],
+  "expected_decision": "allow",
+  "expected_reason_code": "under_refund_limit"
+}

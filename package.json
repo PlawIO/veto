@@ -17,6 +17,7 @@
     "build:cli": "pnpm --filter veto-cli build",
     "build:sdk": "pnpm --filter veto-sdk build",
     "build:web": "pnpm --filter @veto/web build",
+    "check:dependency-zones": "node scripts/check-dependency-zones.mjs",
     "changeset": "changeset",
     "version": "node scripts/version.mjs",
     "release": "pnpm build && changeset publish",
