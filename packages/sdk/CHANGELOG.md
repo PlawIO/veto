@@ -1,5 +1,15 @@
 # veto-sdk
 
+## 2.14.0
+
+### Minor Changes
+
+- [#231](https://github.com/PlawIO/veto/pull/231) [`3f6d2c9`](https://github.com/PlawIO/veto/commit/3f6d2c9382ffb9a5443f8866482c977ebf9262e5) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add conditional output rule lifts with custom context and pre-fetched feed evidence.
+
+### Patch Changes
+
+- [#230](https://github.com/PlawIO/veto/pull/230) [`4c73852`](https://github.com/PlawIO/veto/commit/4c73852d6fc80861d3e96792379b178a257b9cb8) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Redact environment variable secrets with token vault placeholders before custom and kernel LLM validation requests, then restore placeholders in parsed responses.
+
 ## 2.13.0
 
 ### Minor Changes
