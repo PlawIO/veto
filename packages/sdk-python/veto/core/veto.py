@@ -25,7 +25,6 @@ import inspect
 import sys
 from datetime import datetime
 from pathlib import Path
-import yaml
 
 from veto.types.tool import ToolDefinition, ToolCall
 from veto.types.config import (
@@ -96,14 +95,25 @@ from veto.kernel import KernelClient
 from veto.kernel.types import KernelResponse
 from veto.providers.adapters import from_mcp
 from veto.providers.types import MCPTool, MCPToolCallArgs
-from veto.rules import (
+from veto.rules.condition_evaluator import (
     evaluate_condition_collections,
     evaluate_sequence_constraints,
     rule_applies_to_agent,
-    validate_policy_ir,
-    PolicySchemaError,
 )
 from veto.rules.feed_provider import FeedProvider
+
+
+def _load_pyyaml() -> Any:
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "PyYAML is required for YAML policy files and bundled policy packs. "
+            "Install it with `pip install 'veto[rules]'`, or use "
+            "`Veto.local(rules=[...])` for dependency-free local enforcement."
+        ) from exc
+
+    return yaml
 
 
 # Veto operating mode
@@ -528,6 +538,7 @@ class Veto:
         config_path = resolved_config_dir / "veto.config.yaml"
         if config_path.exists():
             try:
+                yaml = _load_pyyaml()
                 with open(config_path, "r", encoding="utf-8") as f:
                     config_data = yaml.safe_load(f)
                 if isinstance(config_data, dict):
@@ -703,6 +714,88 @@ class Veto:
             None,
         )
 
+    @classmethod
+    def local(
+        cls,
+        *,
+        bundle: Optional[Mapping[str, Any]] = None,
+        rules: Optional[list[dict[str, Any]]] = None,
+        output_rules: Optional[list[dict[str, Any]]] = None,
+        mode: Optional[VetoMode] = None,
+        log_level: Optional[LogLevel] = None,
+        stream_mode: Optional[StreamLogMode] = None,
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        role: Optional[str] = None,
+        validators: Optional[list[Union[Validator, NamedValidator]]] = None,
+        on_approval_required: Optional[Callable[..., Any]] = None,
+        approval_poll_interval: Optional[float] = None,
+        approval_timeout: Optional[float] = None,
+        feed_provider: Optional[FeedProvider] = None,
+        economic_policy: Optional[dict[str, Any]] = None,
+        receipts: Optional[str | Path] = None,
+        receipt_store: Optional[str | Path] = None,
+    ) -> "Veto":
+        """Create a dependency-free local enforcement instance.
+
+        ``bundle`` is an inline, already-compiled policy bundle represented as
+        a Python mapping with optional ``rules``, ``output_rules``, and
+        ``economic`` keys. YAML policy files, cloud validation, and admin APIs
+        stay out of this constructor so local enforcement can run from the base
+        wheel without third-party runtime dependencies.
+        """
+        if bundle is not None:
+            if rules is not None or output_rules is not None or economic_policy is not None:
+                raise ValueError(
+                    "Veto.local() accepts either bundle=... or explicit "
+                    "rules/output_rules/economic_policy, not both"
+                )
+            rules, output_rules, economic_policy = cls._extract_local_bundle(bundle)
+
+        resolved_receipt_store = receipt_store if receipt_store is not None else receipts
+
+        return cls.from_rules(
+            rules=rules or [],
+            output_rules=output_rules or [],
+            mode=mode,
+            log_level=log_level,
+            stream_mode=stream_mode,
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            role=role,
+            validators=validators,
+            on_approval_required=on_approval_required,
+            approval_poll_interval=approval_poll_interval,
+            approval_timeout=approval_timeout,
+            feed_provider=feed_provider,
+            economic_policy=economic_policy,
+            validation_mode="local",
+            receipt_store=str(resolved_receipt_store) if resolved_receipt_store else None,
+        )
+
+    @staticmethod
+    def _extract_local_bundle(
+        bundle: Mapping[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], Optional[dict[str, Any]]]:
+        raw_rules = bundle.get("rules", [])
+        raw_output_rules = bundle.get("output_rules", [])
+        raw_economic = bundle.get("economic")
+
+        if not isinstance(raw_rules, list):
+            raise ValueError("bundle.rules must be a list")
+        if not isinstance(raw_output_rules, list):
+            raise ValueError("bundle.output_rules must be a list when provided")
+        if raw_economic is not None and not isinstance(raw_economic, dict):
+            raise ValueError("bundle.economic must be an object when provided")
+
+        return (
+            [dict(rule) for rule in raw_rules if isinstance(rule, dict)],
+            [dict(rule) for rule in raw_output_rules if isinstance(rule, dict)],
+            dict(raw_economic) if isinstance(raw_economic, dict) else None,
+        )
+
     @staticmethod
     def _find_yaml_files(rules_dir: Path, recursive: bool) -> list[Path]:
         if not rules_dir.exists() or not rules_dir.is_dir():
@@ -830,6 +923,7 @@ class Veto:
 
         normalized_pack_name = cls._normalize_policy_pack_name(raw_extends)
         pack_path = cls._resolve_policy_pack_path(normalized_pack_name)
+        yaml = _load_pyyaml()
         with open(pack_path, "r", encoding="utf-8") as f:
             parsed_pack = yaml.safe_load(f)
 
@@ -851,6 +945,7 @@ class Veto:
         logger: Logger,
     ) -> Optional[dict[str, Any]]:
         try:
+            yaml = _load_pyyaml()
             with open(file_path, "r", encoding="utf-8") as f:
                 parsed = yaml.safe_load(f)
         except Exception as exc:
@@ -891,7 +986,19 @@ class Veto:
             return None
 
         try:
+            from veto.rules.schema_validator import PolicySchemaError, validate_policy_ir
+
             validate_policy_ir(parsed_for_validation)
+        except ModuleNotFoundError as exc:
+            logger.error(
+                "Skipping policy file because JSON schema validation dependencies are missing",
+                {
+                    "path": str(file_path),
+                    "hint": "Install with `pip install 'veto[rules]'`.",
+                },
+                exc,
+            )
+            return None
         except PolicySchemaError as exc:
             logger.error(
                 "Skipping invalid policy file during rule load",

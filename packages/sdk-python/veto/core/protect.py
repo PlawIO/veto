@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 from typing import Any, Literal, Optional, Protocol, TypeVar, Union, cast, overload, runtime_checkable
 
-import yaml
-
 from veto.core.veto import Veto, VetoOptions
 from veto.types.config import LogLevel, StreamLogMode
 
@@ -150,6 +148,19 @@ _default_instance: Optional[tuple[Veto, ProtectInitSource, Path]] = None
 _instance_cache: dict[str, Veto] = {}
 
 
+def _load_pyyaml() -> Any:
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "PyYAML is required for protect() policy packs and YAML projects. "
+            "Install it with `pip install 'veto[rules]'`, or use "
+            "`Veto.local(rules=[...])` for dependency-free local enforcement."
+        ) from exc
+
+    return yaml
+
+
 def _to_serializable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -214,6 +225,7 @@ def _load_policy_pack(pack_name: str) -> tuple[list[dict[str, Any]], list[dict[s
     normalized_pack = Veto._normalize_policy_pack_name(pack_name)
     pack_path = Veto._resolve_policy_pack_path(normalized_pack)
 
+    yaml = _load_pyyaml()
     with open(pack_path, "r", encoding="utf-8") as f:
         parsed = yaml.safe_load(f)
 

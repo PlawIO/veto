@@ -11,9 +11,16 @@ Python policy runtime for AI agent tool calls. Veto wraps your tools, evaluates 
 pip install veto
 ```
 
-With provider extras:
+The base install has no third-party runtime dependencies. It supports inline
+local enforcement with `Veto.local(...)` and receipt verification helpers.
+
+With policy-file, cloud, proxy, admin, or provider extras:
 
 ```bash
+pip install veto[rules]
+pip install veto[cloud]
+pip install veto[proxy]
+pip install veto[admin]
 pip install veto[openai]
 pip install veto[anthropic]
 pip install veto[gemini]
@@ -29,7 +36,12 @@ safe = await protect(tools)
 agent = create_agent(tools=safe)
 ```
 
-`protect(tools)` is the public entrypoint. It loads `./veto/veto.config.yaml` and `./veto/rules/*.yaml` when present. Without local policy or explicit options, it uses the built-in `@veto/safe-defaults` pack in observe mode: suspicious destructive shell, file, database, or money-movement network patterns are warned/logged, not blocked.
+`protect(tools)` is the high-level entrypoint. Install `veto[rules]` when using
+YAML policy files or built-in policy packs. It loads `./veto/veto.config.yaml`
+and `./veto/rules/*.yaml` when present. Without local policy or explicit
+options, it uses the built-in `@veto/safe-defaults` pack in observe mode:
+suspicious destructive shell, file, database, or money-movement network
+patterns are warned/logged, not blocked.
 
 ## TypeScript parity
 
@@ -41,6 +53,35 @@ const agent = createAgent({ tools: safeTools });
 ```
 
 ## Local policy
+
+For a dependency-free inline policy:
+
+```python
+from veto import Veto
+
+veto = Veto.local(
+    bundle={
+        "rules": [{
+            "id": "limit-transfers",
+            "name": "Limit large transfers",
+            "enabled": True,
+            "severity": "high",
+            "action": "block",
+            "tools": ["transfer_funds"],
+            "conditions": [{
+                "field": "arguments.amount",
+                "operator": "greater_than",
+                "value": 1000,
+            }],
+        }]
+    },
+    receipts=".veto/receipts.ndjson",
+)
+
+decision = await veto.validate("transfer_funds", {"amount": 5000})
+```
+
+For YAML policy files, install `veto[rules]`:
 
 ```bash
 veto init

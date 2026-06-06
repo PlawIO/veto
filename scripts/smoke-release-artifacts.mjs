@@ -91,12 +91,10 @@ function smokeNpm(tmpRoot) {
       "-e",
       [
         "const sdk = await import('veto-sdk');",
-        "const cli = await import('veto-sdk/cli-runner');",
         "const receipts = await import('veto-receipt-protocol');",
         "const capsules = await import('veto-spend-capsule-protocol');",
         "if (typeof sdk.Veto !== 'function') throw new Error('veto-sdk Veto export missing');",
         "if (typeof sdk.protect !== 'function') throw new Error('veto-sdk protect export missing');",
-        "if (typeof cli.runCli !== 'function') throw new Error('veto-sdk/cli-runner runCli export missing');",
         "if (typeof receipts.verifyDecisionReceiptChain !== 'function') throw new Error('receipt verifier export missing');",
         "if (typeof capsules.verifyCapsule !== 'function') throw new Error('capsule verifier export missing');",
       ].join("\n"),
@@ -104,6 +102,7 @@ function smokeNpm(tmpRoot) {
     { cwd: installDir },
   );
 
+  run("node", [join(installDir, "node_modules/veto-cli/dist/bin.js"), "--help"]);
   run("node", [join(installDir, "node_modules/veto-cli/dist/bin.js"), "version"]);
 }
 
