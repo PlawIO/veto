@@ -48,6 +48,12 @@ def venv_python(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+def venv_script(venv_dir: Path, name: str) -> Path:
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / f"{name}.exe"
+    return venv_dir / "bin" / name
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="veto-python-base-") as raw_tmp:
         tmp = Path(raw_tmp)
@@ -76,6 +82,35 @@ def main() -> None:
         python = venv_python(env_dir)
 
         run([str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])])
+        veto_cmd = venv_script(env_dir, "veto")
+        run([str(veto_cmd), "--help"])
+        version = subprocess.check_output(
+            [str(veto_cmd), "version", "--json"],
+            text=True,
+        )
+        assert json.loads(version)["data"]["runtime"] == "python"
+
+        init_without_rules = subprocess.run(
+            [
+                str(veto_cmd),
+                "init",
+                "--directory",
+                str(tmp / "workspace"),
+                "--agent",
+                "none",
+                "--json",
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert init_without_rules.returncode == 1
+        assert (
+            json.loads(init_without_rules.stdout)["error"]["code"]
+            == "missing_optional_dependency"
+        )
+        assert "Traceback" not in init_without_rules.stderr
 
         probe = textwrap.dedent(
             """
