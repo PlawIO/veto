@@ -9,6 +9,7 @@
 
 import type { Logger } from '../utils/logger.js';
 import type { Rule } from '../rules/types.js';
+import { createEnvTokenVault, maskVaultedResponse } from '../custom/token-vault.js';
 import type {
   KernelConfig,
   KernelResponse,
@@ -108,7 +109,8 @@ export class KernelClient {
     const openai = await this.getOpenAI();
 
     const systemPrompt = buildSystemPrompt();
-    const userPrompt = buildPrompt(toolCall, rules);
+    const tokenVault = createEnvTokenVault({ envVarNames: this.config.tokenVaultEnvVars });
+    const userPrompt = tokenVault.redactText(buildPrompt(toolCall, rules));
 
     this.logger.debug('Evaluating tool call with kernel', {
       tool: toolCall.tool,
@@ -135,7 +137,7 @@ export class KernelClient {
         throw new KernelError('No content in kernel response');
       }
 
-      return this.parseResponse(content);
+      return maskVaultedResponse(this.parseResponse(content), tokenVault);
     } catch (error) {
       if (error instanceof KernelError || error instanceof KernelParseError) {
         throw error;

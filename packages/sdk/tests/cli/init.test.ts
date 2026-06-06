@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { init, isInitialized, getVetoDir } from '../../src/cli/init.js';
 import type { InitOptions } from '../../src/cli/init.js';
+import type { VetoConfigFile } from '../../src/cli/config.js';
 import { createDefaultConfigTemplate } from '../../src/cli/templates.js';
 
 const TEST_DIR = '/tmp/veto-test-' + Date.now();
@@ -35,6 +36,21 @@ describe('CLI init', () => {
           }
         | undefined
       >();
+      expectTypeOf<NonNullable<VetoConfigFile['kernel']>['tokenVaultEnvVars']>()
+        .toEqualTypeOf<string[] | undefined>();
+      expectTypeOf<NonNullable<VetoConfigFile['custom']>['tokenVaultEnvVars']>()
+        .toEqualTypeOf<string[] | undefined>();
+    });
+
+    it('should document token vault env vars for LLM validation modes', () => {
+      const content = createDefaultConfigTemplate();
+
+      expect(content).toContain(
+        '#   # tokenVaultEnvVars: ["SERVICE_TOKEN"]  # Env var values to redact from LLM prompts'
+      );
+      expect(content).toContain(
+        '#   # tokenVaultEnvVars: ["PAYMENTS_TOKEN"]  # Env var values to redact from LLM prompts'
+      );
     });
 
     it('should create veto directory structure', async () => {
