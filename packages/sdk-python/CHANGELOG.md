@@ -1,5 +1,12 @@
 # veto (Python SDK)
 
+## 0.18.0
+
+### Minor Changes
+
+- Add release provenance metadata and OIDC trusted publishing hardening for npm and PyPI release paths.
+- Split Python SDK runtime dependencies into optional extras and add dependency-free `Veto.local(...)` enforcement with receipt verification smoke coverage.
+
 ## 0.17.0
 
 ### Minor Changes

@@ -1,5 +1,15 @@
 # veto-cli
 
+## 1.17.2
+
+### Patch Changes
+
+- [#243](https://github.com/PlawIO/veto/pull/243) [`7fc7d94`](https://github.com/PlawIO/veto/commit/7fc7d94a7d592ffb728c8ea265fb6a723bc88393) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add release provenance metadata and OIDC trusted publishing hardening for npm and PyPI release paths.
+
+- Updated dependencies [[`6a89858`](https://github.com/PlawIO/veto/commit/6a89858ce5ec41d1e586cc487465e7f4826ff683), [`a9cd6c6`](https://github.com/PlawIO/veto/commit/a9cd6c6b8e86b9835791476b240cb1f4cda998fc), [`b156da6`](https://github.com/PlawIO/veto/commit/b156da62eb8d7a2acb895d69e6dd5e891c9c2d67), [`7fc7d94`](https://github.com/PlawIO/veto/commit/7fc7d94a7d592ffb728c8ea265fb6a723bc88393)]:
+  - veto-sdk@2.13.0
+  - veto-receipt-protocol@0.2.2
+
 ## 1.17.1
 
 ### Patch Changes
