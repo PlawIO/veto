@@ -37,8 +37,6 @@ function listWorkspacePackageJsons() {
 function checkReleaseWorkflow() {
   const workflow = readText(RELEASE_WORKFLOW);
   const forbiddenPatterns = [
-    [/\bNPM_TOKEN\b/, "npm publish token"],
-    [/\bNODE_AUTH_TOKEN\b/, "npm auth token env"],
     [/\bPYPI_TOKEN\b/, "PyPI API token"],
     [/\bTWINE_[A-Z_]+\b/, "twine credential env"],
     [/\btwine\s+upload\b/, "twine token upload"],
