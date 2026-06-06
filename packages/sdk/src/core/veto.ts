@@ -194,6 +194,7 @@ interface VetoConfigFile {
     temperature?: number;
     maxTokens?: number;
     timeout?: number;
+    tokenVaultEnvVars?: string[];
   };
   custom?: {
     provider?: 'gemini' | 'openrouter' | 'openai' | 'anthropic';
@@ -203,6 +204,7 @@ interface VetoConfigFile {
     maxTokens?: number;
     timeout?: number;
     baseUrl?: string;
+    tokenVaultEnvVars?: string[];
   };
   pii?: VetoPiiConfig;
   cloud?: {
@@ -658,6 +660,7 @@ export class Veto {
         temperature: config.kernel.temperature,
         maxTokens: config.kernel.maxTokens,
         timeout: config.kernel.timeout,
+        tokenVaultEnvVars: config.kernel.tokenVaultEnvVars,
       };
     } else {
       this.kernelConfig = null;
@@ -686,6 +689,7 @@ export class Veto {
           maxTokens: config.custom.maxTokens,
           timeout: config.custom.timeout,
           baseUrl: config.custom.baseUrl,
+          tokenVaultEnvVars: config.custom.tokenVaultEnvVars,
         };
       }
     } else {

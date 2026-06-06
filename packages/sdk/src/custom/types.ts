@@ -27,6 +27,8 @@ export interface CustomConfig {
   timeout?: number;
   /** Base URL override (for OpenRouter, custom endpoints) */
   baseUrl?: string;
+  /** Additional env vars whose values are replaced with placeholders before custom LLM calls */
+  tokenVaultEnvVars?: string[];
 }
 
 /**
@@ -40,6 +42,7 @@ export interface ResolvedCustomConfig {
   maxTokens: number;
   timeout: number;
   baseUrl?: string;
+  tokenVaultEnvVars?: string[];
 }
 
 /**
@@ -216,5 +219,6 @@ export function resolveCustomConfig(config: CustomConfig): ResolvedCustomConfig 
     maxTokens: config.maxTokens ?? CUSTOM_DEFAULTS.maxTokens,
     timeout: config.timeout ?? CUSTOM_DEFAULTS.timeout,
     baseUrl: config.baseUrl ?? PROVIDER_BASE_URLS[provider],
+    tokenVaultEnvVars: Array.isArray(config.tokenVaultEnvVars) ? config.tokenVaultEnvVars : undefined,
   };
 }

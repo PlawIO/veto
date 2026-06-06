@@ -14,6 +14,7 @@ import type {
 } from './types.js';
 import { CustomError, CustomParseError, resolveCustomConfig } from './types.js';
 import { buildUserPrompt, buildProviderMessages } from './prompt.js';
+import { createEnvTokenVault, maskVaultedResponse } from './token-vault.js';
 import { callOpenAI } from './providers/openai.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callGemini } from './providers/gemini.js';
@@ -55,7 +56,8 @@ export class CustomClient {
    * @returns Custom response with decision and weights
    */
   async evaluate(toolCall: CustomToolCall, rules: Rule[]): Promise<CustomResponse> {
-    const userPrompt = buildUserPrompt(toolCall, rules);
+    const tokenVault = createEnvTokenVault({ envVarNames: this.config.tokenVaultEnvVars });
+    const userPrompt = tokenVault.redactText(buildUserPrompt(toolCall, rules));
     const messages = buildProviderMessages(this.config.provider, userPrompt);
 
     this.logger.debug('Evaluating tool call with custom provider', {
@@ -67,7 +69,7 @@ export class CustomClient {
     try {
       // Route to appropriate provider
       const content = await this.callProvider(messages);
-      return this.parseResponse(content);
+      return maskVaultedResponse(this.parseResponse(content), tokenVault);
     } catch (error) {
       if (error instanceof CustomError || error instanceof CustomParseError) {
         throw error;

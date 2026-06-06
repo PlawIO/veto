@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KernelClient, createKernelClient, type OpenAIClient } from '../../src/kernel/client.js';
 import type { KernelConfig } from '../../src/kernel/types.js';
 import { KernelError, KernelParseError } from '../../src/kernel/types.js';
 import type { Rule } from '../../src/rules/types.js';
 import { createLogger } from '../../src/utils/logger.js';
+
+const ORIGINAL_ENV = { ...process.env };
 
 /**
  * Create a mock OpenAI client for testing.
@@ -46,7 +48,12 @@ describe('KernelClient', () => {
   ];
 
   beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
   });
 
   describe('createKernelClient', () => {
@@ -233,6 +240,40 @@ describe('KernelClient', () => {
           max_tokens: 512,
         })
       );
+    });
+
+    it('redacts env var secrets before kernel requests and masks placeholder responses', async () => {
+      process.env.STRIPE_API_KEY = 'sk_live_kernel_secret';
+      const mockCreate = vi.fn().mockResolvedValue({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              pass_weight: 0.1,
+              block_weight: 0.9,
+              decision: 'block',
+              reasoning: 'Secret __VETO_TOKEN_VAULT_1__ is blocked',
+            }),
+          },
+        }],
+      });
+
+      const client = createKernelClient({
+        config: { ...config, tokenVaultEnvVars: ['STRIPE_API_KEY'] },
+        logger,
+        openaiClient: createMockOpenAI(mockCreate),
+      });
+      const result = await client.evaluate(
+        { tool: 'charge_card', arguments: { apiKey: 'sk_live_kernel_secret' } },
+        sampleRules
+      );
+
+      const request = mockCreate.mock.calls[0][0] as { messages: Array<{ content: string }> };
+      const userPrompt = request.messages[1].content;
+      expect(userPrompt).toContain('__VETO_TOKEN_VAULT_1__');
+      expect(userPrompt).not.toContain('STRIPE_API_KEY');
+      expect(userPrompt).not.toContain('sk_live_kernel_secret');
+      expect(result.reasoning).toBe('Secret [REDACTED_ENV:STRIPE_API_KEY] is blocked');
+      expect(result.reasoning).not.toContain('sk_live_kernel_secret');
     });
   });
 

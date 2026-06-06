@@ -42,6 +42,24 @@ export interface VetoConfigFile {
     directory?: string;
     recursive?: boolean;
   };
+  kernel?: {
+    baseUrl?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeout?: number;
+    tokenVaultEnvVars?: string[];
+  };
+  custom?: {
+    provider?: 'openai' | 'anthropic' | 'gemini' | 'openrouter';
+    model?: string;
+    apiKey?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeout?: number;
+    baseUrl?: string;
+    tokenVaultEnvVars?: string[];
+  };
   session?: {
     sessionHeader?: string;
     agentHeader?: string;

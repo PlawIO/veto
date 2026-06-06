@@ -133,6 +133,7 @@ ${cloudConfigYaml}
 #   model: "hf.co/ycaleb/veto-warden-4b-GGUF:Q4_K_M"
 #   temperature: 0.1
 #   maxTokens: 256
+#   # tokenVaultEnvVars: ["SERVICE_TOKEN"]  # Env var values to redact from LLM prompts
 
 # Custom LLM provider (for mode: "custom")
 # custom:
@@ -142,6 +143,7 @@ ${cloudConfigYaml}
 #   temperature: 0.1
 #   maxTokens: 500
 #   # baseUrl: "https://api.openai.com/v1"  # Optional override
+#   # tokenVaultEnvVars: ["PAYMENTS_TOKEN"]  # Env var values to redact from LLM prompts
 
 # Optional semantic PII detector for output_rules with metadata.detector: "nvidia-gliner-pii"
 # pii:

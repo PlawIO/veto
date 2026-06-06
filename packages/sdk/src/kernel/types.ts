@@ -21,6 +21,8 @@ export interface KernelConfig {
   maxTokens?: number;
   /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
+  /** Additional env vars whose values are replaced with placeholders before kernel LLM calls */
+  tokenVaultEnvVars?: string[];
 }
 
 /**
@@ -32,6 +34,7 @@ export interface ResolvedKernelConfig {
   temperature: number;
   maxTokens: number;
   timeout: number;
+  tokenVaultEnvVars?: string[];
 }
 
 /**
@@ -106,5 +109,6 @@ export function resolveKernelConfig(config: KernelConfig): ResolvedKernelConfig 
     temperature: config.temperature ?? KERNEL_DEFAULTS.temperature,
     maxTokens: config.maxTokens ?? KERNEL_DEFAULTS.maxTokens,
     timeout: config.timeout ?? KERNEL_DEFAULTS.timeout,
+    tokenVaultEnvVars: Array.isArray(config.tokenVaultEnvVars) ? config.tokenVaultEnvVars : undefined,
   };
 }
