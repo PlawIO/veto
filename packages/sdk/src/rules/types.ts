@@ -277,6 +277,8 @@ export interface OutputRule {
   output_conditions?: RuleCondition[];
   /** Alternative condition groups (OR logic between groups) */
   output_condition_groups?: RuleCondition[][];
+  /** Conditions that suppress the output action when they all evaluate true. */
+  unless?: RuleCondition[];
   /** Replacement text for redact action */
   redact_with?: string;
   /** Tags for categorization */

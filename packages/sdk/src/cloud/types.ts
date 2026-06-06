@@ -5,7 +5,7 @@
  */
 
 import type { ArgumentConstraint, SessionConstraints } from '../deterministic/types.js';
-import type { RedactionTrace } from '../core/output-validator.js';
+import type { OutputRuleLiftTrace, RedactionTrace } from '../core/output-validator.js';
 import type { Rule, OutputRule } from '../rules/types.js';
 import type { ReceiptSummary } from 'veto-receipt-protocol';
 
@@ -176,4 +176,5 @@ export interface LogDecisionRequest {
   source: 'client';
   context?: Record<string, unknown>;
   redactions?: RedactionTrace[];
+  liftTrace?: OutputRuleLiftTrace[];
 }

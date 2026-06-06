@@ -1558,6 +1558,7 @@ logging:
         decision: 'allow',
         output: { value: 'redacted' },
         matchedRuleIds: ['rule-1'],
+        liftedRuleIds: [],
         redactions: 1,
         trace: [
           {
@@ -1569,6 +1570,7 @@ logging:
             replacement: '[REDACTED]',
           },
         ],
+        liftTrace: [],
       })).not.toThrow();
 
       expect(getCloudClientSpy).not.toHaveBeenCalled();

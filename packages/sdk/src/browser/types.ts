@@ -5,7 +5,8 @@ import type {
   ValidationContext,
   Validator,
 } from '../types/config.js';
-import type { OutputRule, Rule, RuleSeverity } from '../rules/types.js';
+import type { FeedProvider, OutputRule, Rule, RuleSeverity } from '../rules/types.js';
+import type { OutputRuleLiftTrace } from '../core/output-validator.js';
 import type { BudgetConfig, ToolCostMap } from '../core/budget.js';
 
 export type VetoMode = 'strict' | 'log' | 'shadow';
@@ -41,6 +42,7 @@ export interface BrowserCloudDecisionRequest {
   latency_ms: number;
   source: 'client';
   context?: Record<string, unknown>;
+  liftTrace?: OutputRuleLiftTrace[];
 }
 
 export interface BrowserCloudClient {
@@ -61,6 +63,8 @@ export interface VetoBrowserOptions<TCloudClient = BrowserCloudClient> {
   userId?: string;
   role?: string;
   validators?: (Validator | NamedValidator)[];
+  customContext?: Record<string, unknown>;
+  feedProvider?: FeedProvider;
   apiKey?: string;
   endpoint?: string;
   cloudClient?: TCloudClient;
@@ -85,6 +89,8 @@ export interface VetoFromCloudOptions {
   userId?: string;
   role?: string;
   validators?: (Validator | NamedValidator)[];
+  customContext?: Record<string, unknown>;
+  feedProvider?: FeedProvider;
   onApprovalRequired?: (
     context: ValidationContext,
     approvalId: string

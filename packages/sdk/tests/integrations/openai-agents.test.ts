@@ -23,8 +23,11 @@ function createMockVeto(
       decision: outputDecision,
       reason: outputReason,
       matchedRuleIds,
+      liftedRuleIds: [],
       output: null,
       redactions: 0,
+      trace: [],
+      liftTrace: [],
     }),
   } as any;
 }

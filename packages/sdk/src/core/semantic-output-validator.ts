@@ -1,6 +1,12 @@
 import type { Logger } from '../utils/logger.js';
-import type { OutputRule, RuleCondition } from '../rules/types.js';
-import type { OutputValidationResult, RedactionTrace } from './output-validator.js';
+import type { FeedProvider, OutputRule, RuleCondition } from '../rules/types.js';
+import {
+  buildOutputEvaluationContext,
+  evaluateOutputRuleLift,
+  type OutputValidationContext,
+  type OutputValidationResult,
+  type RedactionTrace,
+} from './output-validator.js';
 import {
   NVIDIA_GLINER_PII_PROVIDER,
   NvidiaGlinerPiiClient,
@@ -17,6 +23,7 @@ export interface SemanticOutputValidatorOptions {
   logger: Logger;
   getRulesForTool: (toolName: string) => OutputRule[];
   piiClient?: NvidiaGlinerPiiClient | null;
+  feedProvider?: FeedProvider;
   maxFields?: number;
   maxTextChars?: number;
 }
@@ -44,6 +51,7 @@ export class SemanticOutputValidator {
   private readonly logger: Logger;
   private readonly getRulesForTool: (toolName: string) => OutputRule[];
   private readonly piiClient: NvidiaGlinerPiiClient | null;
+  private readonly feedProvider?: FeedProvider;
   private readonly maxFields: number;
   private readonly maxTextChars: number;
 
@@ -51,13 +59,15 @@ export class SemanticOutputValidator {
     this.logger = options.logger;
     this.getRulesForTool = options.getRulesForTool;
     this.piiClient = options.piiClient ?? null;
+    this.feedProvider = options.feedProvider;
     this.maxFields = normalizePositiveInteger(options.maxFields, DEFAULT_MAX_FIELDS);
     this.maxTextChars = normalizePositiveInteger(options.maxTextChars, DEFAULT_MAX_TEXT_CHARS);
   }
 
   async validate(
     toolName: string,
-    syncResult: OutputValidationResult
+    syncResult: OutputValidationResult,
+    validationContext: OutputValidationContext = {}
   ): Promise<OutputValidationResult> {
     const piiClient = this.piiClient;
     if (!piiClient || syncResult.decision === 'block') {
@@ -70,7 +80,7 @@ export class SemanticOutputValidator {
     }
 
     try {
-      return await this.applyRules(toolName, syncResult, rules);
+      return await this.applyRules(toolName, syncResult, rules, validationContext);
     } catch (error) {
       const metadata: Record<string, unknown> = {
         tool: toolName,
@@ -93,7 +103,8 @@ export class SemanticOutputValidator {
   private async applyRules(
     toolName: string,
     syncResult: OutputValidationResult,
-    rules: OutputRule[]
+    rules: OutputRule[],
+    validationContext: OutputValidationContext
   ): Promise<OutputValidationResult> {
     const piiClient = this.piiClient;
     if (!piiClient) {
@@ -105,7 +116,9 @@ export class SemanticOutputValidator {
     let cloned = false;
     let redactions = syncResult.redactions;
     const matchedRuleIds = [...syncResult.matchedRuleIds];
+    const liftedRuleIds = [...syncResult.liftedRuleIds];
     const trace = [...syncResult.trace];
+    const liftTrace = [...syncResult.liftTrace];
 
     const ensureClone = (): unknown => {
       if (!cloned) {
@@ -122,6 +135,25 @@ export class SemanticOutputValidator {
     };
 
     for (const rule of rules) {
+      if (liftedRuleIds.includes(rule.id)) {
+        continue;
+      }
+
+      const ruleLiftTrace = evaluateOutputRuleLift(
+        rule,
+        buildOutputEvaluationContext(toolName, transformedOutput, validationContext),
+        {
+          feedProvider: this.feedProvider,
+          now: validationContext.now,
+          nowMs: validationContext.nowMs,
+        }
+      );
+      if (ruleLiftTrace) {
+        appendUniqueInPlace(liftedRuleIds, rule.id);
+        liftTrace.push(ruleLiftTrace);
+        continue;
+      }
+
       const fields = getScanFields(rule);
       const candidates = collectScanCandidates(transformedOutput, fields, this.maxFields, this.maxTextChars);
       if (candidates.length === 0) {
@@ -164,8 +196,10 @@ export class SemanticOutputValidator {
             output: null,
             reason,
             matchedRuleIds: appendUnique(matchedRuleIds, rule.id),
+            liftedRuleIds,
             redactions,
             trace,
+            liftTrace,
           };
         }
 
@@ -226,8 +260,10 @@ export class SemanticOutputValidator {
       decision: 'allow',
       output: transformedOutput,
       matchedRuleIds,
+      liftedRuleIds,
       redactions,
       trace,
+      liftTrace,
     };
   }
 }

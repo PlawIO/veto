@@ -1,9 +1,11 @@
 import type { Logger } from '../utils/logger.js';
 import {
   createSafeRegex,
+  evaluateCondition,
   evaluateConditionCollections,
 } from '../rules/condition-evaluator.js';
-import type { OutputRule, RuleCondition } from '../rules/types.js';
+import type { FeedProvider, OutputRule, RuleCondition } from '../rules/types.js';
+import { isConditionValueRef } from '../rules/types.js';
 import { isSemanticOutputRule } from './output-rule-detectors.js';
 
 const DEFAULT_REDACT_WITH = '[REDACTED]';
@@ -17,52 +19,147 @@ export interface RedactionTrace {
   replacement: string;
 }
 
+export interface OutputRuleLiftTrace {
+  ruleId: string;
+  ruleName: string;
+  lifted: true;
+  conditions: Array<{
+    field?: string;
+    operator?: string;
+    valueRef?: 'feed' | 'pipeline';
+    refId?: string;
+    matched: boolean;
+  }>;
+}
+
 export interface OutputValidationResult {
   decision: 'allow' | 'block';
   output: unknown;
   reason?: string;
   matchedRuleIds: string[];
+  liftedRuleIds: string[];
   redactions: number;
   trace: RedactionTrace[];
+  liftTrace: OutputRuleLiftTrace[];
+}
+
+export interface OutputValidationContext {
+  arguments?: Record<string, unknown>;
+  custom?: Record<string, unknown>;
+  now?: Date;
+  nowMs?: number;
 }
 
 export interface OutputValidatorOptions {
   logger: Logger;
   getRulesForTool: (toolName: string) => OutputRule[];
+  feedProvider?: FeedProvider;
+}
+
+export interface OutputRuleLiftOptions {
+  feedProvider?: FeedProvider;
+  now?: Date;
+  nowMs?: number;
+}
+
+export function buildOutputEvaluationContext(
+  toolName: string,
+  output: unknown,
+  validationContext: OutputValidationContext = {}
+): Record<string, unknown> {
+  const custom = validationContext.custom ?? {};
+  const args = validationContext.arguments ?? {};
+  const base: Record<string, unknown> = {
+    output,
+    arguments: args,
+    tool_name: toolName,
+    toolName,
+    custom,
+  };
+
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    return {
+      ...output as Record<string, unknown>,
+      ...base,
+    };
+  }
+
+  return base;
+}
+
+export function evaluateOutputRuleLift(
+  rule: OutputRule,
+  context: Record<string, unknown>,
+  options: OutputRuleLiftOptions = {}
+): OutputRuleLiftTrace | undefined {
+  if (!rule.unless || rule.unless.length === 0) {
+    return undefined;
+  }
+
+  const conditionResults = rule.unless.map((condition) => ({
+    condition,
+    matched: evaluateCondition(condition, context, {
+      allowNestedObjectStringSearch: true,
+      feedProvider: options.feedProvider,
+      now: options.now,
+      nowMs: options.nowMs,
+      feedRefMissing: 'noMatch',
+    }),
+  }));
+
+  if (!conditionResults.every((result) => result.matched)) {
+    return undefined;
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleName: rule.name,
+    lifted: true,
+    conditions: conditionResults.map(({ condition, matched }) => {
+      const ref = isConditionValueRef(condition.value) ? condition.value : undefined;
+      return {
+        field: condition.field,
+        operator: condition.operator,
+        valueRef: ref?.kind,
+        refId: ref?.kind === 'feed' ? ref.feed_id : ref?.pipeline_id,
+        matched,
+      };
+    }),
+  };
 }
 
 export class OutputValidator {
   private readonly logger: Logger;
   private readonly getRulesForTool: (toolName: string) => OutputRule[];
+  private readonly feedProvider?: FeedProvider;
 
   constructor(options: OutputValidatorOptions) {
     this.logger = options.logger;
     this.getRulesForTool = options.getRulesForTool;
+    this.feedProvider = options.feedProvider;
   }
 
-  validate(toolName: string, output: unknown): OutputValidationResult {
+  validate(
+    toolName: string,
+    output: unknown,
+    validationContext: OutputValidationContext = {}
+  ): OutputValidationResult {
     const rules = this.getRulesForTool(toolName);
     if (rules.length === 0) {
-      return {
-        decision: 'allow',
-        output,
-        matchedRuleIds: [],
-        redactions: 0,
-        trace: [],
-      };
+      return this.allowResult(output);
     }
 
-    const context = this.buildEvaluationContext(toolName, output);
-    const matchedRules = rules.filter((rule) => this.matchesRule(rule, context));
+    const context = buildOutputEvaluationContext(toolName, output, validationContext);
+    const evaluations = rules.map((rule) => this.evaluateRule(rule, context, validationContext));
+    const matchedRules = evaluations
+      .filter((evaluation) => evaluation.matched && !evaluation.liftTrace)
+      .map((evaluation) => evaluation.rule);
+    const liftTrace = evaluations
+      .flatMap((evaluation) => evaluation.liftTrace ? [evaluation.liftTrace] : []);
+    const liftedRuleIds = liftTrace.map((trace) => trace.ruleId);
 
     if (matchedRules.length === 0) {
-      return {
-        decision: 'allow',
-        output,
-        matchedRuleIds: [],
-        redactions: 0,
-        trace: [],
-      };
+      return this.allowResult(output, liftedRuleIds, liftTrace);
     }
 
     const matchedRuleIds = matchedRules.map((rule) => rule.id);
@@ -79,8 +176,10 @@ export class OutputValidator {
         output: null,
         reason,
         matchedRuleIds,
+        liftedRuleIds,
         redactions: 0,
         trace: [],
+        liftTrace,
       };
     }
 
@@ -118,14 +217,51 @@ export class OutputValidator {
       decision: 'allow',
       output: transformedOutput,
       matchedRuleIds,
+      liftedRuleIds,
       redactions,
       trace,
+      liftTrace,
     };
+  }
+
+  private allowResult(
+    output: unknown,
+    liftedRuleIds: string[] = [],
+    liftTrace: OutputRuleLiftTrace[] = []
+  ): OutputValidationResult {
+    return {
+      decision: 'allow',
+      output,
+      matchedRuleIds: [],
+      liftedRuleIds,
+      redactions: 0,
+      trace: [],
+      liftTrace,
+    };
+  }
+
+  private evaluateRule(
+    rule: OutputRule,
+    context: Record<string, unknown>,
+    validationContext: OutputValidationContext
+  ): { rule: OutputRule; matched: boolean; liftTrace?: OutputRuleLiftTrace } {
+    if (!this.matchesRule(rule, context, validationContext)) {
+      return { rule, matched: false };
+    }
+
+    const liftTrace = evaluateOutputRuleLift(rule, context, {
+      feedProvider: this.feedProvider,
+      now: validationContext.now,
+      nowMs: validationContext.nowMs,
+    });
+
+    return { rule, matched: true, liftTrace };
   }
 
   private matchesRule(
     rule: OutputRule,
-    context: Record<string, unknown>
+    context: Record<string, unknown>,
+    validationContext: OutputValidationContext
   ): boolean {
     if (isSemanticOutputRule(rule) && !this.hasFallbackConditions(rule)) {
       return false;
@@ -135,33 +271,19 @@ export class OutputValidator {
       rule.output_conditions,
       rule.output_condition_groups,
       context,
-      { allowNestedObjectStringSearch: true }
+      {
+        allowNestedObjectStringSearch: true,
+        feedProvider: this.feedProvider,
+        now: validationContext.now,
+        nowMs: validationContext.nowMs,
+        feedRefMissing: 'useFallback',
+      }
     );
   }
 
   private hasFallbackConditions(rule: OutputRule): boolean {
     return (rule.output_conditions?.length ?? 0) > 0
       || (rule.output_condition_groups?.length ?? 0) > 0;
-  }
-
-  private buildEvaluationContext(
-    toolName: string,
-    output: unknown
-  ): Record<string, unknown> {
-    const base: Record<string, unknown> = {
-      output,
-      tool_name: toolName,
-      toolName,
-    };
-
-    if (output && typeof output === 'object' && !Array.isArray(output)) {
-      return {
-        ...output as Record<string, unknown>,
-        ...base,
-      };
-    }
-
-    return base;
   }
 
   private applyRedaction(

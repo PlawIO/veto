@@ -115,6 +115,7 @@ class OutputRule(AdminModel):
     action: Literal["block", "redact", "log"]
     tools: Optional[list[str]] = None
     output_conditions: Optional[list[OutputCondition]] = None
+    unless: Optional[list[OutputCondition]] = None
     redact_with: Optional[str] = None
 
 

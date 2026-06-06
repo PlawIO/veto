@@ -357,7 +357,10 @@ describe('Interceptor', () => {
             decision: 'allow',
             output: { time: '[REDACTED]' },
             matchedRuleIds: ['redact-time'],
+            liftedRuleIds: [],
             redactions: 1,
+            trace: [],
+            liftTrace: [],
           }),
         },
       });
@@ -383,7 +386,10 @@ describe('Interceptor', () => {
             output: null,
             reason: 'Output contains sensitive data',
             matchedRuleIds: ['block-sensitive-output'],
+            liftedRuleIds: [],
             redactions: 0,
+            trace: [],
+            liftTrace: [],
           }),
         },
       });

@@ -414,6 +414,7 @@ export class RuleLoader {
       tools: ruleData.tools as string[] | undefined,
       output_conditions: ruleData.output_conditions as OutputRule['output_conditions'],
       output_condition_groups: ruleData.output_condition_groups as OutputRule['output_condition_groups'],
+      unless: ruleData.unless as OutputRule['unless'],
       redact_with: ruleData.redact_with as string | undefined,
       tags: ruleData.tags as string[] | undefined,
       metadata: ruleData.metadata as Record<string, unknown> | undefined,

@@ -145,7 +145,12 @@ export { VetoCloudClient, ApprovalTimeoutError } from './cloud/client.js';
 // Interception result
 export type { InterceptionResult, DenialDetails } from './core/interceptor.js';
 export type { HistoryStats } from './core/history.js';
-export type { OutputValidationResult } from './core/output-validator.js';
+export type {
+  OutputRuleLiftTrace,
+  OutputValidationContext,
+  OutputValidationResult,
+  RedactionTrace,
+} from './core/output-validator.js';
 export type {
   EventWebhookConfig,
   VetoWebhookEvent,
