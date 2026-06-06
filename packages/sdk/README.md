@@ -32,6 +32,16 @@ node examples/60-second-denied-call/denied-call.mjs
 
 `npx --package veto-cli@latest veto init` creates blocking local defaults in `veto/rules/defaults.yaml`, so the example deterministically denies `bash` with `rm -rf` before the handler runs. No provider SDK or API key is required.
 
+## Finance receipt demo
+
+```bash
+pnpm build
+node examples/finance-grade-agent/finance-demo.mjs
+node packages/sdk/dist/cli/bin.js receipts verify examples/finance-grade-agent/demo-output/receipts.ndjson
+```
+
+The demo uses `Veto.local(...)` for AP/procurement/refund decisions, writes portable `veto.receipt/1` receipts, and verifies the receipt chain offline.
+
 ## Python parity
 
 ```python

@@ -8,11 +8,11 @@ const root = cwd();
 const zones = [
   {
     id: "ts-sdk-runtime",
-    description: "veto-sdk runtime dependencies are frozen until the zero-dep local kernel split lands.",
+    description: "veto-sdk base local enforcement must stay dependency-free; CLI/YAML/schema/integration dependencies live in peers, dev deps, or separate packages.",
     file: "packages/sdk/package.json",
     type: "package-json",
     field: "dependencies",
-    allowed: ["ajv", "picocolors", "veto-receipt-protocol", "yaml"],
+    allowed: [],
   },
   {
     id: "ts-cli-runtime",
@@ -39,6 +39,14 @@ const zones = [
     allowed: [],
   },
   {
+    id: "rust-trust-kernel-runtime",
+    description: "veto-core keeps Rust JSON/canonicalization/crypto dependencies explicit and audited.",
+    file: "crates/veto-core/Cargo.toml",
+    type: "cargo",
+    field: "dependencies",
+    allowed: ["serde", "serde_json", "sha2"],
+  },
+  {
     id: "spend-capsule-protocol-runtime",
     description: "spend capsule protocol keeps crypto/canonicalization dependencies explicit.",
     file: "packages/spend-capsule-protocol/package.json",
@@ -48,11 +56,11 @@ const zones = [
   },
   {
     id: "python-sdk-base",
-    description: "Python base dependencies are frozen until cloud/CLI/proxy/integration extras are split out.",
+    description: "Python base local enforcement must stay dependency-free; cloud/CLI/proxy/integration dependencies live in extras.",
     file: "packages/sdk-python/pyproject.toml",
     type: "pyproject",
     field: "project.dependencies",
-    allowed: ["aiohttp", "jcs", "jsonschema", "pydantic", "pyyaml", "sse-starlette"],
+    allowed: [],
   },
 ];
 
@@ -150,9 +158,26 @@ function dependencyNamesFromPyproject(zone) {
   return parseTomlArrayItems(match[1]).map(basePythonPackageName).sort();
 }
 
+function dependencyNamesFromCargoToml(zone) {
+  const text = readFileSync(join(root, zone.file), "utf8");
+  const match = text.match(/\[dependencies\]\n([\s\S]*?)(?:\n\[|$)/);
+  if (!match) {
+    throw new Error(`${zone.file}: could not find [dependencies] table`);
+  }
+  const names = [];
+  for (const rawLine of match[1].split("\n")) {
+    const line = rawLine.replace(/#.*/, "").trim();
+    if (!line) continue;
+    const depMatch = line.match(/^([A-Za-z0-9_-]+)\s*=/);
+    if (depMatch) names.push(depMatch[1]);
+  }
+  return names.sort();
+}
+
 function dependencyNames(zone) {
   if (zone.type === "package-json") return dependencyNamesFromPackageJson(zone);
   if (zone.type === "pyproject") return dependencyNamesFromPyproject(zone);
+  if (zone.type === "cargo") return dependencyNamesFromCargoToml(zone);
   throw new Error(`Unknown zone type: ${zone.type}`);
 }
 

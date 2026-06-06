@@ -445,12 +445,26 @@ export interface VetoOptions {
 export type VetoBrowserOptions = SharedVetoBrowserOptions<VetoCloudClient> & {
   budget?: VetoConfigFile['budget'];
   costs?: VetoConfigFile['costs'];
+  economic?: EconomicPolicyConfig;
   approval?: VetoConfigFile['approval'];
   events?: VetoConfigFile['events'];
   policy?: {
     identity?: IdentityPolicyConfig;
   };
   identity?: IdentityPolicyConfig;
+};
+
+export interface VetoLocalBundle {
+  rules?: Rule[];
+  outputRules?: OutputRule[];
+  output_rules?: OutputRule[];
+  economic?: EconomicPolicyConfig;
+}
+
+export type VetoLocalOptions = Omit<VetoBrowserOptions, 'rules' | 'outputRules'> & {
+  bundle?: VetoLocalBundle;
+  rules?: Rule[];
+  outputRules?: OutputRule[];
 };
 
 export type VetoCloudInitOptions = SharedVetoFromCloudOptions;
@@ -1042,6 +1056,7 @@ export class Veto {
       logging: { level: logLevel, streamMode },
       budget: options.budget,
       costs: options.costs,
+      economic: options.economic,
       approval: options.approval,
       events: options.events,
       policy: options.policy,
@@ -1072,6 +1087,29 @@ export class Veto {
     };
 
     return new Veto(vetoOptions, config, rules, logger, true);
+  }
+
+  static local(options: VetoLocalOptions = {}): Veto {
+    if (options.bundle && (options.rules || options.outputRules || options.economic)) {
+      throw new Error(
+        'Veto.local() accepts either bundle or explicit rules/outputRules/economic options, not both'
+      );
+    }
+
+    const bundle = options.bundle;
+    const rules = options.rules ?? bundle?.rules ?? [];
+    const outputRules = options.outputRules
+      ?? bundle?.outputRules
+      ?? bundle?.output_rules
+      ?? [];
+    const economic = options.economic ?? bundle?.economic;
+
+    return Veto.fromRules({
+      ...options,
+      rules,
+      outputRules,
+      economic,
+    });
   }
 
   static async fromCloud(options: VetoCloudInitOptions): Promise<Veto> {
@@ -4204,6 +4242,22 @@ export class Veto {
    *
    * Unlike interceptor execution, this returns raw validation outcomes in log/shadow mode.
    */
+  async validate(
+    toolName: string,
+    args: Record<string, unknown>,
+    context: GuardContext = {}
+  ): Promise<GuardResult> {
+    return this.guard(toolName, args, context);
+  }
+
+  async enforce(
+    toolName: string,
+    args: Record<string, unknown>,
+    context: GuardContext = {}
+  ): Promise<GuardResult> {
+    return this.guard(toolName, args, context);
+  }
+
   async guard(
     toolName: string,
     args: Record<string, unknown>,
