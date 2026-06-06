@@ -1,5 +1,15 @@
 # @veto/python-release
 
+## 0.9.0
+
+### Minor Changes
+
+- [#245](https://github.com/PlawIO/veto/pull/245) [`575531c`](https://github.com/PlawIO/veto/commit/575531ce046925dab0e2608e8086bf41acf570d8) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Split Python SDK runtime dependencies into optional extras and add dependency-free `Veto.local(...)` enforcement with receipt verification smoke coverage.
+
+### Patch Changes
+
+- [#243](https://github.com/PlawIO/veto/pull/243) [`7fc7d94`](https://github.com/PlawIO/veto/commit/7fc7d94a7d592ffb728c8ea265fb6a723bc88393) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add release provenance metadata and OIDC trusted publishing hardening for npm and PyPI release paths.
+
 ## 0.8.0
 
 ### Minor Changes

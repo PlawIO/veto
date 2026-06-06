@@ -1,5 +1,19 @@
 # veto-sdk
 
+## 2.13.0
+
+### Minor Changes
+
+- [#246](https://github.com/PlawIO/veto/pull/246) [`a9cd6c6`](https://github.com/PlawIO/veto/commit/a9cd6c6b8e86b9835791476b240cb1f4cda998fc) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Split the TypeScript SDK base install away from CLI/YAML/schema/runtime extras and add `Veto.local(...)` with `validate`/`enforce` aliases for dependency-free local enforcement.
+
+- [#247](https://github.com/PlawIO/veto/pull/247) [`b156da6`](https://github.com/PlawIO/veto/commit/b156da62eb8d7a2acb895d69e6dd5e891c9c2d67) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add canonical CLI aliases for local validation, cloud auth, MCP start/restore, stable `version --json`, opaque receipt export cursors, and receipt lookup with `veto receipts show`.
+
+### Patch Changes
+
+- [#248](https://github.com/PlawIO/veto/pull/248) [`6a89858`](https://github.com/PlawIO/veto/commit/6a89858ce5ec41d1e586cc487465e7f4826ff683) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add a local AP/procurement/refund finance demo with allow, deny, approval-required decisions and offline-verifiable decision receipts.
+
+- [#243](https://github.com/PlawIO/veto/pull/243) [`7fc7d94`](https://github.com/PlawIO/veto/commit/7fc7d94a7d592ffb728c8ea265fb6a723bc88393) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add release provenance metadata and OIDC trusted publishing hardening for npm and PyPI release paths.
+
 ## 2.12.1
 
 ### Patch Changes
