@@ -28,6 +28,11 @@ export interface ReceiptsVerifyOptions {
   inputPath?: string;
 }
 
+export interface ReceiptsShowOptions {
+  inputPath?: string;
+  receiptId?: string;
+}
+
 export interface ReceiptsExportResult {
   source: 'local' | 'cloud';
   inputPath?: string;
@@ -40,6 +45,13 @@ export interface ReceiptsVerifyResult {
   path: string;
   count: number;
   finalReceiptHash: string | null;
+}
+
+export interface ReceiptsShowResult {
+  path: string;
+  index: number;
+  receiptHash: string;
+  receipt: DecisionReceiptPayload;
 }
 
 function ok<T>(data: T): HeadlessResult<T> {
@@ -79,7 +91,7 @@ function buildExportUrl(options: ReceiptsExportOptions, cursor?: string): URL {
   if (cursor !== undefined) {
     url.searchParams.set('cursor', cursor);
   } else if (options.cursor !== undefined) {
-    url.searchParams.set('cursor', parseBoundedInteger(options.cursor, 'cursor', 0, Number.MAX_SAFE_INTEGER));
+    url.searchParams.set('cursor', String(options.cursor));
   }
   if (options.limit !== undefined) url.searchParams.set('limit', parseBoundedInteger(options.limit, 'limit', 1, 10_000));
   return url;
@@ -110,7 +122,7 @@ async function fetchCloudReceipts(options: ReceiptsExportOptions): Promise<strin
 
   let cursor = options.cursor === undefined
     ? undefined
-    : parseBoundedInteger(options.cursor, 'cursor', 0, Number.MAX_SAFE_INTEGER);
+    : String(options.cursor);
   const chunks: string[] = [];
 
   while (true) {
@@ -131,7 +143,7 @@ async function fetchCloudReceipts(options: ReceiptsExportOptions): Promise<strin
     if (!nextCursor) {
       break;
     }
-    cursor = parseBoundedInteger(nextCursor, 'cursor', 0, Number.MAX_SAFE_INTEGER);
+    cursor = nextCursor;
   }
 
   return chunks.join('');
@@ -208,6 +220,47 @@ export function runReceiptsVerifyCommand(
     });
   } catch (error) {
     return fail('receipts_verify_failed', 'Failed to verify receipts.', {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export function runReceiptsShowCommand(
+  options: ReceiptsShowOptions = {},
+): HeadlessResult<ReceiptsShowResult> {
+  try {
+    const receiptId = options.receiptId?.trim();
+    if (!receiptId) {
+      return fail('receipt_id_required', 'Receipt id is required. Usage: veto receipts show <receipt-id>');
+    }
+
+    const path = resolveReceiptsPath(options.inputPath);
+    if (!existsSync(path)) {
+      return fail('receipts_not_found', `Receipt log not found: ${path}`);
+    }
+
+    const receipts = parseReceiptNdjson(readFileSync(path, 'utf-8'));
+    const verified = verifyDecisionReceiptChain(receipts);
+    if (!verified.ok) {
+      return fail('receipts_chain_broken', verified.reason ?? 'Receipt chain is broken.', {
+        breakAt: verified.breakAt,
+      });
+    }
+
+    const index = receipts.findIndex((receipt) => receipt.receipt_id === receiptId);
+    if (index < 0) {
+      return fail('receipt_not_found', `Receipt not found: ${receiptId}`, { path });
+    }
+
+    const receipt = receipts[index]!;
+    return ok({
+      path,
+      index,
+      receiptHash: hashDecisionReceipt(receipt),
+      receipt,
+    });
+  } catch (error) {
+    return fail('receipts_show_failed', 'Failed to show receipt.', {
       reason: error instanceof Error ? error.message : String(error),
     });
   }

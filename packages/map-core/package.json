@@ -1,0 +1,38 @@
+{
+  "name": "veto-map-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MAP-Core artifact types, commitments, validation, and conformance fixtures.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "fixtures"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "veto",
+    "map",
+    "machine-authority",
+    "agent-authorization",
+    "conformance"
+  ],
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.16"
+  }
+}

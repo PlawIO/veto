@@ -1,0 +1,78 @@
+{
+  "name": "approval_replay_denied",
+  "description": "An approval for one refund cannot authorize a different refund proposal.",
+  "artifacts": [
+    {
+      "version": "map.action_proposal/0.1",
+      "proposal_id": "prop_refund_900_original",
+      "action": "issue_refund",
+      "arguments": {
+        "amount_usd": 900,
+        "customer_id": "cus_999"
+      },
+      "actor": {
+        "id": "agent_refunds",
+        "kind": "agent"
+      },
+      "subject": {
+        "id": "org_acme",
+        "kind": "organization"
+      },
+      "audience": ["acct_payable"],
+      "created_at": "2026-06-04T15:00:00Z",
+      "expires_at": "2026-06-04T15:05:00Z",
+      "nonce": "nonce_original_001"
+    },
+    {
+      "version": "map.action_proposal/0.1",
+      "proposal_id": "prop_refund_900_replay",
+      "action": "issue_refund",
+      "arguments": {
+        "amount_usd": 900,
+        "customer_id": "cus_attacker"
+      },
+      "actor": {
+        "id": "agent_refunds",
+        "kind": "agent"
+      },
+      "subject": {
+        "id": "org_acme",
+        "kind": "organization"
+      },
+      "audience": ["acct_payable"],
+      "created_at": "2026-06-04T15:02:00Z",
+      "expires_at": "2026-06-04T15:07:00Z",
+      "nonce": "nonce_replay_001"
+    },
+    {
+      "version": "map.approval/0.1",
+      "approval_id": "approval_original_refund",
+      "proposal_id": "prop_refund_900_original",
+      "action_commitment": "sha256:80c081e1a055c563d25940c6a266f89a265743801286eb770b0dacad769dd80c",
+      "approver": {
+        "id": "human_controller",
+        "kind": "human"
+      },
+      "decision": "approved",
+      "reason_code": "controller_approved",
+      "created_at": "2026-06-04T15:01:00Z",
+      "expires_at": "2026-06-04T15:06:00Z",
+      "nonce": "nonce_original_approval_001"
+    },
+    {
+      "version": "map.decision_outcome/0.1",
+      "outcome_id": "outcome_replay_denied",
+      "proposal_id": "prop_refund_900_replay",
+      "action_commitment": "sha256:ff57212492edce84a389851e9cb11bd10542dc3765c10fbf897a446eab4afb3e",
+      "policy_bundle_id": "bundle_refunds_v1",
+      "decision": "deny",
+      "reason_code": "approval_commitment_mismatch",
+      "reason_detail": "Approval commitment does not match the replayed action proposal.",
+      "approval_id": "approval_original_refund",
+      "receipt_required": true,
+      "evaluated_at": "2026-06-04T15:02:01Z"
+    }
+  ],
+  "expected_decision": "deny",
+  "expected_reason_code": "approval_commitment_mismatch"
+}

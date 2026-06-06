@@ -14,8 +14,6 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from veto.cloud.client import VetoCloudClient, VetoCloudConfig
 from veto.core.veto import Veto, VetoOptions
 from veto.receipts import (
@@ -28,7 +26,6 @@ from veto.receipts import (
     verify_file,
     verify_receipt_chain,
 )
-from veto.rules import PolicySchemaError, validate_policy_ir
 
 DEFAULT_RECEIPTS_PATH = Path(".veto/receipts.ndjson")
 
@@ -129,10 +126,35 @@ def _print(payload: dict[str, Any], *, json_output: bool) -> None:
         print(f"{err['code']}: {err['message']}", file=sys.stderr)
 
 
+def _load_pyyaml() -> Any:
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "PyYAML is required for YAML CLI commands. Install it with "
+            "`pip install 'veto[rules]'`."
+        ) from exc
+
+    return yaml
+
+
+def _load_policy_validator() -> tuple[type[Exception], Any]:
+    try:
+        from veto.rules.schema_validator import PolicySchemaError, validate_policy_ir
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "jsonschema is required to validate policy files. Install it with "
+            "`pip install 'veto[rules]'`."
+        ) from exc
+
+    return PolicySchemaError, validate_policy_ir
+
+
 def _write_yaml(path: Path, data: dict[str, Any], *, force: bool) -> bool:
     if path.exists() and not force:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
+    yaml = _load_pyyaml()
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return True
 
@@ -257,92 +279,103 @@ def _cmd_version(args: argparse.Namespace) -> int:
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
-    workspace = Path(args.directory).resolve()
-    veto_dir = workspace / "veto"
-    config_path = veto_dir / "veto.config.yaml"
-    rules_path = veto_dir / "rules" / "defaults.yaml"
-    mcp_path = veto_dir / "mcp.config.yaml"
-    receipt_path = workspace / DEFAULT_RECEIPTS_PATH
+    try:
+        workspace = Path(args.directory).resolve()
+        veto_dir = workspace / "veto"
+        config_path = veto_dir / "veto.config.yaml"
+        rules_path = veto_dir / "rules" / "defaults.yaml"
+        mcp_path = veto_dir / "mcp.config.yaml"
+        receipt_path = workspace / DEFAULT_RECEIPTS_PATH
 
-    if args.restore:
-        payload = _error(
-            "restore_requires_backup",
-            "Use 'veto mcp restore --backup <path>' to restore an MCP client config.",
-            next_step="veto mcp restore --backup <path>",
+        if args.restore:
+            payload = _error(
+                "restore_requires_backup",
+                "Use 'veto mcp restore --backup <path>' to restore an MCP client config.",
+                next_step="veto mcp restore --backup <path>",
+            )
+            _print(payload, json_output=args.json)
+            return 1
+
+        created: list[str] = []
+        if not args.dry_run:
+            config = dict(DEFAULT_CONFIG)
+            if args.mode in {"strict", "log", "shadow"}:
+                config["mode"] = args.mode
+                config["validation"] = {"mode": "local"}
+            else:
+                config["mode"] = "strict"
+                config["validation"] = {"mode": args.mode}
+            if args.pack:
+                config["packs"] = [args.pack]
+            if _write_yaml(config_path, config, force=args.force):
+                created.append(str(config_path.relative_to(workspace)))
+            rules = dict(DEFAULT_RULES)
+            if args.pack:
+                rules = {
+                    "version": "1.0",
+                    "name": "custom-rules",
+                    "description": f"Rules extending {args.pack}",
+                    "extends": args.pack,
+                    "rules": [],
+                }
+            if _write_yaml(rules_path, rules, force=args.force):
+                created.append(str(rules_path.relative_to(workspace)))
+            if not args.no_mcp and _write_yaml(mcp_path, DEFAULT_MCP_CONFIG, force=args.force):
+                created.append(str(mcp_path.relative_to(workspace)))
+
+        import_result: dict[str, Any] | None = None
+        if not args.no_mcp and args.agent != "none":
+            candidates = [
+                workspace / ".cursor" / "mcp.json",
+                workspace / ".codex" / "mcp.json",
+                workspace / ".claude" / "mcp.json",
+                workspace / "mcp.json",
+            ]
+            detected = next((candidate for candidate in candidates if candidate.exists()), None)
+            if detected is not None or args.agent in {"cursor", "codex", "claude-desktop", "generic"}:
+                output = detected or workspace / "mcp.json"
+                import_result = _run_mcp_import(
+                    output=output,
+                    config=mcp_path,
+                    cloud=args.mode == "cloud",
+                    dry_run=args.dry_run,
+                )
+
+        receipt_ok = False
+        if not args.dry_run and not args.no_receipt_smoke:
+            receipt = build_decision_receipt(
+                tool_name="veto_init_smoke",
+                arguments={"command": "rm -rf /tmp/veto-smoke"},
+                decision="deny",
+                reason="Veto init receipt smoke check",
+                session_id="init",
+                agent_id="veto-python-cli",
+            )
+            append_receipt(receipt_path, receipt)
+            receipt_ok = bool(verify_file(receipt_path).get("ok"))
+
+        payload = _ok(
+            {
+                "workspace": str(workspace),
+                "created": created,
+                "mcp": import_result,
+                "receipt": receipt_ok,
+                "receiptStore": str(receipt_path),
+            },
+            ["veto doctor", f"veto receipts verify {receipt_path}"],
         )
         _print(payload, json_output=args.json)
-        return 1
-
-    created: list[str] = []
-    if not args.dry_run:
-        config = dict(DEFAULT_CONFIG)
-        if args.mode in {"strict", "log", "shadow"}:
-            config["mode"] = args.mode
-            config["validation"] = {"mode": "local"}
-        else:
-            config["mode"] = "strict"
-            config["validation"] = {"mode": args.mode}
-        if args.pack:
-            config["packs"] = [args.pack]
-        if _write_yaml(config_path, config, force=args.force):
-            created.append(str(config_path.relative_to(workspace)))
-        rules = dict(DEFAULT_RULES)
-        if args.pack:
-            rules = {
-                "version": "1.0",
-                "name": "custom-rules",
-                "description": f"Rules extending {args.pack}",
-                "extends": args.pack,
-                "rules": [],
-            }
-        if _write_yaml(rules_path, rules, force=args.force):
-            created.append(str(rules_path.relative_to(workspace)))
-        if not args.no_mcp and _write_yaml(mcp_path, DEFAULT_MCP_CONFIG, force=args.force):
-            created.append(str(mcp_path.relative_to(workspace)))
-
-    import_result: dict[str, Any] | None = None
-    if not args.no_mcp and args.agent != "none":
-        candidates = [
-            workspace / ".cursor" / "mcp.json",
-            workspace / ".codex" / "mcp.json",
-            workspace / ".claude" / "mcp.json",
-            workspace / "mcp.json",
-        ]
-        detected = next((candidate for candidate in candidates if candidate.exists()), None)
-        if detected is not None or args.agent in {"cursor", "codex", "claude-desktop", "generic"}:
-            output = detected or workspace / "mcp.json"
-            import_result = _run_mcp_import(
-                output=output,
-                config=mcp_path,
-                cloud=args.mode == "cloud",
-                dry_run=args.dry_run,
-            )
-
-    receipt_ok = False
-    if not args.dry_run and not args.no_receipt_smoke:
-        receipt = build_decision_receipt(
-            tool_name="veto_init_smoke",
-            arguments={"command": "rm -rf /tmp/veto-smoke"},
-            decision="deny",
-            reason="Veto init receipt smoke check",
-            session_id="init",
-            agent_id="veto-python-cli",
+        return 0
+    except ModuleNotFoundError as exc:
+        _print(
+            _error(
+                "missing_optional_dependency",
+                str(exc),
+                next_step="pip install 'veto[rules]'",
+            ),
+            json_output=args.json,
         )
-        append_receipt(receipt_path, receipt)
-        receipt_ok = bool(verify_file(receipt_path).get("ok"))
-
-    payload = _ok(
-        {
-            "workspace": str(workspace),
-            "created": created,
-            "mcp": import_result,
-            "receipt": receipt_ok,
-            "receiptStore": str(receipt_path),
-        },
-        ["veto doctor", f"veto receipts verify {receipt_path}"],
-    )
-    _print(payload, json_output=args.json)
-    return 0
+        return 1
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
@@ -365,10 +398,21 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 def _cmd_validate_policy(args: argparse.Namespace) -> int:
     path = Path(args.path)
     try:
+        yaml = _load_pyyaml()
+        policy_error_type, validate_policy_ir = _load_policy_validator()
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        validate_policy_ir(data)
-    except PolicySchemaError as exc:
-        payload = _error("policy_invalid", str(exc))
+        try:
+            validate_policy_ir(data)
+        except policy_error_type as exc:
+            payload = _error("policy_invalid", str(exc))
+            _print(payload, json_output=args.json)
+            return 1
+    except ModuleNotFoundError as exc:
+        payload = _error(
+            "missing_optional_dependency",
+            str(exc),
+            next_step="pip install 'veto[rules]'",
+        )
         _print(payload, json_output=args.json)
         return 1
     except Exception as exc:
