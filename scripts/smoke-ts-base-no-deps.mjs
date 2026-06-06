@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -72,6 +72,37 @@ const installedTopLevel = new Set(
 const unexpectedInstalledDeps = [...deniedRuntimeDeps].filter((dep) => installedTopLevel.has(dep));
 if (unexpectedInstalledDeps.length > 0) {
   throw new Error(`base install pulled optional deps: ${unexpectedInstalledDeps.join(", ")}`);
+}
+
+const vetoBin = join(appDir, "node_modules", ".bin", "veto");
+const mcpProxyBin = join(appDir, "node_modules", ".bin", "veto-mcp-proxy");
+const helpOutput = execFileSync(vetoBin, ["--help"], { cwd: appDir, encoding: "utf8" });
+if (!helpOutput.includes("Usage:")) {
+  throw new Error("base veto --help did not print usage");
+}
+
+const versionOutput = execFileSync(vetoBin, ["version"], { cwd: appDir, encoding: "utf8" });
+if (!/^veto v/.test(versionOutput.trim())) {
+  throw new Error(`base veto version returned unexpected output: ${versionOutput}`);
+}
+
+const mcpProxyHelpOutput = execFileSync(mcpProxyBin, ["--help"], { cwd: appDir, encoding: "utf8" });
+if (!mcpProxyHelpOutput.includes("Usage: veto-mcp-proxy")) {
+  throw new Error("base veto-mcp-proxy --help did not print usage");
+}
+
+const initWithoutPeers = spawnSync(vetoBin, ["init"], {
+  cwd: appDir,
+  encoding: "utf8",
+});
+if (initWithoutPeers.status !== 1) {
+  throw new Error(`base veto init should fail without CLI peers, got ${initWithoutPeers.status}`);
+}
+if (!initWithoutPeers.stderr.includes("optional CLI peer dependencies")) {
+  throw new Error(`base veto init did not explain missing CLI peers: ${initWithoutPeers.stderr}`);
+}
+if (initWithoutPeers.stderr.includes("at ModuleJob") || initWithoutPeers.stderr.includes("Node.js v")) {
+  throw new Error(`base veto init leaked a module stack trace: ${initWithoutPeers.stderr}`);
 }
 
 const sdk = await import(pathToFileURL(join(appDir, "node_modules", "veto-sdk", "dist", "index.js")));
