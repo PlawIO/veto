@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
+
+const require = createRequire(import.meta.url);
 
 const BUILT_IN_POLICY_PACK_FILE_NAMES = {
   '@veto/safe-defaults': 'safe-defaults.yaml',
@@ -23,6 +25,19 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKS_DIR = resolve(MODULE_DIR, '..', '..', 'packs');
 
 type PolicyDocument = Record<string, unknown>;
+
+function loadYamlParser(): (content: string) => unknown {
+  try {
+    const yaml = require('yaml') as { parse: (content: string) => unknown };
+    return yaml.parse;
+  } catch (error) {
+    const cause = error instanceof Error ? error : undefined;
+    throw new Error(
+      'The `yaml` package is required for YAML policy packs. Install it with `npm install yaml` or use inline local rules.',
+      { cause }
+    );
+  }
+}
 
 export function getBuiltInPolicyPackNames(): string[] {
   return Object.keys(BUILT_IN_POLICY_PACK_FILE_NAMES);
@@ -147,7 +162,7 @@ export function resolvePolicyPackExtends(
   const normalizedPackName = normalizePolicyPackName(policyData.extends);
   const packPath = resolveBuiltInPolicyPackPath(normalizedPackName);
   const packContent = readFileSync(packPath, 'utf-8');
-  const parser = yamlParser ?? parseYaml;
+  const parser = yamlParser ?? loadYamlParser();
   const parsedPack = parser(packContent);
 
   if (!parsedPack || typeof parsedPack !== 'object' || Array.isArray(parsedPack)) {

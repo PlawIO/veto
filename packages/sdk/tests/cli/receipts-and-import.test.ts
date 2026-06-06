@@ -9,7 +9,7 @@ import {
   type DecisionReceiptPayload,
 } from 'veto-receipt-protocol';
 import { runMcpImportCommand } from '../../src/cli/mcp-import.js';
-import { runReceiptsExportCommand, runReceiptsVerifyCommand } from '../../src/cli/receipts.js';
+import { runReceiptsExportCommand, runReceiptsShowCommand, runReceiptsVerifyCommand } from '../../src/cli/receipts.js';
 
 const TMP_ROOT = `/tmp/veto-receipts-cli-test-${Date.now()}`;
 const DIGEST_ZERO = `sha256:${'0'.repeat(64)}`;
@@ -84,6 +84,16 @@ describe('receipt and MCP import CLI commands', () => {
     expect(verified.data?.count).toBe(2);
     expect(verified.data?.finalReceiptHash).toMatch(/^sha256:[0-9a-f]{64}$/);
 
+    const shown = runReceiptsShowCommand({ inputPath: outputPath, receiptId: second.receipt_id });
+    expect(shown.ok).toBe(true);
+    expect(shown.data).toMatchObject({
+      index: 1,
+      receiptHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      receipt: {
+        receipt_id: second.receipt_id,
+      },
+    });
+
     const tampered = parseReceiptNdjson(readFileSync(outputPath, 'utf-8'));
     tampered[0] = { ...tampered[0]!, reason_detail: 'Tampered' };
     const tamperedPath = tmpPath('tampered.ndjson');
@@ -113,7 +123,7 @@ describe('receipt and MCP import CLI commands', () => {
     const second = receipt(2, first);
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(formatReceiptNdjson([first]), {
-        headers: { 'X-Veto-Next-Cursor': '1' },
+        headers: { 'X-Veto-Next-Cursor': 'opaque-next-cursor' },
       }),
     ).mockResolvedValueOnce(
       new Response(formatReceiptNdjson([second])),
@@ -132,7 +142,7 @@ describe('receipt and MCP import CLI commands', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const urls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(urls[0]).toBe('https://api.veto.example/v1/receipts/export?format=ndjson&projectId=project-1&limit=1');
-    expect(urls[1]).toBe('https://api.veto.example/v1/receipts/export?format=ndjson&projectId=project-1&cursor=1&limit=1');
+    expect(urls[1]).toBe('https://api.veto.example/v1/receipts/export?format=ndjson&projectId=project-1&cursor=opaque-next-cursor&limit=1');
   });
 
   it('imports generic MCP JSON with dry-run, backup, and restore support', () => {

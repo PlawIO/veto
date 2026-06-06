@@ -54,6 +54,9 @@ jobs:
       - name: Build
         run: pnpm turbo build --filter='./packages/*'
 
+      - name: Smoke TS base package without runtime dependencies
+        run: pnpm smoke:ts-base-no-deps
+
       - name: Typecheck
         run: pnpm turbo typecheck --filter='./packages/*'
 

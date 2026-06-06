@@ -8,11 +8,11 @@ const root = cwd();
 const zones = [
   {
     id: "ts-sdk-runtime",
-    description: "veto-sdk runtime dependencies are frozen until the zero-dep local kernel split lands.",
+    description: "veto-sdk base local enforcement must stay dependency-free; CLI/YAML/schema/integration dependencies live in peers, dev deps, or separate packages.",
     file: "packages/sdk/package.json",
     type: "package-json",
     field: "dependencies",
-    allowed: ["ajv", "picocolors", "veto-receipt-protocol", "yaml"],
+    allowed: [],
   },
   {
     id: "ts-cli-runtime",
