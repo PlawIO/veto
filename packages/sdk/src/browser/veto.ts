@@ -4,7 +4,7 @@ import type {
   ValidationResult,
   Validator,
 } from '../types/config.js';
-import type { OutputRule, Rule, RuleSeverity } from '../rules/types.js';
+import type { FeedProvider, OutputRule, Rule, RuleSeverity } from '../rules/types.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { generateId, generateToolCallId } from '../utils/id.js';
 import { evaluateConditionCollections } from '../rules/condition-evaluator.js';
@@ -258,6 +258,8 @@ export class Veto {
   private readonly agentId?: string;
   private readonly userId?: string;
   private readonly role?: string;
+  private readonly customContext?: Record<string, unknown>;
+  private readonly feedProvider?: FeedProvider;
   private readonly validators: NamedValidator[];
   private readonly historyTracker: HistoryTracker;
   private readonly budgetTracker: BudgetTracker | null;
@@ -284,6 +286,8 @@ export class Veto {
     this.agentId = options.agentId;
     this.userId = options.userId;
     this.role = options.role;
+    this.customContext = options.customContext;
+    this.feedProvider = options.feedProvider;
     this.validators = toNamedValidators(options.validators);
     this.cloudRules = options.rules;
     this.cloudOutputRules = options.outputRules ?? [];
@@ -312,6 +316,7 @@ export class Veto {
     this.outputValidator = new OutputValidator({
       logger: this.logger,
       getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
+      feedProvider: this.feedProvider,
     });
   }
 
@@ -337,6 +342,8 @@ export class Veto {
       validators: options.validators,
       onApprovalRequired: options.onApprovalRequired,
       onDecisionMade: options.onDecisionMade,
+      customContext: options.customContext,
+      feedProvider: options.feedProvider,
       budget: options.budget,
       costs: options.costs,
       apiKey: options.apiKey,
@@ -903,7 +910,9 @@ export class Veto {
       const executionResult = args.length === 1 && typeof args[0] === 'object' && args[0] !== null
         ? await original.call(tool, callArgs)
         : await original.apply(tool, args);
-      const outputResult = this.validateOutput(toolName, executionResult);
+      const outputResult = this.validateOutput(toolName, executionResult, {
+        arguments: callArgs,
+      });
 
       if (outputResult.decision === 'block') {
         throw new Error(outputResult.reason ?? `Tool output blocked for ${toolName}`);
@@ -915,8 +924,22 @@ export class Veto {
     return wrapped as T;
   }
 
-  validateOutput(toolName: string, output: unknown): OutputValidationResult {
-    return this.outputValidator.validate(toolName, output);
+  validateOutput(
+    toolName: string,
+    output: unknown,
+    context: {
+      arguments?: Record<string, unknown>;
+      custom?: Record<string, unknown>;
+      now?: Date;
+      nowMs?: number;
+    } = {}
+  ): OutputValidationResult {
+    return this.outputValidator.validate(toolName, output, {
+      arguments: context.arguments,
+      custom: context.custom ?? this.customContext,
+      now: context.now,
+      nowMs: context.nowMs,
+    });
   }
 
   async refreshRules(): Promise<void> {

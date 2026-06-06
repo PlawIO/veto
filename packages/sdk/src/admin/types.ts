@@ -48,6 +48,7 @@ export interface OutputRule {
   action: 'block' | 'redact' | 'log';
   tools?: string[];
   output_conditions?: { field: string; operator: string; value: unknown }[];
+  unless?: { field: string; operator: string; value: unknown }[];
   redact_with?: string;
 }
 

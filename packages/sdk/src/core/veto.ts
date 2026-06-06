@@ -41,6 +41,7 @@ import type {
   RuleSeverity,
   RuleSet,
   OutputRule,
+  FeedProvider,
   ToolCallContext,
   ToolCallHistorySummary,
   ValidationAPIResponse,
@@ -381,6 +382,17 @@ export interface VetoOptions {
   validators?: (Validator | NamedValidator)[];
 
   /**
+   * Custom context available to output validation lift clauses.
+   */
+  customContext?: Record<string, unknown>;
+
+  /**
+   * Pre-fetched feed snapshots for dynamic feed/pipeline-backed conditions.
+   * The SDK never fetches these during validation; callers own refresh.
+   */
+  feedProvider?: FeedProvider;
+
+  /**
    * API key for cloud mode.
    * When set, Veto auto-detects cloud mode.
    */
@@ -520,6 +532,8 @@ export class Veto {
   private readonly agentId?: string;
   private readonly userId?: string;
   private readonly role?: string;
+  private readonly customContext?: Record<string, unknown>;
+  private readonly feedProvider?: FeedProvider;
   private readonly identityPolicy: IdentityPolicyConfig | null;
   private readonly identityTrustBundle: TrustBundle | null;
 
@@ -755,6 +769,8 @@ export class Veto {
     this.agentId = options.agentId ?? envAgentId;
     this.userId = options.userId ?? envUserId;
     this.role = options.role ?? envRole;
+    this.customContext = options.customContext;
+    this.feedProvider = options.feedProvider;
     this.identityPolicy = Veto.resolveIdentityPolicy(options, config);
     this.identityTrustBundle = this.identityPolicy?.require_signed === true
       ? Veto.resolveIdentityTrustBundle(this.identityPolicy)
@@ -893,6 +909,7 @@ export class Veto {
     this.outputValidator = new OutputValidator({
       logger: this.logger,
       getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
+      feedProvider: this.feedProvider,
     });
 
     const piiDetector = this.resolvePiiDetector(options, config);
@@ -901,6 +918,7 @@ export class Veto {
           logger: this.logger,
           getRulesForTool: (toolName) => this.getOutputRulesForTool(toolName),
           piiClient: piiDetector.client,
+          feedProvider: this.feedProvider,
           maxFields: piiDetector.maxFields,
           maxTextChars: piiDetector.maxTextChars,
         })
@@ -1083,6 +1101,8 @@ export class Veto {
       policy: options.policy,
       identity: options.identity,
       validators: options.validators,
+      customContext: options.customContext,
+      feedProvider: options.feedProvider,
       apiKey: undefined,
       endpoint: undefined,
       cloudClient,
@@ -1141,6 +1161,8 @@ export class Veto {
       apiKey: options.apiKey,
       endpoint: options.endpoint,
       cloudClient,
+      customContext: options.customContext,
+      feedProvider: options.feedProvider,
     });
 
     veto.setRefreshInterval(options.refreshIntervalMs);
@@ -3814,7 +3836,11 @@ export class Veto {
       return;
     }
 
-    if (outputResult.decision !== 'block' && outputResult.trace.length === 0) {
+    if (
+      outputResult.decision !== 'block'
+      && outputResult.trace.length === 0
+      && outputResult.liftTrace.length === 0
+    ) {
       return;
     }
 
@@ -3828,8 +3854,10 @@ export class Veto {
       source: 'client',
       context: {
         output_validation: true,
+        lifted_output_rules: outputResult.liftTrace,
       },
       redactions: outputResult.trace,
+      liftTrace: outputResult.liftTrace,
     });
   }
 
@@ -3839,7 +3867,10 @@ export class Veto {
     output: unknown
   ): Promise<unknown> {
     const startedAt = Date.now();
-    const outputResult = await this.validateOutputAsync(toolName, output);
+    const outputResult = await this.validateOutputAsync(toolName, output, {
+      arguments: args,
+      custom: this.customContext,
+    });
     const latencyMs = Date.now() - startedAt;
     this.logOutputValidation(toolName, args, outputResult, latencyMs);
     if (outputResult.decision === 'block') {
@@ -4175,17 +4206,46 @@ export class Veto {
   /**
    * Validate and transform tool output against configured output rules.
    */
-  validateOutput(toolName: string, output: unknown): OutputValidationResult {
-    return this.outputValidator.validate(toolName, output);
+  validateOutput(
+    toolName: string,
+    output: unknown,
+    context: {
+      arguments?: Record<string, unknown>;
+      custom?: Record<string, unknown>;
+      now?: Date;
+      nowMs?: number;
+    } = {}
+  ): OutputValidationResult {
+    return this.outputValidator.validate(toolName, output, {
+      arguments: context.arguments,
+      custom: context.custom ?? this.customContext,
+      now: context.now,
+      nowMs: context.nowMs,
+    });
   }
 
-  async validateOutputAsync(toolName: string, output: unknown): Promise<OutputValidationResult> {
-    const syncResult = this.outputValidator.validate(toolName, output);
+  async validateOutputAsync(
+    toolName: string,
+    output: unknown,
+    context: {
+      arguments?: Record<string, unknown>;
+      custom?: Record<string, unknown>;
+      now?: Date;
+      nowMs?: number;
+    } = {}
+  ): Promise<OutputValidationResult> {
+    const outputContext = {
+      arguments: context.arguments,
+      custom: context.custom ?? this.customContext,
+      now: context.now,
+      nowMs: context.nowMs,
+    };
+    const syncResult = this.outputValidator.validate(toolName, output, outputContext);
     if (syncResult.decision === 'block' || !this.semanticOutputValidator) {
       return syncResult;
     }
 
-    return await this.semanticOutputValidator.validate(toolName, syncResult);
+    return await this.semanticOutputValidator.validate(toolName, syncResult, outputContext);
   }
 
   isCloudReady(): boolean {

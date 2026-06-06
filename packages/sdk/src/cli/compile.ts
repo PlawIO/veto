@@ -78,6 +78,7 @@ Each output rule object MUST have these fields:
   - "operator": one of ${Array.from(new Set(['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'matches', 'greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal', 'length_greater_than', 'in', 'not_in', 'not_exists', 'outside_hours', 'within_hours'])).map((operator) => `"${operator}"`).join(', ')}
   - "value": the value to compare against
 - "redact_with": replacement string when action is "redact"
+- Optional "unless": array of condition objects that suppress the output action when all match, usually against "custom.*" context supplied by the caller
 
 Output rule guidance:
 - Use output_rules for phrases like "do not show", "hide", "redact", "don't reveal", "mask"
@@ -271,6 +272,11 @@ interface CompiledOutputRule {
     operator: string;
     value: unknown;
   }>>;
+  unless?: Array<{
+    field: string;
+    operator: string;
+    value: unknown;
+  }>;
   redact_with?: string;
 }
 
@@ -280,10 +286,12 @@ interface LLMOutput {
   notes: string;
 }
 
+type ConditionValidationLabel = 'condition' | 'output condition' | 'output unless condition';
+
 function validateConditionCollection(
   ruleId: string,
   conditions: unknown,
-  label: 'condition' | 'output condition'
+  label: ConditionValidationLabel
 ): void {
   if (!Array.isArray(conditions)) {
     return;
@@ -297,7 +305,7 @@ function validateConditionCollection(
 function validateConditionGroups(
   ruleId: string,
   groups: unknown,
-  label: 'condition' | 'output condition'
+  label: ConditionValidationLabel
 ): void {
   if (!Array.isArray(groups)) {
     return;
@@ -317,7 +325,7 @@ function validateConditionGroups(
 function validateCondition(
   ruleId: string,
   condition: unknown,
-  label: 'condition' | 'output condition'
+  label: ConditionValidationLabel
 ): void {
   if (!condition || typeof condition !== 'object') {
     throw new CompileError(`Rule "${ruleId}" has invalid ${label}`);
@@ -415,6 +423,7 @@ function parseAndValidateLLMOutput(raw: string): LLMOutput {
       }
       validateConditionCollection(r.id, r.output_conditions, 'output condition');
       validateConditionGroups(r.id, r.output_condition_groups, 'output condition');
+      validateConditionCollection(r.id, r.unless, 'output unless condition');
     }
   }
 

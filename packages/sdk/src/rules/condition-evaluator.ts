@@ -1,14 +1,25 @@
 import { isSafePattern } from '../deterministic/regex-safety.js';
 import type {
   ConditionOperator,
+  FeedProvider,
   RuleCondition,
   TimeConditionDay,
 } from './types.js';
+import { isConditionValueRef } from './types.js';
+import { resolveFeedRef } from './feed-provider.js';
 
 export interface ConditionEvaluationOptions {
   evaluateExpression?: (expression: string, context: Record<string, unknown>) => boolean;
   allowNestedObjectStringSearch?: boolean;
   now?: Date;
+  nowMs?: number;
+  feedProvider?: FeedProvider;
+  /**
+   * Dynamic feed refs usually honor their configured fallback. Exception
+   * clauses can set this to noMatch so missing evidence never suppresses
+   * an enforcement rule.
+   */
+  feedRefMissing?: 'useFallback' | 'noMatch';
 }
 
 interface TimeWindowValue {
@@ -635,6 +646,22 @@ export function evaluateCondition(
 
   if (condition.field && condition.operator) {
     const fieldValue = resolveFieldPath(condition.field, context, builtInContext);
+    let expected = condition.value;
+
+    if (isConditionValueRef(expected)) {
+      const outcome = resolveFeedRef(
+        expected,
+        options.feedProvider,
+        options.nowMs ?? options.now?.getTime()
+      );
+      if ('fallback' in outcome) {
+        if (options.feedRefMissing === 'noMatch') {
+          return false;
+        }
+        return outcome.fallback === 'fail_closed';
+      }
+      expected = outcome.resolved;
+    }
 
     if (condition.operator === 'percent_of') {
       if (typeof condition.reference !== 'string') {
@@ -643,7 +670,7 @@ export function evaluateCondition(
 
       const referenceValue = resolveFieldPath(condition.reference, context, builtInContext);
       const resolvedFieldValue = Number(fieldValue);
-      const resolvedExpectedValue = Number(condition.value);
+      const resolvedExpectedValue = Number(expected);
       const resolvedReferenceValue = Number(referenceValue);
 
       if (
@@ -658,7 +685,7 @@ export function evaluateCondition(
       return resolvedFieldValue > (resolvedReferenceValue * resolvedExpectedValue / 100);
     }
 
-    return evaluateLegacyCondition(fieldValue, condition.operator, condition.value, {
+    return evaluateLegacyCondition(fieldValue, condition.operator, expected, {
       allowNestedObjectStringSearch: options.allowNestedObjectStringSearch,
     });
   }

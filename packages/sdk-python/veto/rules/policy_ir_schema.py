@@ -214,6 +214,11 @@ POLICY_IR_V1_SCHEMA: Dict[str, Any] = {
                     },
                     "description": "Alternative output condition groups (OR between groups, AND within each group).",
                 },
+                "unless": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/Condition"},
+                    "description": "Conditions that suppress this output action when they all evaluate true.",
+                },
                 "redact_with": {
                     "type": "string",
                     "description": "Replacement string used for redact action.",
