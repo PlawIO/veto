@@ -77,6 +77,54 @@ fn canonicalizes_keys_in_bytewise_order() {
 }
 
 #[test]
+fn rejects_policy_bundle_authority_without_version() {
+    let raw = fs::read_to_string(fixtures_dir().join("allow-refund.json")).expect("fixture json");
+    let mut value: Value = serde_json::from_str(&raw).expect("valid json fixture");
+    let artifacts = value["artifacts"].as_array_mut().expect("artifacts");
+    let bundle = artifacts
+        .iter_mut()
+        .find(|artifact| artifact["version"] == "map.policy_pack/0.1")
+        .expect("policy bundle");
+    let authority = bundle["authorities"]
+        .as_array_mut()
+        .expect("authorities")
+        .first_mut()
+        .expect("authority");
+    authority
+        .as_object_mut()
+        .expect("authority object")
+        .remove("version");
+
+    let err = validate_fixture(&value).expect_err("missing nested authority version should fail");
+    assert!(err
+        .to_string()
+        .contains("$.authorities[0].version: missing authority version"));
+}
+
+#[test]
+fn rejects_policy_bundle_authority_with_unsupported_version() {
+    let raw = fs::read_to_string(fixtures_dir().join("allow-refund.json")).expect("fixture json");
+    let mut value: Value = serde_json::from_str(&raw).expect("valid json fixture");
+    let artifacts = value["artifacts"].as_array_mut().expect("artifacts");
+    let bundle = artifacts
+        .iter_mut()
+        .find(|artifact| artifact["version"] == "map.policy_pack/0.1")
+        .expect("policy bundle");
+    let authority = bundle["authorities"]
+        .as_array_mut()
+        .expect("authorities")
+        .first_mut()
+        .expect("authority");
+    authority["version"] = Value::String("map.authority/9.9".to_string());
+
+    let err =
+        validate_fixture(&value).expect_err("unsupported nested authority version should fail");
+    assert!(err
+        .to_string()
+        .contains("$.authorities[0].version: unsupported authority version"));
+}
+
+#[test]
 fn fails_closed_on_approval_replay_tampering() {
     let raw = fs::read_to_string(fixtures_dir().join("approval-replay-denied.json"))
         .expect("fixture json");

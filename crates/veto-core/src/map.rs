@@ -482,7 +482,7 @@ pub fn validate_fixture(value: &Value) -> VetoCoreResult<FixtureVerification> {
 fn validate_artifact(artifact: &MapArtifact) -> VetoCoreResult<()> {
     match artifact {
         MapArtifact::ActionProposal(value) => validate_action_proposal(value),
-        MapArtifact::Authority(value) => validate_authority(value, "$"),
+        MapArtifact::Authority(value) => validate_authority(value, "$", false),
         MapArtifact::PolicyBundle(value) => validate_policy_bundle(value),
         MapArtifact::Approval(value) => validate_approval(value),
         MapArtifact::DecisionOutcome(value) => validate_decision_outcome(value),
@@ -505,11 +505,20 @@ fn validate_action_proposal(value: &MapActionProposal) -> VetoCoreResult<()> {
     validate_id(&value.nonce, "$.nonce")
 }
 
-fn validate_authority(value: &MapAuthority, path: &str) -> VetoCoreResult<()> {
-    if let Some(version) = &value.version {
-        if version != "map.authority/0.1" {
+fn validate_authority(
+    value: &MapAuthority,
+    path: &str,
+    version_required: bool,
+) -> VetoCoreResult<()> {
+    match value.version.as_deref() {
+        Some("map.authority/0.1") => {}
+        Some(_) => {
             return invalid_artifact(&format!("{path}.version"), "unsupported authority version");
         }
+        None if version_required => {
+            return invalid_artifact(&format!("{path}.version"), "missing authority version");
+        }
+        None => {}
     }
     validate_id(&value.authority_id, &format!("{path}.authority_id"))?;
     validate_actor(&value.issuer, &format!("{path}.issuer"))?;
@@ -537,7 +546,7 @@ fn validate_policy_bundle(value: &MapPolicyBundle) -> VetoCoreResult<()> {
         parse_rfc3339_epoch_seconds(valid_until)?;
     }
     for (index, authority) in value.authorities.iter().enumerate() {
-        validate_authority(authority, &format!("$.authorities[{index}]"))?;
+        validate_authority(authority, &format!("$.authorities[{index}]"), true)?;
     }
     for (index, rule) in value.rules.iter().enumerate() {
         validate_action(&rule.action, &format!("$.rules[{index}].action"))?;
