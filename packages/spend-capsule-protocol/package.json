@@ -46,6 +46,10 @@
     "url": "https://github.com/PlawIO/veto",
     "directory": "packages/spend-capsule-protocol"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "homepage": "https://docs.veto.so/meow",
   "dependencies": {
     "@noble/ed25519": "^2.3.0",

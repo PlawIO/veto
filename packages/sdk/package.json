@@ -38,6 +38,15 @@
   ],
   "author": "",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PlawIO/veto",
+    "directory": "packages/sdk"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "devDependencies": {
     "@opentelemetry/api": "^1.9.1",
     "@types/node": "^20.10.0",

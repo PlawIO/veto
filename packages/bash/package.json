@@ -12,6 +12,15 @@
     "dist",
     "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PlawIO/veto",
+    "directory": "packages/bash"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "dev": "tsc --watch",

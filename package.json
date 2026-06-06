@@ -25,6 +25,8 @@
     "changeset": "changeset",
     "version": "node scripts/version.mjs",
     "release": "pnpm build && changeset publish",
+    "check:release-supply-chain": "node scripts/check-release-supply-chain.mjs",
+    "smoke:release-artifacts": "node scripts/smoke-release-artifacts.mjs",
     "prepare": "husky"
   },
   "lint-staged": {

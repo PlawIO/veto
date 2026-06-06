@@ -16,11 +16,11 @@ const zones = [
   },
   {
     id: "ts-cli-runtime",
-    description: "veto-cli may carry terminal/UI deps, but additions must be intentional.",
+    description: "veto-cli carries the peer-backed CLI runner deps that are intentionally split out of veto-sdk base.",
     file: "packages/cli/package.json",
     type: "package-json",
     field: "dependencies",
-    allowed: ["@opentui/core", "ink", "picocolors", "react", "veto-sdk"],
+    allowed: ["@opentui/core", "ajv", "ink", "picocolors", "react", "veto-receipt-protocol", "veto-sdk", "yaml", "zod"],
   },
   {
     id: "receipt-protocol-runtime",

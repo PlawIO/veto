@@ -179,14 +179,16 @@ describe("dependency-zone guards", () => {
       mkdirSync(join(tempRoot, "packages/receipt-protocol"), { recursive: true });
       mkdirSync(join(tempRoot, "packages/map-core/src"), { recursive: true });
       mkdirSync(join(tempRoot, "packages/spend-capsule-protocol"), { recursive: true });
+      mkdirSync(join(tempRoot, "crates/veto-core"), { recursive: true });
 
       writeFileSync(join(tempRoot, "packages/sdk-python/veto/core/bad.py"), "from .cli import main\nfrom ..proxy.server import app\n");
       writeFileSync(join(tempRoot, "packages/sdk-python/pyproject.toml"), "[project]\ndependencies = [\"aiohttp\", \"jcs\", \"jsonschema\", \"pydantic\", \"pyyaml\", \"sse-starlette\"]\n");
       writeFileSync(join(tempRoot, "packages/sdk/package.json"), JSON.stringify({ dependencies: { ajv: "*", picocolors: "*", "veto-receipt-protocol": "*", yaml: "*" } }));
-      writeFileSync(join(tempRoot, "packages/cli/package.json"), JSON.stringify({ dependencies: { "@opentui/core": "*", ink: "*", picocolors: "*", react: "*", "veto-sdk": "*" } }));
+      writeFileSync(join(tempRoot, "packages/cli/package.json"), JSON.stringify({ dependencies: { "@opentui/core": "*", ajv: "*", ink: "*", picocolors: "*", react: "*", "veto-receipt-protocol": "*", "veto-sdk": "*", yaml: "*", zod: "*" } }));
       writeFileSync(join(tempRoot, "packages/receipt-protocol/package.json"), JSON.stringify({ dependencies: { "@noble/hashes": "*", canonicalize: "*" } }));
       writeFileSync(join(tempRoot, "packages/map-core/package.json"), JSON.stringify({ dependencies: {} }));
       writeFileSync(join(tempRoot, "packages/spend-capsule-protocol/package.json"), JSON.stringify({ dependencies: { "@noble/ed25519": "*", "@noble/hashes": "*", "@scure/base": "*", canonicalize: "*", jose: "*", "veto-receipt-protocol": "*" } }));
+      writeFileSync(join(tempRoot, "crates/veto-core/Cargo.toml"), "[dependencies]\nserde = \"*\"\nserde_json = \"*\"\nsha2 = \"*\"\n");
 
       expect(() => execFileSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), "../../../scripts/check-dependency-zones.mjs")], {
         cwd: tempRoot,

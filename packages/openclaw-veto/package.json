@@ -10,6 +10,15 @@
     "README.md",
     "openclaw.plugin.json"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PlawIO/veto",
+    "directory": "packages/openclaw-veto"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

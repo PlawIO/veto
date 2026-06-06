@@ -34,8 +34,15 @@ jobs:
           node-version: 20
           cache: "pnpm"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check release supply chain
+        run: pnpm check:release-supply-chain
 
       - name: Check dependency zones
         run: pnpm check:dependency-zones
@@ -53,6 +60,9 @@ jobs:
 
       - name: Build
         run: pnpm turbo build --filter='./packages/*'
+
+      - name: Smoke release artifacts
+        run: pnpm smoke:release-artifacts
 
       - name: Smoke TS base package without runtime dependencies
         run: pnpm smoke:ts-base-no-deps
