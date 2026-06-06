@@ -154,6 +154,9 @@ function validateActionProposal(input: unknown, path: string): MapActionProposal
 
 function validateAuthority(input: unknown, path: string): MapAuthority {
   const obj = requireRecord(input, path);
+  if (obj.version !== MAP_AUTHORITY_VERSION) {
+    throw new MapValidationError(`${path}.version`, `must be ${MAP_AUTHORITY_VERSION}`);
+  }
   return {
     version: MAP_AUTHORITY_VERSION,
     authority_id: requireString(obj.authority_id, `${path}.authority_id`, RE_ID),

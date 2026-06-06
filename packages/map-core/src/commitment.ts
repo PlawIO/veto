@@ -15,9 +15,7 @@ function assertJsonValue(value: unknown, path: string): void {
   }
   if (typeof value === "object") {
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (item === undefined) {
-        throw new Error(`${path}.${key}: undefined cannot be committed`);
-      }
+      if (item === undefined) continue;
       assertJsonValue(item, `${path}.${key}`);
     }
     return;
@@ -30,6 +28,7 @@ export function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((item) => canonicalize(item)).join(",")}]`;
   const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`);
   return `{${entries.join(",")}}`;

@@ -86,6 +86,9 @@ const sourceBoundaryRules = [
       /^from veto\.proxy import /m,
       /^from veto\.proxy\.server import /m,
       /^import veto\.proxy/m,
+      /^from \.+cli import /m,
+      /^from \.+proxy import /m,
+      /^from \.+proxy\.server import /m,
     ],
   },
   {
