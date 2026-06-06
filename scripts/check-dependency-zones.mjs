@@ -8,11 +8,11 @@ const root = cwd();
 const zones = [
   {
     id: "ts-sdk-runtime",
-    description: "veto-sdk runtime dependencies are frozen until the zero-dep local kernel split lands.",
+    description: "veto-sdk base local enforcement must stay dependency-free; CLI/YAML/schema/integration dependencies live in peers, dev deps, or separate packages.",
     file: "packages/sdk/package.json",
     type: "package-json",
     field: "dependencies",
-    allowed: ["ajv", "picocolors", "veto-receipt-protocol", "yaml"],
+    allowed: [],
   },
   {
     id: "ts-cli-runtime",
@@ -56,11 +56,11 @@ const zones = [
   },
   {
     id: "python-sdk-base",
-    description: "Python base dependencies are frozen until cloud/CLI/proxy/integration extras are split out.",
+    description: "Python base local enforcement must stay dependency-free; cloud/CLI/proxy/integration dependencies live in extras.",
     file: "packages/sdk-python/pyproject.toml",
     type: "pyproject",
     field: "project.dependencies",
-    allowed: ["aiohttp", "jcs", "jsonschema", "pydantic", "pyyaml", "sse-starlette"],
+    allowed: [],
   },
 ];
 

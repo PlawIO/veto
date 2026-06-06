@@ -54,6 +54,9 @@ jobs:
       - name: Build
         run: pnpm turbo build --filter='./packages/*'
 
+      - name: Smoke TS base package without runtime dependencies
+        run: pnpm smoke:ts-base-no-deps
+
       - name: Typecheck
         run: pnpm turbo typecheck --filter='./packages/*'
 
@@ -72,6 +75,9 @@ jobs:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: packages/sdk-python/pyproject.toml
+
+      - name: Smoke base wheel without runtime dependencies
+        run: python scripts/smoke-python-base-no-deps.py
 
       - name: Install dependencies
         working-directory: packages/sdk-python

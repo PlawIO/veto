@@ -115,9 +115,12 @@ export {
 export {
   DEFAULT_RECEIPTS_PATH,
   runReceiptsExportCommand,
+  runReceiptsShowCommand,
   runReceiptsVerifyCommand,
   type ReceiptsExportOptions,
   type ReceiptsExportResult,
+  type ReceiptsShowOptions,
+  type ReceiptsShowResult,
   type ReceiptsVerifyOptions,
   type ReceiptsVerifyResult,
 } from './receipts.js';

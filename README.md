@@ -46,6 +46,16 @@ node examples/60-second-denied-call/denied-call.mjs
 
 This path is local-only: no provider SDK or API key is required. For prose generation, Veto tries configured cloud/self-hosted/kernel endpoints first, then uses a local deterministic template fallback with review warnings; in fallback, no prompt or policy data leaves your machine.
 
+For a finance-style irreversible action demo with portable receipts:
+
+```bash
+pnpm build
+node examples/finance-grade-agent/finance-demo.mjs
+node packages/sdk/dist/cli/bin.js receipts verify examples/finance-grade-agent/demo-output/receipts.ndjson
+```
+
+The demo runs local policy for an AP/procurement/refund workflow: one action is allowed, one is denied, one requires approval, and all three decisions are written as an offline-verifiable `veto.receipt/1` chain.
+
 Install Veto into developer tools and MCP clients:
 
 ```bash

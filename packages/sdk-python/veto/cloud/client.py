@@ -12,7 +12,6 @@ import os
 import time
 import asyncio
 from urllib.parse import quote
-import aiohttp
 
 from veto.cloud.types import (
     ToolRegistration,
@@ -25,11 +24,26 @@ from veto.cloud.types import (
 )
 
 if TYPE_CHECKING:
+    import aiohttp
+
     from veto.utils.logger import Logger
 
 
 # Default API base URL
 DEFAULT_BASE_URL = "https://api.veto.so"
+
+
+def _load_aiohttp() -> Any:
+    try:
+        import aiohttp
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "aiohttp is required for Veto Cloud requests. Install it with "
+            "`pip install 'veto[cloud]'` or use `Veto.local(...)` for "
+            "dependency-free local enforcement."
+        ) from exc
+
+    return aiohttp
 
 
 def _bounded_int(value: str | int, name: str, minimum: int, maximum: int) -> str:
@@ -86,9 +100,10 @@ class VetoCloudClient:
         self._registered_tools: set[str] = set()
 
         # Shared session (lazy-initialized)
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: Optional["aiohttp.ClientSession"] = None
 
-    def _get_session(self) -> aiohttp.ClientSession:
+    def _get_session(self) -> "aiohttp.ClientSession":
+        aiohttp = _load_aiohttp()
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=self._config.timeout / 1000),
