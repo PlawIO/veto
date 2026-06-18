@@ -112,6 +112,61 @@ class ApprovalPollOptions:
 
 
 @dataclass
+class RuntimeActionCreateRequest:
+    """Request to create a runtime action for human approval."""
+
+    agent_id: str
+    action_intent: str
+    tool_name: str
+    tool_call_payload: Any
+    project_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    agent_version: Optional[str] = None
+    raw_tool_call_payload: Optional[str] = None
+    timeout_seconds: Optional[int] = None
+    risk_score: Optional[float] = None
+    session_id: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
+@dataclass
+class RuntimeActionData:
+    """Runtime action state returned by the Veto runtime approval API."""
+
+    id: str
+    status: Literal["pending", "approved", "denied", "expired", "cancelled"]
+    organization_id: Optional[str] = None
+    project_id: Optional[str] = None
+    decision_id: Optional[str] = None
+    approval_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    action_intent: Optional[str] = None
+    tool_name: Optional[str] = None
+    tool_call_payload: Optional[Any] = None
+    raw_tool_call_payload: Optional[str] = None
+    payload_hash: Optional[str] = None
+    payload_hash_algorithm: Optional[str] = None
+    request_ts: Optional[int] = None
+    request_time: Optional[str] = None
+    expires_at: Optional[str] = None
+    expires_at_ms: Optional[int] = None
+    timeout_ms: Optional[int] = None
+    risk_score: Optional[float] = None
+    session_id: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[str] = None
+    resolution_method: Optional[str] = None
+    web_resolution_reason: Optional[str] = None
+    device_id: Optional[str] = None
+    ledger_entry_id: Optional[str] = None
+    receipt_summary: Optional[Any] = None
+    ledger_entry: Optional[dict[str, Any]] = None
+    stream: Optional[dict[str, str]] = None
+
+
+@dataclass
 class CloudPolicyResponse:
     """Policy data returned from the server for client-side validation."""
 
