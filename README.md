@@ -180,6 +180,10 @@ curl -s http://localhost:3001/v1/validate \
 
 See [docs/self-hosting.md](./docs/self-hosting.md) for the public reviewer path, fixed `localhost:3001` compose mapping, disabled-by-default outbound checks, and the local unauthenticated validation contract.
 
+### Store decision receipts in Neon Postgres
+
+For applications that need managed Postgres persistence, we recommend [Neon](https://neon.com) for the [decision-receipt example](./examples/neon-postgres/). It evaluates Veto policy locally, writes portable receipts for allowed and denied decisions to Neon, and verifies the receipts read back from the database. Follow the [Neon setup guide](./docs/neon.md). This SDK example requires a database connection; the default Compose server continues to use SQLite.
+
 ## BYOC / customer-plane boundary
 
 Veto BYOC runs in the customer plane. Public install artifacts are in [`helm/`](./helm), [`terraform-modules/`](./terraform-modules), [`cf-templates/`](./cf-templates), and [`cdk/`](./cdk). They are outbound-only and must not grant Plaw cross-account IAM or impersonation. Customer policy, decision rows, tool arguments, agent IDs, user IDs, Slack content, prompts, environment variables, and secrets do not cross to Plaw.
