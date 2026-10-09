@@ -285,8 +285,8 @@ describe('mcp cli commands', () => {
       bin?: Record<string, string>;
     };
 
-    expect(sdkPackage.bin?.['veto-mcp-proxy']).toBe('./dist/cli/mcp-proxy-bin.js');
-    expect(cliPackage.bin?.['veto-mcp-proxy']).toBe('./dist/mcp-proxy-bin.js');
+    expect(sdkPackage.bin?.['veto-mcp-proxy']).toBe('dist/cli/mcp-proxy-bin.js');
+    expect(cliPackage.bin?.['veto-mcp-proxy']).toBe('dist/mcp-proxy-bin.js');
     expect(vetoPackage.bin?.['veto-mcp-proxy']).toBe('./dist/mcp-proxy-bin.js');
   });
 

@@ -4,7 +4,7 @@
   "description": "Rust-first policy runtime for bash tool calls with MCP support",
   "type": "module",
   "bin": {
-    "veto-bash": "./dist/bin.js"
+    "veto-bash": "dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

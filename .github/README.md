@@ -4,6 +4,8 @@ CI, benchmarks, and repository automation use `depot-ubuntu-24.04-4` (Ubuntu 24.
 
 The two publishing jobs in `release.yml` stay on GitHub-hosted `ubuntu-latest` because npm provenance requires a GitHub-hosted runner. Keep their OIDC permissions and provenance settings when changing release infrastructure.
 
+Each public npm package must trust GitHub owner `PlawIO`, repository `veto`, workflow `release.yml`, with direct `npm publish` allowed and no environment name. Both release paths use Changesets, which calls npm to authenticate with OIDC and skips versions already published. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN`; a stale token can prevent OIDC authentication.
+
 GitHub manages CodeQL through repository settings, outside these workflow files. Its default setup uses the same `depot-ubuntu-24.04-4` label; keep that label configured in both GitHub and `.github/actionlint.yaml`.
 
 ## Release approval
