@@ -1,5 +1,11 @@
 # @veto/python-release
 
+## 0.9.1
+
+### Patch Changes
+
+- [#253](https://github.com/PlawIO/veto/pull/253) [`5e655d5`](https://github.com/PlawIO/veto/commit/5e655d50fdef19782219f8fbe6fc4258d6f6dadd) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Pin the Python SDK's development linter and make its established rule set explicit so new Ruff defaults do not unexpectedly break contributor checks. Runtime behavior is unchanged.
+
 ## 0.9.0
 
 ### Minor Changes
