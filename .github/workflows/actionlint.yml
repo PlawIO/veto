@@ -18,7 +18,7 @@ jobs:
     name: Lint GitHub Actions workflows
     runs-on: depot-ubuntu-24.04-4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Run actionlint
         uses: reviewdog/action-actionlint@v1
