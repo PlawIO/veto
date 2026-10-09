@@ -147,6 +147,70 @@ export interface ApprovalPollOptions {
 }
 
 /**
+ * Request payload for creating an iOS runtime authorization action.
+ */
+export interface RuntimeActionCreateRequest {
+  projectId?: string;
+  agentId: string;
+  agentName?: string;
+  agentVersion?: string;
+  actionIntent: string;
+  toolName: string;
+  toolCallPayload: unknown;
+  rawToolCallPayload?: string;
+  timeoutSeconds?: number;
+  riskScore?: number;
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Pending/runtime action returned by the iOS authorization API.
+ */
+export interface RuntimeActionData {
+  id: string;
+  organizationId?: string;
+  projectId?: string | null;
+  decisionId?: string | null;
+  approvalId?: string | null;
+  agentId: string;
+  agentName?: string | null;
+  actionIntent: string;
+  toolName: string;
+  toolCallPayload?: unknown;
+  rawToolCallPayload?: string;
+  payloadHash?: string;
+  payloadHashAlgorithm?: string;
+  requestTs?: number;
+  requestTime?: string;
+  expiresAt?: string;
+  expiresAtMs?: number;
+  timeoutMs?: number;
+  riskScore?: number | null;
+  sessionId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled';
+  resolvedBy?: string | null;
+  resolvedAt?: string | null;
+  resolutionMethod?: string | null;
+  webResolutionReason?: string | null;
+  deviceId?: string | null;
+  ledgerEntryId?: string | null;
+  receiptSummary?: unknown;
+  ledgerEntry?: {
+    id: string;
+    ledgerHash: string;
+    canonicalPayloadHash: string;
+    signatureAlgorithm: string;
+    createdAt: string;
+  } | null;
+  stream?: {
+    sse?: string;
+    websocket?: string;
+  };
+}
+
+/**
  * Policy data returned from the server for client-side validation.
  */
 export interface CloudPolicyResponse {

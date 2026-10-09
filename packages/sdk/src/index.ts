@@ -128,6 +128,8 @@ export type {
   FailedConstraint,
   ApprovalData,
   ApprovalPollOptions,
+  RuntimeActionCreateRequest,
+  RuntimeActionData,
   SessionState,
 } from './cloud/types.js';
 
@@ -140,7 +142,11 @@ export type {
   DeterministicPolicy,
   LocalValidationResult,
 } from './deterministic/types.js';
-export { VetoCloudClient, ApprovalTimeoutError } from './cloud/client.js';
+export {
+  VetoCloudClient,
+  ApprovalTimeoutError,
+  RuntimeActionTimeoutError,
+} from './cloud/client.js';
 
 // Interception result
 export type { InterceptionResult, DenialDetails } from './core/interceptor.js';

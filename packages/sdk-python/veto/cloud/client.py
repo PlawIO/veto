@@ -21,6 +21,8 @@ from veto.cloud.types import (
     CloudDenialDetails,
     ApprovalData,
     ApprovalPollOptions,
+    RuntimeActionCreateRequest,
+    RuntimeActionData,
 )
 
 if TYPE_CHECKING:
@@ -487,6 +489,164 @@ class VetoCloudClient:
 
             await asyncio.sleep(opts.poll_interval)
 
+    async def create_runtime_action(
+        self,
+        request: RuntimeActionCreateRequest | dict[str, Any],
+    ) -> RuntimeActionData:
+        """Create a runtime action for the iOS approval wallet."""
+        url = f"{self._base_url}/v1/runtime/actions"
+        payload = self._runtime_action_request_payload(request)
+
+        session = self._get_session()
+        async with session.post(url, json=payload) as response:
+            body = await response.text()
+            if not response.ok:
+                raise RuntimeError(f"API returned status {response.status}: {body}")
+            data: dict[str, Any] = await response.json()
+            return self._parse_runtime_action(data)
+
+    async def wait_runtime_action(
+        self,
+        action_id: str,
+        options: Optional[ApprovalPollOptions] = None,
+    ) -> RuntimeActionData:
+        """
+        Long-poll a runtime action until it resolves or times out.
+
+        Args:
+            action_id: Runtime action ID returned by create_runtime_action
+            options: Poll options (interval and total timeout)
+
+        Returns:
+            The terminal runtime action state.
+
+        Raises:
+            RuntimeActionTimeoutError: If the runtime action stays pending.
+        """
+        opts = options or ApprovalPollOptions()
+        deadline = time.monotonic() + opts.timeout
+        last_action: Optional[RuntimeActionData] = None
+
+        self._log_info(
+            "Waiting for runtime action resolution",
+            {"action_id": action_id, "timeout": opts.timeout},
+        )
+
+        session = self._get_session()
+        while True:
+            client_timeout_seconds = self._config.timeout / 1000
+            server_wait_seconds = min(
+                30.0,
+                client_timeout_seconds - 0.5
+                if client_timeout_seconds > 1.5
+                else client_timeout_seconds,
+            )
+            timeout_ms = max(1_000, int(server_wait_seconds * 1000))
+            url = (
+                f"{self._base_url}/v1/runtime/actions/"
+                f"{quote(action_id, safe='')}/wait"
+            )
+
+            try:
+                async with session.get(
+                    url,
+                    params={"timeoutMs": str(timeout_ms)},
+                ) as response:
+                    if not response.ok:
+                        error_text = await response.text()
+                        self._log_warn(
+                            "Runtime action wait request failed",
+                            {"status": response.status, "error": error_text},
+                        )
+                    else:
+                        data: dict[str, Any] = await response.json()
+                        action = self._parse_runtime_action(data)
+                        last_action = action
+
+                        if action.status != "pending":
+                            self._log_info(
+                                "Runtime action resolved",
+                                {"action_id": action_id, "status": action.status},
+                            )
+                            return action
+
+            except Exception as error:
+                self._log_warn(
+                    "Runtime action wait error",
+                    {"action_id": action_id, "error": str(error)},
+                )
+
+            if time.monotonic() >= deadline:
+                raise RuntimeActionTimeoutError(action_id, opts.timeout, last_action)
+
+            await asyncio.sleep(opts.poll_interval)
+
+    def _runtime_action_request_payload(
+        self,
+        request: RuntimeActionCreateRequest | dict[str, Any],
+    ) -> dict[str, Any]:
+        if isinstance(request, dict):
+            return {key: value for key, value in request.items() if value is not None}
+
+        payload: dict[str, Any] = {
+            "agentId": request.agent_id,
+            "actionIntent": request.action_intent,
+            "toolName": request.tool_name,
+            "toolCallPayload": request.tool_call_payload,
+        }
+        if request.project_id is not None:
+            payload["projectId"] = request.project_id
+        if request.agent_name is not None:
+            payload["agentName"] = request.agent_name
+        if request.agent_version is not None:
+            payload["agentVersion"] = request.agent_version
+        if request.raw_tool_call_payload is not None:
+            payload["rawToolCallPayload"] = request.raw_tool_call_payload
+        if request.timeout_seconds is not None:
+            payload["timeoutSeconds"] = request.timeout_seconds
+        if request.risk_score is not None:
+            payload["riskScore"] = request.risk_score
+        if request.session_id is not None:
+            payload["sessionId"] = request.session_id
+        if request.metadata is not None:
+            payload["metadata"] = request.metadata
+        return payload
+
+    def _parse_runtime_action(self, data: dict[str, Any]) -> RuntimeActionData:
+        return RuntimeActionData(
+            id=data.get("id", ""),
+            status=data.get("status", "pending"),
+            organization_id=data.get("organizationId"),
+            project_id=data.get("projectId"),
+            decision_id=data.get("decisionId"),
+            approval_id=data.get("approvalId"),
+            agent_id=data.get("agentId"),
+            agent_name=data.get("agentName"),
+            action_intent=data.get("actionIntent"),
+            tool_name=data.get("toolName"),
+            tool_call_payload=data.get("toolCallPayload"),
+            raw_tool_call_payload=data.get("rawToolCallPayload"),
+            payload_hash=data.get("payloadHash"),
+            payload_hash_algorithm=data.get("payloadHashAlgorithm"),
+            request_ts=data.get("requestTs"),
+            request_time=data.get("requestTime"),
+            expires_at=data.get("expiresAt"),
+            expires_at_ms=data.get("expiresAtMs"),
+            timeout_ms=data.get("timeoutMs"),
+            risk_score=data.get("riskScore"),
+            session_id=data.get("sessionId"),
+            metadata=data.get("metadata"),
+            resolved_by=data.get("resolvedBy"),
+            resolved_at=data.get("resolvedAt"),
+            resolution_method=data.get("resolutionMethod"),
+            web_resolution_reason=data.get("webResolutionReason"),
+            device_id=data.get("deviceId"),
+            ledger_entry_id=data.get("ledgerEntryId"),
+            receipt_summary=data.get("receiptSummary"),
+            ledger_entry=data.get("ledgerEntry"),
+            stream=data.get("stream"),
+        )
+
     async def fetch_policy(self, tool_name: str) -> "Optional[dict[str, Any]]":
         """Fetch a policy for a tool from the server."""
         url = f"{self._base_url}/v1/policies/{quote(tool_name, safe='')}"
@@ -534,3 +694,20 @@ class ApprovalTimeoutError(Exception):
         )
         self.approval_id = approval_id
         self.timeout = timeout
+
+
+class RuntimeActionTimeoutError(Exception):
+    """Error raised when a runtime action wait times out."""
+
+    def __init__(
+        self,
+        action_id: str,
+        timeout: float,
+        last_action: Optional[RuntimeActionData] = None,
+    ):
+        super().__init__(
+            f"Runtime action {action_id} was not resolved within {timeout}s"
+        )
+        self.action_id = action_id
+        self.timeout = timeout
+        self.last_action = last_action
