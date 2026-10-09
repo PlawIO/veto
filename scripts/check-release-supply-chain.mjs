@@ -41,6 +41,7 @@ function checkReleaseWorkflow() {
     [/\bTWINE_[A-Z_]+\b/, "twine credential env"],
     [/\btwine\s+upload\b/, "twine token upload"],
     [/secrets\.VETO_PAT\b/, "long-lived GitHub PAT"],
+    [/\b(?:NPM_TOKEN|NODE_AUTH_TOKEN)\s*:/, "npm token environment variable"],
   ];
 
   for (const [pattern, label] of forbiddenPatterns) {
@@ -86,6 +87,14 @@ function checkPackageManifest(path) {
 
   if (manifest.private === true) {
     return;
+  }
+
+  // npm 11 publish removes bin entries with a leading ./ instead of normalizing them.
+  const bins = typeof manifest.bin === "string" ? [manifest.bin] : Object.values(manifest.bin ?? {});
+  for (const bin of bins) {
+    if (bin.startsWith("./")) {
+      fail(`${path}: bin path ${bin} must omit the leading ./ for npm 11 publishing.`);
+    }
   }
 
   const repository = manifest.repository;

@@ -36,9 +36,10 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
+          package-manager-cache: false
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
@@ -94,11 +95,7 @@ jobs:
           title: "chore: release packages"
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # npm trusted publishing is preferred, but current package-side
-          # trusted publisher settings are incomplete. Keep provenance enabled
-          # while using the existing automation token for npm auth.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # npm authenticates through this workflow's trusted publisher.
           NPM_CONFIG_PROVENANCE: "true"
 
       - name: Enable auto-merge for release PR
@@ -174,9 +171,10 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
+          package-manager-cache: false
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
@@ -213,26 +211,9 @@ jobs:
         run: pnpm smoke:release-artifacts
 
       - name: Publish npm packages
-        run: |
-          publish_if_missing() {
-            filter="$1"
-            manifest="$2"
-            name="$(node -p "require('./${manifest}').name")"
-            version="$(node -p "require('./${manifest}').version")"
-
-            if npm view "${name}@${version}" version >/dev/null 2>&1; then
-              echo "Skipping ${name}@${version}; already published."
-              return 0
-            fi
-
-            pnpm --filter "$filter" publish --no-git-checks --access public --provenance
-          }
-
-          publish_if_missing veto-sdk packages/sdk/package.json
-          publish_if_missing veto-cli packages/cli/package.json
+        # Changesets uses npm for OIDC publishing and skips existing versions.
+        run: pnpm exec changeset publish
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
       - name: Build Python SDK distribution
