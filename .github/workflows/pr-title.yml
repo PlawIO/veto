@@ -10,7 +10,7 @@ permissions:
 jobs:
   semantic-pr-title:
     name: Semantic PR Title
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-4
     if: github.actor != 'dependabot[bot]'
     steps:
       - name: Validate PR title

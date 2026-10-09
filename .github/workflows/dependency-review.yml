@@ -11,7 +11,7 @@ permissions:
 jobs:
   dependency-review:
     name: Dependency Review
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - uses: actions/checkout@v4
 
