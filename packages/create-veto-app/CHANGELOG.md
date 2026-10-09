@@ -1,5 +1,14 @@
 # create-veto-app
 
+## 0.2.18
+
+### Patch Changes
+
+- [#256](https://github.com/PlawIO/veto/pull/256) [`6c1565f`](https://github.com/PlawIO/veto/commit/6c1565fb9d0a7747a19f3d7db06532858a019192) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Preserve CLI command entries when publishing with npm 11.
+
+- Updated dependencies [[`6c1565f`](https://github.com/PlawIO/veto/commit/6c1565fb9d0a7747a19f3d7db06532858a019192)]:
+  - veto-sdk@2.14.1
+
 ## 0.2.17
 
 ### Patch Changes
