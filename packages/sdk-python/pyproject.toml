@@ -55,7 +55,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "mypy>=1.0.0",
-    "ruff>=0.4.0",
+    "ruff==0.17.0",
     "aiohttp>=3.8.0",
     "jsonschema>=4.20.0",
     "pydantic>=2.0.0",
@@ -81,3 +81,8 @@ packages = ["veto"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
+
+[tool.ruff.lint]
+# Preserve the SDK's established checks after Ruff 0.16 expanded its defaults.
+# Adopt additional rule families in a separate, intentional lint-policy change.
+select = ["E4", "E7", "E9", "F"]

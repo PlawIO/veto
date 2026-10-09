@@ -1,5 +1,16 @@
 # Self-hosting
 
+## Storage options
+
+The default server deployment below uses local SQLite and does not require an
+external database connection. For applications using the SDK that need managed
+Postgres persistence, we recommend Neon for the [decision-receipt
+example](../examples/neon-postgres/). Follow the [Neon setup guide](./neon.md) to
+store and verify actual Veto decisions in your own Neon database. That example
+requires `DATABASE_URL`; it does not change the Compose server's storage driver.
+
+## Run the local server
+
 ```bash
 docker compose up
 ```
