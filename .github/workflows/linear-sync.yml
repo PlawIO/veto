@@ -15,10 +15,10 @@ permissions:
 jobs:
   sync:
     name: Sync Linear → GitHub (SDK/CLI)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - name: Sync
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:

@@ -15,9 +15,9 @@ permissions:
 jobs:
   sync:
     name: Sync Repository Labels
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Sync labels from config
         uses: crazy-max/ghaction-github-labeler@v5

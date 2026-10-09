@@ -11,7 +11,7 @@ permissions:
 jobs:
   dependabot:
     name: Auto-merge Dependabot
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-4
     if: github.actor == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata

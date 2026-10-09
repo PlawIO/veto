@@ -21,7 +21,8 @@ env:
 jobs:
   release:
     name: Release
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' && github.event.inputs.force != 'true'
+    # npm provenance requires a GitHub-hosted publishing runner.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -29,19 +30,19 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -50,6 +51,8 @@ jobs:
           node --version
           npm_version="$(npm --version)"
           echo "npm $npm_version"
+          # Keep JavaScript template literals intact for Node, not the shell.
+          # shellcheck disable=SC2016
           node -e '
             const version = process.argv[1].split(".").map(Number);
             const [major, minor, patch] = version;
@@ -66,7 +69,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Turbo Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ github.sha }}
@@ -98,8 +101,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
-      - name: Auto-approve and enable auto-merge for release PR
-        if: steps.changesets.outputs.published != 'true'
+      - name: Enable auto-merge for release PR
+        if: steps.changesets.outputs.hasChangesets == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -114,31 +117,31 @@ jobs:
             exit 0
           fi
 
-          gh pr review "$PR_NUMBER" \
-            --approve \
-            --body "Auto-approving trusted Changesets release PR." || true
-
+          # A maintainer must approve the bot-authored PR and its workflow runs.
+          # GitHub does not allow the author to approve its own pull request.
           gh pr merge "$PR_NUMBER" \
             --auto \
             --squash \
             --delete-branch
 
+      # Python-only releases must not depend on npm publishing a package.
+      # With no pending changesets, skip-existing makes PyPI retries idempotent.
       - name: Build Python SDK distribution
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.changesets.outputs.hasChangesets == 'false'
         working-directory: packages/sdk-python
         run: |
           python -m pip install --upgrade pip build
           python -m build
 
       - name: Publish Python SDK to PyPI
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.changesets.outputs.hasChangesets == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/sdk-python/dist
           skip-existing: true
 
       - name: Create GitHub Release for Python
-        if: steps.changesets.outputs.published == 'true'
+        if: steps.changesets.outputs.hasChangesets == 'false'
         run: |
           VERSION=$(grep -m1 'version = ' packages/sdk-python/pyproject.toml | cut -d'"' -f2)
           if git tag | grep -q "sdk-py@$VERSION"; then
@@ -157,6 +160,7 @@ jobs:
   # Manual release option
   release-manual:
     name: Manual Release
+    # npm provenance requires a GitHub-hosted publishing runner.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true' && github.ref == 'refs/heads/master'
@@ -164,19 +168,19 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -185,6 +189,8 @@ jobs:
           node --version
           npm_version="$(npm --version)"
           echo "npm $npm_version"
+          # Keep JavaScript template literals intact for Node, not the shell.
+          # shellcheck disable=SC2016
           node -e '
             const version = process.argv[1].split(".").map(Number);
             const [major, minor, patch] = version;

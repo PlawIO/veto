@@ -7,13 +7,13 @@ on:
 jobs:
   sync:
     name: Update Linear issue
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-4
     if: github.actor != 'github-actions[bot]'
     permissions:
       issues: read
     steps:
       - name: Sync
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
