@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { VetoCloudClient, ApprovalTimeoutError } from '../../src/cloud/client.js';
+import {
+  VetoCloudClient,
+  ApprovalTimeoutError,
+  RuntimeActionTimeoutError,
+} from '../../src/cloud/client.js';
 import type { Logger } from '../../src/utils/logger.js';
 
 const mockFetch = vi.fn();
@@ -284,6 +288,135 @@ describe('VetoCloudClient', () => {
 
       expect(result.status).toBe('approved');
       expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('runtime actions', () => {
+    it('creates a runtime action for the iOS approval wallet', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({
+          id: 'pending-123',
+          approvalId: 'approval-123',
+          decisionId: 'decision-123',
+          status: 'pending',
+          agentId: 'refund-agent',
+          actionIntent: 'Refund $500',
+          toolName: 'refund_customer',
+          payloadHash: 'sha256:abc123',
+          expiresAtMs: Date.now() + 120_000,
+        }),
+      });
+
+      const client = new VetoCloudClient({
+        config: { apiKey: 'test-key', baseUrl: 'http://localhost:3001', retries: 0 },
+        logger,
+      });
+
+      const result = await client.createRuntimeAction({
+        agentId: 'refund-agent',
+        agentName: 'Refund Agent',
+        actionIntent: 'Refund $500',
+        toolName: 'refund_customer',
+        toolCallPayload: { amount: 500, currency: 'USD' },
+        timeoutSeconds: 120,
+        sessionId: 'session-1',
+        metadata: { traceId: 'trace-1' },
+      });
+
+      expect(result).toMatchObject({
+        id: 'pending-123',
+        approvalId: 'approval-123',
+        decisionId: 'decision-123',
+        status: 'pending',
+        payloadHash: 'sha256:abc123',
+      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3001/v1/runtime/actions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'X-Veto-API-Key': 'test-key',
+          }),
+          body: JSON.stringify({
+            agentId: 'refund-agent',
+            agentName: 'Refund Agent',
+            actionIntent: 'Refund $500',
+            toolName: 'refund_customer',
+            toolCallPayload: { amount: 500, currency: 'USD' },
+            timeoutSeconds: 120,
+            sessionId: 'session-1',
+            metadata: { traceId: 'trace-1' },
+          }),
+        }),
+      );
+    });
+
+    it('waits until a runtime action reaches a terminal state', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            id: 'pending-123',
+            status: 'pending',
+            agentId: 'refund-agent',
+            actionIntent: 'Refund $500',
+            toolName: 'refund_customer',
+          }),
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            id: 'pending-123',
+            status: 'approved',
+            agentId: 'refund-agent',
+            actionIntent: 'Refund $500',
+            toolName: 'refund_customer',
+            resolvedBy: 'user-1',
+          }),
+          text: async () => '',
+        });
+
+      const client = new VetoCloudClient({
+        config: { apiKey: 'test-key', baseUrl: 'http://localhost:3001' },
+        logger,
+      });
+
+      const result = await client.waitRuntimeAction('pending-123', {
+        pollInterval: 10,
+        timeout: 5_000,
+      });
+
+      expect(result.status).toBe('approved');
+      expect(result.resolvedBy).toBe('user-1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^http:\/\/localhost:3001\/v1\/runtime\/actions\/pending-123\/wait\?timeoutMs=\d+$/),
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('throws RuntimeActionTimeoutError when a runtime action remains pending', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          id: 'pending-123',
+          status: 'pending',
+          agentId: 'refund-agent',
+          actionIntent: 'Refund $500',
+          toolName: 'refund_customer',
+        }),
+        text: async () => '',
+      });
+
+      const client = new VetoCloudClient({
+        config: { apiKey: 'test-key', baseUrl: 'http://localhost:3001' },
+        logger,
+      });
+
+      await expect(
+        client.waitRuntimeAction('pending-123', { pollInterval: 10, timeout: 50 })
+      ).rejects.toThrow(RuntimeActionTimeoutError);
     });
   });
 

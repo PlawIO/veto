@@ -21,6 +21,8 @@ import type {
   LogDecisionRequest,
   ApprovalData,
   ApprovalPollOptions,
+  RuntimeActionCreateRequest,
+  RuntimeActionData,
 } from './types.js';
 import type { Rule, OutputRule } from '../rules/types.js';
 
@@ -329,6 +331,99 @@ export class VetoCloudClient {
     }
   }
 
+  async createRuntimeAction(
+    request: RuntimeActionCreateRequest
+  ): Promise<RuntimeActionData> {
+    const url = `${this.config.baseUrl}/v1/runtime/actions`;
+
+    this.logger.info('Creating runtime approval action', {
+      agent_id: request.agentId,
+      tool: request.toolName,
+      timeout_seconds: request.timeoutSeconds,
+    });
+
+    const response = await this.fetchWithTimeout(url, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(request),
+    });
+    const body = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`API returned status ${response.status}: ${body}`);
+    }
+
+    return JSON.parse(body) as RuntimeActionData;
+  }
+
+  async waitRuntimeAction(
+    actionId: string,
+    options?: ApprovalPollOptions
+  ): Promise<RuntimeActionData> {
+    const pollInterval = options?.pollInterval ?? 750;
+    const timeout = options?.timeout ?? 300_000;
+    const deadline = Date.now() + timeout;
+
+    this.logger.info('Waiting for runtime approval action', {
+      runtime_action_id: actionId,
+      timeout,
+    });
+
+    let lastAction: RuntimeActionData | undefined;
+    const maxServerWaitMs = Math.max(
+      1_000,
+      Math.min(
+        30_000,
+        this.config.timeout > 1_500 ? this.config.timeout - 500 : this.config.timeout
+      )
+    );
+
+    while (true) {
+      const remainingTime = deadline - Date.now();
+      if (remainingTime <= 0) {
+        throw new RuntimeActionTimeoutError(actionId, timeout, lastAction);
+      }
+
+      const waitMs = Math.max(1_000, Math.min(maxServerWaitMs, remainingTime));
+      const url = `${this.config.baseUrl}/v1/runtime/actions/${encodeURIComponent(actionId)}/wait?timeoutMs=${waitMs}`;
+
+      try {
+        const response = await this.fetchWithTimeout(url, {
+          method: 'GET',
+          headers: this.getHeaders(),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          this.logger.warn('Runtime action wait request failed', {
+            runtime_action_id: actionId,
+            status: response.status,
+            error: errorText,
+          });
+        } else {
+          lastAction = (await response.json()) as RuntimeActionData;
+          if (lastAction.status !== 'pending') {
+            this.logger.info('Runtime action resolved', {
+              runtime_action_id: actionId,
+              status: lastAction.status,
+            });
+            return lastAction;
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Runtime action wait error', {
+          runtime_action_id: actionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      const nextDelay = Math.min(pollInterval, Math.max(0, deadline - Date.now()));
+      if (nextDelay > 0) {
+        await this.delay(nextDelay);
+      }
+    }
+  }
+
   async fetchPolicy(toolName: string): Promise<CloudPolicyResponse | null> {
     const url = `${this.config.baseUrl}/v1/policies/${encodeURIComponent(toolName)}`;
 
@@ -458,5 +553,24 @@ export class ApprovalTimeoutError extends Error {
     this.name = 'ApprovalTimeoutError';
     this.approvalId = approvalId;
     this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Error thrown when a runtime action wait times out.
+ */
+export class RuntimeActionTimeoutError extends Error {
+  readonly actionId: string;
+  readonly timeoutMs: number;
+  readonly lastAction?: RuntimeActionData;
+
+  constructor(actionId: string, timeoutMs: number, lastAction?: RuntimeActionData) {
+    super(
+      `Runtime action ${actionId} was not resolved within ${timeoutMs}ms`
+    );
+    this.name = 'RuntimeActionTimeoutError';
+    this.actionId = actionId;
+    this.timeoutMs = timeoutMs;
+    this.lastAction = lastAction;
   }
 }
