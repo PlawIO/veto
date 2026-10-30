@@ -1,5 +1,11 @@
 # @veto/python-release
 
+## 0.10.0
+
+### Minor Changes
+
+- [#252](https://github.com/PlawIO/veto/pull/252) [`3f34e79`](https://github.com/PlawIO/veto/commit/3f34e79473a6ba5eaa436a60d3dd8f81eb8b41f4) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add cloud client helpers for creating and waiting on iOS runtime authorization actions.
+
 ## 0.9.1
 
 ### Patch Changes

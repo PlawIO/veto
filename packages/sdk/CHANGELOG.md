@@ -1,5 +1,15 @@
 # veto-sdk
 
+## 2.15.0
+
+### Minor Changes
+
+- [#252](https://github.com/PlawIO/veto/pull/252) [`3f34e79`](https://github.com/PlawIO/veto/commit/3f34e79473a6ba5eaa436a60d3dd8f81eb8b41f4) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Add cloud client helpers for creating and waiting on iOS runtime authorization actions.
+
+### Patch Changes
+
+- [#256](https://github.com/PlawIO/veto/pull/256) [`6c1565f`](https://github.com/PlawIO/veto/commit/6c1565fb9d0a7747a19f3d7db06532858a019192) Thanks [@yazcaleb](https://github.com/yazcaleb)! - Preserve CLI command entries when publishing with npm 11.
+
 ## 2.14.0
 
 ### Minor Changes
