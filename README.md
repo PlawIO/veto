@@ -207,6 +207,12 @@ Install docs:
 - Local-first operation with optional self-hosted or cloud policy distribution.
 - Apache-2.0 licensed packages and public supply-chain verification artifacts.
 
+## Sponsors and partners
+
+<a href="https://neon.com"><img src=".github/assets/neon-logo.svg" alt="Neon" height="48"></a>
+
+Thanks to [Neon](https://neon.com) for supporting Veto through the Neon Open Source Program.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Report vulnerabilities to [security@plaw.io](mailto:security@plaw.io).
