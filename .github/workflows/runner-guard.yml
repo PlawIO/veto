@@ -41,6 +41,14 @@ jobs:
           }
           EXPRESSION = "$" + "{"
           MULTILINE = {"|", ">", "|-", ">-", "|+", ">+"}
+          # npm provenance requires RUNNER_ENVIRONMENT=github-hosted.
+          # libnpmpublish puts that value in the provenance builder id, and the
+          # registry accepts only github-hosted. Depot reports self-hosted.
+          # Allow exactly these release.yml publish jobs on ubuntu-24.04.
+          PUBLISH_ALLOWLIST = {
+              ("release.yml", "release"): "ubuntu-24.04",
+              ("release.yml", "release-manual"): "ubuntu-24.04",
+          }
           JOB_KEY = re.compile(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$")
           RUNS_ON_LINE = re.compile(r"^runs-on:\s*(.*?)\s*(?:#.*)?$")
 
@@ -56,6 +64,11 @@ jobs:
               if not inner:
                   return []
               return [strip_quotes(part.strip()) for part in inner.split(",") if part.strip()]
+
+
+          def is_publish_allowlist(workflow: pathlib.Path, job: str, labels: list[str]) -> bool:
+              expected = PUBLISH_ALLOWLIST.get((workflow.name, job))
+              return expected is not None and labels == [expected]
 
 
           def accept(labels: list[str]) -> bool:
@@ -208,6 +221,9 @@ jobs:
                           failed = True
                           continue
                       rendered = ", ".join(labels) if labels else "<empty>"
+                      if is_publish_allowlist(path, name, labels):
+                          print(f"{path}: {name} -> {rendered} (npm provenance allowlist)")
+                          continue
                       if not accept(labels):
                           print(
                               f"::error file={path},line={lineno}::job {name} runs-on [{rendered}] is not depot-* or self-hosted"
@@ -218,7 +234,7 @@ jobs:
 
               if failed:
                   return 1
-              print("All workflow runs-on labels are depot-* or self-hosted.")
+              print("All workflow runs-on labels are depot-*, self-hosted, or the release.yml npm publish allowlist.")
               return 0
 
 

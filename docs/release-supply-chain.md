@@ -10,7 +10,7 @@ For each public workspace package, configure npm Trusted Publishing with:
 - Workflow filename: `release.yml`
 - Allowed action: `npm publish`
 
-The release workflow only runs from `refs/heads/master`, uses `depot-ubuntu-24.04`, checks that npm is new enough for Trusted Publishing, and sets npm provenance on publish. Keep package repository metadata aligned with the package directory so provenance points at the source that produced the package. npm still documents provenance for GitHub-hosted runners; Depot runners identify as self-hosted, and a workflow edit does not publish a release.
+The release workflow only runs from `refs/heads/master`. The npm publishing jobs `release` and `release-manual` use pinned `ubuntu-24.04` so `RUNNER_ENVIRONMENT` is `github-hosted`. They check that npm is new enough for Trusted Publishing and set npm provenance on publish. Keep package repository metadata aligned with the package directory so provenance points at the source that produced the package. Depot runners report `self-hosted`, which the registry rejects when verifying provenance.
 
 After Trusted Publishing succeeds, disallow traditional npm publish tokens for these packages and revoke old automation tokens.
 
@@ -39,4 +39,4 @@ pnpm smoke:release-artifacts
 
 The smoke test packs the public npm packages, installs the resulting tarballs into a clean project with lifecycle scripts disabled, imports the expected runtime surfaces, builds the Python wheel, installs it into a clean virtual environment, and imports the expected Python SDK surfaces.
 
-The hardening check fails if release publish tokens, `twine upload`, a release runner other than `depot-ubuntu-24.04`, missing package provenance metadata, missing package smoke tests, or install-time npm lifecycle hooks are introduced.
+The hardening check fails if release publish tokens, `twine upload`, an npm publishing job on a runner other than `ubuntu-24.04`, missing package provenance metadata, missing package smoke tests, or install-time npm lifecycle hooks are introduced.

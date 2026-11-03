@@ -68,27 +68,64 @@ function checkReleaseWorkflow() {
   }
 }
 
+const PUBLISHING_JOBS = {
+  release: "ubuntu-24.04",
+  "release-manual": "ubuntu-24.04",
+};
+
 function checkReleaseRunners(workflow) {
-  const runners = [];
+  const runners = parseJobRunners(workflow);
+
+  for (const [job, expected] of Object.entries(PUBLISHING_JOBS)) {
+    if (runners[job] !== expected) {
+      fail(
+        `${RELEASE_WORKFLOW}: ${job} must run on ${expected} so npm provenance sees a GitHub-hosted runner.`
+      );
+    }
+  }
+
+  for (const [job, label] of Object.entries(runners)) {
+    if (Object.hasOwn(PUBLISHING_JOBS, job)) {
+      continue;
+    }
+    if (!label.startsWith("depot-")) {
+      fail(`${RELEASE_WORKFLOW}: ${job} must run on a depot-* runner.`);
+    }
+  }
+}
+
+function parseJobRunners(workflow) {
+  const runners = {};
+  let inJobs = false;
+  let currentJob = null;
 
   for (const line of workflow.split("\n")) {
-    const match = /^[ \t]*runs-on:[ \t]*(.*?)\s*(?:#.*)?$/.exec(line);
-    if (!match) {
+    if (/^jobs:\s*(?:#.*)?$/.test(line)) {
+      inJobs = true;
+      continue;
+    }
+    if (!inJobs) {
+      continue;
+    }
+    if (/^\S/.test(line)) {
+      break;
+    }
+
+    const jobMatch = /^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$/.exec(line);
+    if (jobMatch) {
+      currentJob = jobMatch[1];
       continue;
     }
 
-    const raw = match[1].trim().replace(/^["']|["']$/g, "");
-    if (!raw || raw.startsWith("[") || raw.startsWith("{") || raw.startsWith("|") || raw.startsWith(">")) {
-      fail(`${RELEASE_WORKFLOW}: release jobs must set runs-on to the scalar depot-ubuntu-24.04.`);
+    const runsMatch = /^    runs-on:[ \t]*(.*?)\s*(?:#.*)?$/.exec(line);
+    if (!runsMatch || !currentJob) {
       continue;
     }
 
-    runners.push(raw);
+    runners[currentJob] = runsMatch[1].trim().replace(/^["']|["']$/g, "");
   }
 
-  if (runners.length < 2 || runners.some((label) => label !== "depot-ubuntu-24.04")) {
-    fail(`${RELEASE_WORKFLOW}: release publishing must run on depot-ubuntu-24.04.`);
-  }
+  return runners;
 }
 
 function checkPackageManifest(path) {
