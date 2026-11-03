@@ -50,8 +50,9 @@ function checkReleaseWorkflow() {
     }
   }
 
+  checkReleaseRunners(workflow);
+
   const requiredPatterns = [
-    [/runs-on:\s*ubuntu-latest/g, "GitHub-hosted release runners"],
     [/node-version:\s*24/g, "Node 24 for npm trusted publishing"],
     [/id-token:\s*write/g, "OIDC id-token permission"],
     [/NPM_CONFIG_PROVENANCE:\s*"true"/g, "npm provenance config"],
@@ -65,9 +66,28 @@ function checkReleaseWorkflow() {
       fail(`${RELEASE_WORKFLOW}: missing ${label}.`);
     }
   }
+}
 
-  if (/runs-on:\s*blacksmith-/g.test(workflow)) {
-    fail(`${RELEASE_WORKFLOW}: release publishing must not run on non-GitHub-hosted runners.`);
+function checkReleaseRunners(workflow) {
+  const runners = [];
+
+  for (const line of workflow.split("\n")) {
+    const match = /^[ \t]*runs-on:[ \t]*(.*?)\s*(?:#.*)?$/.exec(line);
+    if (!match) {
+      continue;
+    }
+
+    const raw = match[1].trim().replace(/^["']|["']$/g, "");
+    if (!raw || raw.startsWith("[") || raw.startsWith("{") || raw.startsWith("|") || raw.startsWith(">")) {
+      fail(`${RELEASE_WORKFLOW}: release jobs must set runs-on to the scalar depot-ubuntu-24.04.`);
+      continue;
+    }
+
+    runners.push(raw);
+  }
+
+  if (runners.length < 2 || runners.some((label) => label !== "depot-ubuntu-24.04")) {
+    fail(`${RELEASE_WORKFLOW}: release publishing must run on depot-ubuntu-24.04.`);
   }
 }
 

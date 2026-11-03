@@ -1,0 +1,227 @@
+name: Runner guard
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  runner-guard:
+    name: Reject non-Depot runners
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check runs-on labels
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          HOSTED = re.compile(r"^(ubuntu-|windows-|macos-)")
+          COMPANIONS = {
+              "linux",
+              "windows",
+              "macos",
+              "macOS",
+              "x64",
+              "X64",
+              "arm",
+              "ARM",
+              "arm64",
+              "ARM64",
+          }
+          EXPRESSION = "$" + "{"
+          MULTILINE = {"|", ">", "|-", ">-", "|+", ">+"}
+          JOB_KEY = re.compile(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$")
+          RUNS_ON_LINE = re.compile(r"^runs-on:\s*(.*?)\s*(?:#.*)?$")
+
+
+          def strip_quotes(value: str) -> str:
+              if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                  return value[1:-1]
+              return value
+
+
+          def split_flow(value: str) -> list[str]:
+              inner = value[1:-1].strip()
+              if not inner:
+                  return []
+              return [strip_quotes(part.strip()) for part in inner.split(",") if part.strip()]
+
+
+          def accept(labels: list[str]) -> bool:
+              if not labels:
+                  return False
+              saw_anchor = False
+              for label in labels:
+                  if not label or EXPRESSION in label or HOSTED.match(label):
+                      return False
+                  if label.startswith("depot-") or label == "self-hosted":
+                      saw_anchor = True
+                      continue
+                  if label not in COMPANIONS:
+                      return False
+              return saw_anchor
+
+
+          def indent_of(line: str) -> int:
+              return len(line) - len(line.lstrip(" "))
+
+
+          def job_spans(lines: list[str]) -> list[tuple[str, int, int]]:
+              start = None
+              for index, line in enumerate(lines):
+                  if re.match(r"^jobs:\s*(?:#.*)?$", line):
+                      start = index + 1
+                      break
+              if start is None:
+                  return []
+
+              spans: list[tuple[str, int, int]] = []
+              name = None
+              name_at = None
+              for index in range(start, len(lines)):
+                  line = lines[index]
+                  if line.strip() == "" or line.lstrip().startswith("#"):
+                      continue
+                  if indent_of(line) == 0:
+                      break
+                  match = JOB_KEY.match(line)
+                  if match:
+                      if name is not None and name_at is not None:
+                          spans.append((name, name_at, index))
+                      name = match.group(1)
+                      name_at = index
+              if name is not None and name_at is not None:
+                  spans.append((name, name_at, len(lines)))
+              return spans
+
+
+          def parse_runs_on(lines: list[str], index: int) -> tuple[list[str], int]:
+              line = lines[index]
+              base_indent = indent_of(line)
+              match = RUNS_ON_LINE.match(line.strip())
+              if match is None:
+                  return [], index + 1
+              value = match.group(1).strip()
+              if value.startswith("[") and value.endswith("]"):
+                  return split_flow(value), index + 1
+              if value and value not in MULTILINE:
+                  return [strip_quotes(value)], index + 1
+
+              if value in MULTILINE:
+                  parts: list[str] = []
+                  index += 1
+                  while index < len(lines):
+                      nxt = lines[index]
+                      if nxt.strip() == "" or nxt.lstrip().startswith("#"):
+                          index += 1
+                          continue
+                      if indent_of(nxt) <= base_indent:
+                          break
+                      parts.append(re.sub(r"\s+#.*$", "", nxt.strip()).strip())
+                      index += 1
+                  joined = " ".join(part for part in parts if part)
+                  return [strip_quotes(joined)] if joined else [], index
+
+              labels: list[str] = []
+              collect = True
+              index += 1
+              while index < len(lines):
+                  nxt = lines[index]
+                  if nxt.strip() == "" or nxt.lstrip().startswith("#"):
+                      index += 1
+                      continue
+                  if indent_of(nxt) <= base_indent:
+                      break
+                  content = nxt.strip()
+                  if content.startswith("labels:"):
+                      rest = re.sub(r"\s+#.*$", "", content.split(":", 1)[1].strip()).strip()
+                      collect = True
+                      if rest.startswith("[") and rest.endswith("]"):
+                          labels.extend(split_flow(rest))
+                      index += 1
+                      continue
+                  if content.startswith("group:"):
+                      collect = False
+                      index += 1
+                      continue
+                  if content.startswith("- ") and collect:
+                      item = re.sub(r"\s+#.*$", "", content[2:].strip()).strip()
+                      labels.append(strip_quotes(item))
+                      index += 1
+                      continue
+                  index += 1
+              return labels, index
+
+
+          def runs_on_for_span(
+              lines: list[str], start: int, end: int
+          ) -> tuple[bool, bool, list[str], int | None]:
+              has_uses = False
+              found_line = None
+              labels: list[str] = []
+              index = start
+              while index < end:
+                  line = lines[index]
+                  if re.match(r"^    uses:", line):
+                      has_uses = True
+                  if re.match(r"^    runs-on:", line):
+                      found_line = index + 1
+                      labels, index = parse_runs_on(lines, index)
+                      continue
+                  index += 1
+              return found_line is not None, has_uses, labels, found_line
+
+
+          def main() -> int:
+              root = pathlib.Path(os.environ.get("WORKFLOWS_DIR", ".github/workflows"))
+              files = sorted(root.glob("*.yml")) + sorted(root.glob("*.yaml"))
+              if not files:
+                  print(f"::error::no workflow files found under {root}")
+                  return 1
+
+              failed = False
+              for path in files:
+                  lines = path.read_text().splitlines()
+                  spans = job_spans(lines)
+                  if not spans:
+                      print(f"::error file={path}::workflow has no jobs")
+                      failed = True
+                      continue
+                  for name, start, end in spans:
+                      has_runs_on, has_uses, labels, lineno = runs_on_for_span(lines, start, end)
+                      if not has_runs_on:
+                          if has_uses:
+                              print(f"{path}: {name} uses a reusable workflow")
+                              continue
+                          print(f"::error file={path}::job {name} is missing runs-on")
+                          failed = True
+                          continue
+                      rendered = ", ".join(labels) if labels else "<empty>"
+                      if not accept(labels):
+                          print(
+                              f"::error file={path},line={lineno}::job {name} runs-on [{rendered}] is not depot-* or self-hosted"
+                          )
+                          failed = True
+                          continue
+                      print(f"{path}: {name} -> {rendered}")
+
+              if failed:
+                  return 1
+              print("All workflow runs-on labels are depot-* or self-hosted.")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          PY
