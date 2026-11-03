@@ -22,8 +22,8 @@ jobs:
   release:
     name: Release
     if: github.ref == 'refs/heads/master' && github.event.inputs.force != 'true'
-    # npm provenance requires a GitHub-hosted publishing runner.
-    runs-on: ubuntu-latest
+    # npm provenance requires RUNNER_ENVIRONMENT=github-hosted. Depot reports self-hosted.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
@@ -157,8 +157,8 @@ jobs:
   # Manual release option
   release-manual:
     name: Manual Release
-    # npm provenance requires a GitHub-hosted publishing runner.
-    runs-on: ubuntu-latest
+    # npm provenance requires RUNNER_ENVIRONMENT=github-hosted. Depot reports self-hosted.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true' && github.ref == 'refs/heads/master'
     permissions:

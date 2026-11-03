@@ -50,8 +50,9 @@ function checkReleaseWorkflow() {
     }
   }
 
+  checkReleaseRunners(workflow);
+
   const requiredPatterns = [
-    [/runs-on:\s*ubuntu-latest/g, "GitHub-hosted release runners"],
     [/node-version:\s*24/g, "Node 24 for npm trusted publishing"],
     [/id-token:\s*write/g, "OIDC id-token permission"],
     [/NPM_CONFIG_PROVENANCE:\s*"true"/g, "npm provenance config"],
@@ -65,10 +66,66 @@ function checkReleaseWorkflow() {
       fail(`${RELEASE_WORKFLOW}: missing ${label}.`);
     }
   }
+}
 
-  if (/runs-on:\s*blacksmith-/g.test(workflow)) {
-    fail(`${RELEASE_WORKFLOW}: release publishing must not run on non-GitHub-hosted runners.`);
+const PUBLISHING_JOBS = {
+  release: "ubuntu-24.04",
+  "release-manual": "ubuntu-24.04",
+};
+
+function checkReleaseRunners(workflow) {
+  const runners = parseJobRunners(workflow);
+
+  for (const [job, expected] of Object.entries(PUBLISHING_JOBS)) {
+    if (runners[job] !== expected) {
+      fail(
+        `${RELEASE_WORKFLOW}: ${job} must run on ${expected} so npm provenance sees a GitHub-hosted runner.`
+      );
+    }
   }
+
+  for (const [job, label] of Object.entries(runners)) {
+    if (Object.hasOwn(PUBLISHING_JOBS, job)) {
+      continue;
+    }
+    if (!label.startsWith("depot-")) {
+      fail(`${RELEASE_WORKFLOW}: ${job} must run on a depot-* runner.`);
+    }
+  }
+}
+
+function parseJobRunners(workflow) {
+  const runners = {};
+  let inJobs = false;
+  let currentJob = null;
+
+  for (const line of workflow.split("\n")) {
+    if (/^jobs:\s*(?:#.*)?$/.test(line)) {
+      inJobs = true;
+      continue;
+    }
+    if (!inJobs) {
+      continue;
+    }
+    if (/^\S/.test(line)) {
+      break;
+    }
+
+    const jobMatch = /^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$/.exec(line);
+    if (jobMatch) {
+      currentJob = jobMatch[1];
+      continue;
+    }
+
+    const runsMatch = /^    runs-on:[ \t]*(.*?)\s*(?:#.*)?$/.exec(line);
+    if (!runsMatch || !currentJob) {
+      continue;
+    }
+
+    runners[currentJob] = runsMatch[1].trim().replace(/^["']|["']$/g, "");
+  }
+
+  return runners;
 }
 
 function checkPackageManifest(path) {
